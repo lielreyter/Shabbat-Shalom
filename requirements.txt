@@ -1,0 +1,15 @@
+# Note: This is a React Native project (not Python).
+# Use npm/yarn to install JS dependencies listed below.
+# Example:
+#   npm install <package>
+#   yarn add <package>
+
+# Core Module 1 dependencies
+firebase
+@invertase/react-native-apple-authentication
+@react-native-async-storage/async-storage
+react-native-config
+react-native-get-random-values
+uuid
+@noble/hashes
+@react-native-community/geolocation
