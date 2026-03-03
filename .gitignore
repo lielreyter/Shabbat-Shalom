@@ -68,6 +68,9 @@ yarn-error.log
 
 # Secrets
 firebase.txt
+.env
+.env.*
+!.env.example
 
 # Yarn
 .yarn/*
