@@ -2,11 +2,12 @@ import Config from "react-native-config";
 import { initializeApp, getApps } from "firebase/app";
 import {
   initializeAuth,
-  getReactNativePersistence,
-} from "firebase/auth/react-native";
-import { getAuth } from "firebase/auth";
+  getAuth,
+} from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getFirestore } from "firebase/firestore";
+
+const { getReactNativePersistence } = require("@firebase/auth/dist/rn/index.js");
 
 type FirebaseConfig = {
   apiKey: string;
@@ -48,7 +49,6 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 export const auth = (() => {
   try {
-    // Explicitly set React Native persistence so auth survives restarts.
     return initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage),
     });
