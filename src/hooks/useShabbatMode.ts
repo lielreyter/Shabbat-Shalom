@@ -16,7 +16,7 @@ type UseShabbatModeState = {
   isActive: boolean;
   start: () => Promise<void>;
   end: () => Promise<void>;
-  breakShabbat: () => Promise<void>;
+  breakShabbat: () => Promise<"ALLOWED" | "CANCELED">;
 };
 
 const defaultState: ShabbatModeState = {
@@ -52,8 +52,9 @@ export const useShabbatMode = (): UseShabbatModeState => {
   }, []);
 
   const breakShabbat = useCallback(async () => {
-    await attemptBreakShabbat();
+    const result = await attemptBreakShabbat();
     setState(getCurrentState());
+    return result;
   }, []);
 
   return {

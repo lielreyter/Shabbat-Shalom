@@ -19,15 +19,3 @@ export type LocationCacheRecord = {
   source: LocationSource;
   fetchedAtIso: string;
 };
-export type LocationSource = "gps" | "manual";
-
-export type LocationPermissionStatus = "granted" | "denied" | "undetermined";
-
-export type LocationResult = {
-  city: string | null;
-  latitude: number;
-  longitude: number;
-  timezone: string;
-  source: LocationSource;
-  fetchedAt: Date;
-};

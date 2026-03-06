@@ -36,7 +36,10 @@ const readCurrentLocationHash = async (): Promise<string | null> => {
   }
 };
 
-const toCacheRecord = (times: ShabbatTimes, locationHash: string): ShabbatTimesCacheRecord => ({
+const toCacheRecord = (
+  times: ShabbatTimes,
+  locationHash: string
+): ShabbatTimesCacheRecord => ({
   shabbatStartIso: times.shabbatStart.toISOString(),
   shabbatEndIso: times.shabbatEnd.toISOString(),
   cityName: times.cityName ?? null,
@@ -61,28 +64,29 @@ const fromCacheRecord = (record: ShabbatTimesCacheRecord): ShabbatTimes => ({
   parsha: record.parsha ?? null,
 });
 
-export const getCachedShabbatTimes = async (): Promise<ShabbatTimes | null> => {
-  const raw = await AsyncStorage.getItem(SHABBAT_CACHE_KEY);
-  if (!raw) {
-    return null;
-  }
-  try {
-    const record = JSON.parse(raw) as ShabbatTimesCacheRecord;
-    const fetchedAt = new Date(record.fetchedAtIso);
-    if (Number.isNaN(fetchedAt.getTime()) || !isCacheFresh(fetchedAt)) {
+export const getCachedShabbatTimes =
+  async (): Promise<ShabbatTimes | null> => {
+    const raw = await AsyncStorage.getItem(SHABBAT_CACHE_KEY);
+    if (!raw) {
       return null;
     }
+    try {
+      const record = JSON.parse(raw) as ShabbatTimesCacheRecord;
+      const fetchedAt = new Date(record.fetchedAtIso);
+      if (Number.isNaN(fetchedAt.getTime()) || !isCacheFresh(fetchedAt)) {
+        return null;
+      }
 
-    const currentHash = await readCurrentLocationHash();
-    if (currentHash && record.locationHash !== currentHash) {
+      const currentHash = await readCurrentLocationHash();
+      if (currentHash && record.locationHash !== currentHash) {
+        return null;
+      }
+
+      return fromCacheRecord(record);
+    } catch {
       return null;
     }
-
-    return fromCacheRecord(record);
-  } catch {
-    return null;
-  }
-};
+  };
 
 export const setCachedShabbatTimes = async (
   times: ShabbatTimes
@@ -94,96 +98,4 @@ export const setCachedShabbatTimes = async (
 
 export const clearCache = async (): Promise<void> => {
   await AsyncStorage.removeItem(SHABBAT_CACHE_KEY);
-};
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ShabbatTimes } from "./shabbatTimeTypes";
-import { LocationResult } from "../location/locationTypes";
-
-const CACHE_KEY = "shabbatTimes:v1";
-const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-type StoredShabbatTimes = {
-  times: {
-    shabbatStart: string;
-    shabbatEnd: string;
-    cityName: string | null;
-    latitude: number;
-    longitude: number;
-    timezone: string;
-    source: "api";
-    fetchedAt: string;
-    parsha?: string | null;
-  };
-  locationHash: string;
-};
-
-const buildLocationHash = (location: LocationResult): string =>
-  `${location.latitude}|${location.longitude}|${location.timezone}`;
-
-const toStoredTimes = (times: ShabbatTimes): StoredShabbatTimes["times"] => ({
-  shabbatStart: times.shabbatStart.toISOString(),
-  shabbatEnd: times.shabbatEnd.toISOString(),
-  cityName: times.cityName,
-  latitude: times.latitude,
-  longitude: times.longitude,
-  timezone: times.timezone,
-  source: "api",
-  fetchedAt: times.fetchedAt.toISOString(),
-  parsha: times.parsha ?? null,
-});
-
-const fromStoredTimes = (stored: StoredShabbatTimes["times"]): ShabbatTimes => ({
-  shabbatStart: new Date(stored.shabbatStart),
-  shabbatEnd: new Date(stored.shabbatEnd),
-  cityName: stored.cityName ?? null,
-  latitude: stored.latitude,
-  longitude: stored.longitude,
-  timezone: stored.timezone,
-  source: "api",
-  fetchedAt: new Date(stored.fetchedAt),
-  parsha: stored.parsha ?? null,
-});
-
-const isExpired = (stored: StoredShabbatTimes): boolean => {
-  const fetchedAt = new Date(stored.times.fetchedAt).getTime();
-  return Number.isNaN(fetchedAt) || Date.now() - fetchedAt > MAX_CACHE_AGE_MS;
-};
-
-export const getCachedShabbatTimes = async (
-  location: LocationResult
-): Promise<ShabbatTimes | null> => {
-  const raw = await AsyncStorage.getItem(CACHE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  let stored: StoredShabbatTimes;
-  try {
-    stored = JSON.parse(raw) as StoredShabbatTimes;
-  } catch {
-    return null;
-  }
-
-  const currentHash = buildLocationHash(location);
-  if (stored.locationHash !== currentHash || isExpired(stored)) {
-    return null;
-  }
-
-  return fromStoredTimes(stored.times);
-};
-
-export const setCachedShabbatTimes = async (
-  location: LocationResult,
-  times: ShabbatTimes
-): Promise<void> => {
-  const payload: StoredShabbatTimes = {
-    times: toStoredTimes(times),
-    locationHash: buildLocationHash(location),
-  };
-
-  await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-};
-
-export const clearCache = async (): Promise<void> => {
-  await AsyncStorage.removeItem(CACHE_KEY);
 };

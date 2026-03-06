@@ -1,8 +1,8 @@
 import "react-native-get-random-values";
 import { v4 as uuidv4 } from "uuid";
 import { appleAuth } from "@invertase/react-native-apple-authentication";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { DEV_MODE } from "../config/devMode";
 
 export enum AuthErrorCode {

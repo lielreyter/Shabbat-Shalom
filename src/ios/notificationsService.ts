@@ -34,6 +34,7 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
     console.log("DEV MODE STUB — notification permission requested.");
     return !stubConfig.forcePermissionDenied;
   }
+  // Production: use UNUserNotificationCenter via a native module.
   throw {
     code: ReminderErrorCode.PERMISSION_DENIED,
     message: "Notification permission not implemented.",
@@ -66,6 +67,23 @@ export const scheduleDailyNotification = async (
   throw {
     code: ReminderErrorCode.SCHEDULING_FAILED,
     message: "Notification scheduling not implemented.",
+  } satisfies ReminderError;
+};
+
+export const cancelNotificationById = async (id: string): Promise<void> => {
+  if (DEV_MODE) {
+    console.log("DEV MODE STUB — cancel notification by id:", id);
+    if (stubConfig.forceCancelFailure) {
+      throw {
+        code: ReminderErrorCode.SCHEDULING_FAILED,
+        message: "Failed to cancel notification (stub).",
+      } satisfies ReminderError;
+    }
+    return;
+  }
+  throw {
+    code: ReminderErrorCode.SCHEDULING_FAILED,
+    message: "Notification cancel not implemented.",
   } satisfies ReminderError;
 };
 

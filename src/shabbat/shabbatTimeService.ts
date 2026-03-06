@@ -91,14 +91,24 @@ const toShabbatTimes = (
 const mapToShabbatError = (error: unknown): ShabbatTimeError => {
   if (error && typeof error === "object" && "code" in error) {
     const code = String((error as { code?: string }).code);
-    if (Object.values(ShabbatTimeErrorCode).includes(code as ShabbatTimeErrorCode)) {
+    if (
+      Object.values(ShabbatTimeErrorCode).includes(
+        code as ShabbatTimeErrorCode
+      )
+    ) {
       return error as ShabbatTimeError;
     }
   }
   if (error instanceof TypeError) {
-    return { code: ShabbatTimeErrorCode.NETWORK_ERROR, message: "Network error." };
+    return {
+      code: ShabbatTimeErrorCode.NETWORK_ERROR,
+      message: "Network error.",
+    };
   }
-  return { code: ShabbatTimeErrorCode.API_FAILED, message: "Failed to fetch Shabbat times." };
+  return {
+    code: ShabbatTimeErrorCode.API_FAILED,
+    message: "Failed to fetch Shabbat times.",
+  };
 };
 
 export const getShabbatTimes = async (
@@ -119,128 +129,4 @@ export const getShabbatTimes = async (
   } catch (error) {
     throw mapToShabbatError(error);
   }
-};
-import { LocationResult } from "../location/locationTypes";
-import {
-  ShabbatTimes,
-  ShabbatTimeError,
-  ShabbatTimeErrorCode,
-} from "./shabbatTimeTypes";
-
-type HebcalItem = {
-  title?: string;
-  date?: string;
-  category?: string;
-};
-
-type HebcalResponse = {
-  items?: HebcalItem[];
-  location?: {
-    title?: string;
-  };
-};
-
-const buildHebcalUrl = (location: LocationResult): string => {
-  const params = new URLSearchParams({
-    cfg: "json",
-    latitude: String(location.latitude),
-    longitude: String(location.longitude),
-    tzid: location.timezone,
-  });
-  return `https://www.hebcal.com/shabbat?${params.toString()}`;
-};
-
-const parseDate = (value?: string): Date | null => {
-  if (!value) {
-    return null;
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const findItemDate = (items: HebcalItem[], matcher: (title: string) => boolean): Date | null => {
-  const match = items.find((item) => item.title && matcher(item.title));
-  return parseDate(match?.date);
-};
-
-const isCandleLighting = (title: string): boolean =>
-  title.toLowerCase().startsWith("candle lighting");
-
-const isHavdalah = (title: string): boolean =>
-  title.toLowerCase().startsWith("havdalah");
-
-const isParsha = (title: string): boolean =>
-  title.toLowerCase().startsWith("parashat") || title.toLowerCase().startsWith("parashah");
-
-const buildError = (
-  code: ShabbatTimeErrorCode,
-  message: string
-): ShabbatTimeError => ({ code, message });
-
-export const getShabbatTimes = async (
-  location: LocationResult
-): Promise<ShabbatTimes> => {
-  const url = buildHebcalUrl(location);
-  let response: Response;
-
-  try {
-    response = await fetch(url);
-  } catch (error) {
-    console.error("Hebcal request failed", error);
-    throw buildError(
-      ShabbatTimeErrorCode.NETWORK_ERROR,
-      "Network error while fetching Shabbat times."
-    );
-  }
-
-  if (!response.ok) {
-    console.error("Hebcal response not ok", response.status);
-    throw buildError(
-      ShabbatTimeErrorCode.API_FAILED,
-      "Hebcal API request failed."
-    );
-  }
-
-  let data: HebcalResponse;
-  try {
-    data = (await response.json()) as HebcalResponse;
-  } catch (error) {
-    console.error("Hebcal response invalid JSON", error);
-    throw buildError(
-      ShabbatTimeErrorCode.INVALID_RESPONSE,
-      "Invalid Hebcal response."
-    );
-  }
-
-  if (!data.items || !Array.isArray(data.items)) {
-    throw buildError(
-      ShabbatTimeErrorCode.INVALID_RESPONSE,
-      "Hebcal response missing items."
-    );
-  }
-
-  const shabbatStart = findItemDate(data.items, isCandleLighting);
-  const shabbatEnd = findItemDate(data.items, isHavdalah);
-  const parshaItem = data.items.find((item) =>
-    item.title ? isParsha(item.title) : false
-  );
-
-  if (!shabbatStart || !shabbatEnd) {
-    throw buildError(
-      ShabbatTimeErrorCode.INVALID_RESPONSE,
-      "Hebcal response missing required times."
-    );
-  }
-
-  return {
-    shabbatStart,
-    shabbatEnd,
-    cityName: data.location?.title ?? null,
-    latitude: location.latitude,
-    longitude: location.longitude,
-    timezone: location.timezone,
-    source: "api",
-    fetchedAt: new Date(),
-    parsha: parshaItem?.title ?? null,
-  };
 };

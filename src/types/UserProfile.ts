@@ -10,12 +10,17 @@ export interface UserProfile {
 
   shabbatIntentText: string | null;
   wantsMorningReminders: boolean;
+  wantsShabbatReminders: boolean;
 
   timeZone: string;
   platform: "ios";
+  gender: string | null;
+  profileImageUrl: string | null;
 
   currentStreak: number;
   longestStreak: number;
+  lastStreakWeekId: string | null;
 
   congregationId: string | null;
+  congregationOnboardingCompleted: boolean;
 }

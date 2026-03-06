@@ -24,6 +24,8 @@ const getTimeZone = (): string => {
 
 const userDocRef = (uid: string) => doc(firestore, "users", uid);
 
+const normalizeWeekId = (weekId: string): string => weekId.trim();
+
 const ensureTimestamp = (value: unknown): Timestamp => {
   // Server timestamps can be null immediately after writes; fall back safely.
   return value instanceof Timestamp ? value : Timestamp.now();
@@ -38,11 +40,16 @@ const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): UserProfil
     email: data.email ?? null,
     shabbatIntentText: data.shabbatIntentText ?? null,
     wantsMorningReminders: data.wantsMorningReminders ?? true,
+    wantsShabbatReminders: data.wantsShabbatReminders ?? true,
     timeZone: data.timeZone ?? getTimeZone(),
     platform: "ios",
+    gender: data.gender ?? null,
+    profileImageUrl: data.profileImageUrl ?? null,
     currentStreak: data.currentStreak ?? 0,
     longestStreak: data.longestStreak ?? 0,
+    lastStreakWeekId: data.lastStreakWeekId ?? null,
     congregationId: data.congregationId ?? null,
+    congregationOnboardingCompleted: data.congregationOnboardingCompleted ?? false,
   };
 };
 
@@ -74,11 +81,16 @@ export const createUserProfile = async ({
     email,
     shabbatIntentText: null,
     wantsMorningReminders: true,
+    wantsShabbatReminders: true,
     timeZone: getTimeZone(),
     platform: "ios",
+    gender: null,
+    profileImageUrl: null,
     currentStreak: 0,
     longestStreak: 0,
+    lastStreakWeekId: null,
     congregationId: null,
+    congregationOnboardingCompleted: false,
   };
 
   await setDoc(userDocRef(uid), payload);
@@ -125,8 +137,79 @@ export const getOrCreateUserProfileOnLogin = async ({
   if (!existing.platform) {
     updates.platform = "ios";
   }
+  if (typeof existing.wantsShabbatReminders !== "boolean") {
+    updates.wantsShabbatReminders = true;
+  }
 
   await updateDoc(userDocRef(uid), updates);
   const snapshot = await getDoc(userDocRef(uid));
   return hydrateUserProfile(uid, snapshot.data() as UserProfile);
+};
+
+export const setUserCongregation = async (
+  uid: string,
+  congregationId: string | null
+): Promise<UserProfile> => {
+  const updates: Partial<UserProfile> = {
+    congregationId,
+    congregationOnboardingCompleted: true,
+  };
+  return updateUserProfile(uid, updates);
+};
+
+export const completeCongregationOnboarding = async (
+  uid: string
+): Promise<UserProfile> => {
+  return updateUserProfile(uid, { congregationOnboardingCompleted: true });
+};
+
+export const recordKeptShabbatWeek = async (
+  uid: string,
+  weekId: string
+): Promise<UserProfile> => {
+  const existing = await getUserProfile(uid);
+  if (!existing) {
+    throw new Error("User profile not found.");
+  }
+
+  const normalizedWeekId = normalizeWeekId(weekId);
+  if (!normalizedWeekId) {
+    throw new Error("Invalid week id.");
+  }
+
+  if (existing.lastStreakWeekId === normalizedWeekId) {
+    return existing;
+  }
+
+  const nextStreak = existing.currentStreak + 1;
+  const nextLongest = Math.max(existing.longestStreak, nextStreak);
+  return updateUserProfile(uid, {
+    currentStreak: nextStreak,
+    longestStreak: nextLongest,
+    lastStreakWeekId: normalizedWeekId,
+  });
+};
+
+export const recordBrokenShabbatWeek = async (
+  uid: string,
+  weekId: string
+): Promise<UserProfile> => {
+  const existing = await getUserProfile(uid);
+  if (!existing) {
+    throw new Error("User profile not found.");
+  }
+
+  const normalizedWeekId = normalizeWeekId(weekId);
+  if (!normalizedWeekId) {
+    throw new Error("Invalid week id.");
+  }
+
+  if (existing.lastStreakWeekId === normalizedWeekId && existing.currentStreak === 0) {
+    return existing;
+  }
+
+  return updateUserProfile(uid, {
+    currentStreak: 0,
+    lastStreakWeekId: normalizedWeekId,
+  });
 };
