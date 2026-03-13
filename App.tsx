@@ -43,7 +43,17 @@ import {
 } from "./src/shabbatMode/shabbatIntentFlow";
 import { scheduleShabbatMode } from "./src/shabbatMode/shabbatModeScheduler";
 import { getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
-import { signInWithApple, signOut, subscribeToAuthState } from "./src/auth/authService";
+import {
+  confirmPhoneSignIn,
+  registerWithEmailPassword,
+  signInWithApple,
+  signInWithEmailPassword,
+  signInWithGoogle,
+  signOut,
+  startPhoneSignIn,
+  subscribeToAuthState,
+  type PhoneAuthConfirmation,
+} from "./src/auth/authService";
 import { UserProfile } from "./src/types/UserProfile";
 import {
   approveJoinRequest,
@@ -180,6 +190,13 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authPhone, setAuthPhone] = useState("");
+  const [authPhoneCode, setAuthPhoneCode] = useState("");
+  const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(
+    null
+  );
   const [city, setCity] = useState("Unknown city");
 
   const [restrictions, setRestrictions] =
@@ -447,11 +464,11 @@ export default function App() {
     [restrictions, saveRestrictions, weekId]
   );
 
-  const onPressContinue = useCallback(async () => {
+  const runAuthAction = useCallback(async (action: () => Promise<UserProfile>) => {
     setAuthError(null);
     setActionLoading(true);
     try {
-      const profile = await signInWithApple();
+      const profile = await action();
       setUser(profile);
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to sign in."));
@@ -459,6 +476,59 @@ export default function App() {
       setActionLoading(false);
     }
   }, []);
+
+  const onPressContinueApple = useCallback(async () => {
+    await runAuthAction(signInWithApple);
+  }, [runAuthAction]);
+
+  const onPressContinueGoogle = useCallback(async () => {
+    await runAuthAction(signInWithGoogle);
+  }, [runAuthAction]);
+
+  const onPressEmailSignIn = useCallback(async () => {
+    await runAuthAction(() =>
+      signInWithEmailPassword({
+        email: authEmail,
+        password: authPassword,
+      })
+    );
+  }, [authEmail, authPassword, runAuthAction]);
+
+  const onPressEmailRegister = useCallback(async () => {
+    await runAuthAction(() =>
+      registerWithEmailPassword({
+        email: authEmail,
+        password: authPassword,
+      })
+    );
+  }, [authEmail, authPassword, runAuthAction]);
+
+  const onPressSendPhoneCode = useCallback(async () => {
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      const confirmation = await startPhoneSignIn(authPhone);
+      setPhoneConfirmation(confirmation);
+      Alert.alert("Code sent", "Enter the verification code you received.");
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to send verification code."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [authPhone]);
+
+  const onPressVerifyPhoneCode = useCallback(async () => {
+    if (!phoneConfirmation) {
+      setAuthError("Please request a verification code first.");
+      return;
+    }
+    await runAuthAction(() =>
+      confirmPhoneSignIn({
+        confirmation: phoneConfirmation,
+        code: authPhoneCode,
+      })
+    );
+  }, [authPhoneCode, phoneConfirmation, runAuthAction]);
 
   const onPressSignOut = useCallback(async () => {
     setActionLoading(true);
@@ -1261,13 +1331,87 @@ export default function App() {
         <StatusBar barStyle="dark-content" />
         <View style={s.centered}>
           <Text style={s.title}>Shabbat Shalom</Text>
-          <Text style={s.subText}>Continue to enter the app.</Text>
+          <Text style={s.subText}>Choose a sign-in method to enter the app.</Text>
           <Pressable
             style={[s.primaryButton, actionLoading && s.disabled]}
-            onPress={onPressContinue}
+            onPress={onPressContinueApple}
             disabled={actionLoading}
           >
-            <Text style={s.primaryButtonText}>Continue</Text>
+            <Text style={s.primaryButtonText}>Continue with Apple</Text>
+          </Pressable>
+          <Pressable
+            style={[s.secondaryButton, actionLoading && s.disabled]}
+            onPress={onPressContinueGoogle}
+            disabled={actionLoading}
+          >
+            <Text style={s.secondaryButtonText}>Continue with Google</Text>
+          </Pressable>
+
+          <TextInput
+            placeholder="Email"
+            value={authEmail}
+            onChangeText={setAuthEmail}
+            style={s.input}
+            placeholderTextColor="#777"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            editable={!actionLoading}
+          />
+          <TextInput
+            placeholder="Password"
+            value={authPassword}
+            onChangeText={setAuthPassword}
+            style={s.input}
+            placeholderTextColor="#777"
+            secureTextEntry
+            editable={!actionLoading}
+          />
+          <Pressable
+            style={[s.primaryButton, actionLoading && s.disabled]}
+            onPress={onPressEmailSignIn}
+            disabled={actionLoading}
+          >
+            <Text style={s.primaryButtonText}>Sign in with Email</Text>
+          </Pressable>
+          <Pressable
+            style={[s.secondaryButton, actionLoading && s.disabled]}
+            onPress={onPressEmailRegister}
+            disabled={actionLoading}
+          >
+            <Text style={s.secondaryButtonText}>Create Email Account</Text>
+          </Pressable>
+
+          <TextInput
+            placeholder="Phone number (e.g. +15551234567)"
+            value={authPhone}
+            onChangeText={setAuthPhone}
+            style={s.input}
+            placeholderTextColor="#777"
+            keyboardType="phone-pad"
+            editable={!actionLoading}
+          />
+          <Pressable
+            style={[s.secondaryButton, actionLoading && s.disabled]}
+            onPress={onPressSendPhoneCode}
+            disabled={actionLoading}
+          >
+            <Text style={s.secondaryButtonText}>Send Phone Code</Text>
+          </Pressable>
+          <TextInput
+            placeholder="Verification code"
+            value={authPhoneCode}
+            onChangeText={setAuthPhoneCode}
+            style={s.input}
+            placeholderTextColor="#777"
+            keyboardType="number-pad"
+            editable={!actionLoading}
+          />
+          <Pressable
+            style={[s.primaryButton, actionLoading && s.disabled]}
+            onPress={onPressVerifyPhoneCode}
+            disabled={actionLoading}
+          >
+            <Text style={s.primaryButtonText}>Verify Phone Code</Text>
           </Pressable>
           {authError ? <Text style={s.errorText}>{authError}</Text> : null}
         </View>

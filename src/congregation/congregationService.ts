@@ -74,6 +74,9 @@ const congregationsCollection = () =>
 const congregationDoc = (id: string) =>
   doc(firestore, CONGREGATIONS_COLLECTION, id);
 
+const normalizeMatchText = (value: string): string =>
+  value.trim().toLowerCase().replace(/\s+/g, " ");
+
 const normalizeCongregation = (
   id: string,
   data: Partial<Congregation>
@@ -161,6 +164,19 @@ export const createCongregation = async ({
   const trimmedCity = city.trim();
   if (!trimmedName || !trimmedCity) {
     throw new Error("Congregation name and city are required.");
+  }
+  const normalizedName = normalizeMatchText(trimmedName);
+  const normalizedCity = normalizeMatchText(trimmedCity);
+  const existingCongregations = await listCongregations();
+  const duplicate = existingCongregations.find(
+    (existing) =>
+      normalizeMatchText(existing.name) === normalizedName &&
+      normalizeMatchText(existing.city) === normalizedCity
+  );
+  if (duplicate) {
+    throw new Error(
+      `A congregation named "${duplicate.name}" already exists in ${duplicate.city}.`
+    );
   }
 
   const id = `cong-${trimmedName

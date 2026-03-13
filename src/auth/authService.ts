@@ -1,6 +1,11 @@
 import {
+  ConfirmationResult,
+  GoogleAuthProvider,
+  createUserWithEmailAndPassword,
   OAuthProvider,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPhoneNumber,
   signInAnonymously,
   signInWithCredential,
   signOut as firebaseSignOut,
@@ -8,6 +13,8 @@ import {
   User as FirebaseUser,
 } from "firebase/auth";
 import { auth } from "../firebase/firebaseConfig";
+import Config from "react-native-config";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import {
   signInWithApple as signInWithAppleAuth,
   AuthErrorCode,
@@ -80,6 +87,63 @@ const hydrateProfileForFirebaseUser = async (
   });
 };
 
+const hydrateProfileWithFallback = async ({
+  firebaseUser,
+  displayName,
+  email,
+}: {
+  firebaseUser: FirebaseUser;
+  displayName?: string | null;
+  email?: string | null;
+}): Promise<UserProfile> => {
+  let profile: UserProfile;
+  try {
+    profile = await getOrCreateUserProfileOnLogin({
+      uid: firebaseUser.uid,
+      displayName: displayName ?? firebaseUser.displayName ?? null,
+      email: email ?? firebaseUser.email ?? null,
+    });
+  } catch (error) {
+    // In DEV MODE, allow app usage even if Firestore rules/config are not ready yet.
+    if (!DEV_MODE) {
+      throw error;
+    }
+    profile = {
+      uid: firebaseUser.uid,
+      createdAt: Timestamp.now(),
+      lastLoginAt: Timestamp.now(),
+      displayName: displayName ?? firebaseUser.displayName ?? "Dev User",
+      email: email ?? firebaseUser.email ?? null,
+      shabbatIntentText: null,
+      wantsMorningReminders: true,
+      wantsShabbatReminders: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      platform: "ios",
+      gender: null,
+      profileImageUrl: null,
+      currentStreak: 0,
+      longestStreak: 0,
+      lastStreakWeekId: null,
+      congregationId: null,
+      congregationOnboardingCompleted: false,
+    };
+  }
+  cachedUserProfile = profile;
+  return profile;
+};
+
+const ensureGoogleConfigured = (): void => {
+  const webClientId = Config.GOOGLE_WEB_CLIENT_ID ?? "";
+  if (!webClientId) {
+    throw new Error(
+      "Missing GOOGLE_WEB_CLIENT_ID. Add it to .env using your Firebase Web client ID."
+    );
+  }
+  GoogleSignin.configure({
+    webClientId,
+  });
+};
+
 export const signInWithApple = async (): Promise<UserProfile> => {
   try {
     const appleResult = await signInWithAppleAuth();
@@ -97,46 +161,11 @@ export const signInWithApple = async (): Promise<UserProfile> => {
       });
       result = await signInWithCredential(auth, credential);
     }
-
-    const displayName =
-      appleResult.fullName ?? result.user.displayName ?? null;
-    const email = appleResult.email ?? result.user.email ?? null;
-
-    let profile: UserProfile;
-    try {
-      profile = await getOrCreateUserProfileOnLogin({
-        uid: result.user.uid,
-        displayName,
-        email,
-      });
-    } catch (error) {
-      // In DEV MODE, allow app usage even if Firestore rules/config are not ready yet.
-      if (!DEV_MODE) {
-        throw error;
-      }
-      profile = {
-        uid: result.user.uid,
-        createdAt: Timestamp.now(),
-        lastLoginAt: Timestamp.now(),
-        displayName: displayName ?? "Dev User",
-        email,
-        shabbatIntentText: null,
-        wantsMorningReminders: true,
-        wantsShabbatReminders: true,
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-        platform: "ios",
-        gender: null,
-        profileImageUrl: null,
-        currentStreak: 0,
-        longestStreak: 0,
-        lastStreakWeekId: null,
-        congregationId: null,
-        congregationOnboardingCompleted: false,
-      };
-    }
-
-    cachedUserProfile = profile;
-    return profile;
+    return hydrateProfileWithFallback({
+      firebaseUser: result.user,
+      displayName: appleResult.fullName,
+      email: appleResult.email,
+    });
   } catch (error) {
     if (DEV_MODE) {
       // Last-resort DEV fallback so app can run without complete Firebase auth setup.
@@ -168,6 +197,103 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         throw typed;
       }
     }
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const signInWithGoogle = async (): Promise<UserProfile> => {
+  try {
+    if (DEV_MODE) {
+      const result = await signInAnonymously(auth);
+      return hydrateProfileWithFallback({
+        firebaseUser: result.user,
+        displayName: "Dev Google User",
+      });
+    }
+
+    ensureGoogleConfigured();
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    await GoogleSignin.signIn();
+    const { idToken } = await GoogleSignin.getTokens();
+    if (!idToken) {
+      throw new Error("Google sign-in did not return an ID token.");
+    }
+
+    const credential = GoogleAuthProvider.credential(idToken);
+    const result = await signInWithCredential(auth, credential);
+    return hydrateProfileWithFallback({ firebaseUser: result.user });
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const signInWithEmailPassword = async ({
+  email,
+  password,
+}: {
+  email: string;
+  password: string;
+}): Promise<UserProfile> => {
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail || !password) {
+    throw new Error("Email and password are required.");
+  }
+  try {
+    const result = await signInWithEmailAndPassword(auth, trimmedEmail, password);
+    return hydrateProfileWithFallback({ firebaseUser: result.user, email: trimmedEmail });
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const registerWithEmailPassword = async ({
+  email,
+  password,
+}: {
+  email: string;
+  password: string;
+}): Promise<UserProfile> => {
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail || !password) {
+    throw new Error("Email and password are required.");
+  }
+  try {
+    const result = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+    return hydrateProfileWithFallback({ firebaseUser: result.user, email: trimmedEmail });
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const startPhoneSignIn = async (
+  phoneNumber: string
+): Promise<ConfirmationResult> => {
+  const trimmedPhone = phoneNumber.trim();
+  if (!trimmedPhone) {
+    throw new Error("Phone number is required.");
+  }
+  try {
+    return await signInWithPhoneNumber(auth, trimmedPhone);
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const confirmPhoneSignIn = async ({
+  confirmation,
+  code,
+}: {
+  confirmation: ConfirmationResult;
+  code: string;
+}): Promise<UserProfile> => {
+  const trimmedCode = code.trim();
+  if (!trimmedCode) {
+    throw new Error("Verification code is required.");
+  }
+  try {
+    const result = await confirmation.confirm(trimmedCode);
+    return hydrateProfileWithFallback({ firebaseUser: result.user });
+  } catch (error) {
     throw mapFirebaseAuthError(error);
   }
 };
@@ -205,3 +331,4 @@ export const subscribeToAuthState = (
 
 export type { AuthError };
 export { AuthErrorCode };
+export type { ConfirmationResult as PhoneAuthConfirmation };
