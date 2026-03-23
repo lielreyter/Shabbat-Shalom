@@ -4,6 +4,8 @@ import {
   createUserWithEmailAndPassword,
   OAuthProvider,
   onAuthStateChanged,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPhoneNumber,
   signInAnonymously,
@@ -27,39 +29,42 @@ import { Timestamp } from "firebase/firestore";
 
 let cachedUserProfile: UserProfile | null = null;
 
+const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
+  "auth/invalid-credential": "Incorrect email or password.",
+  "auth/wrong-password": "Incorrect password. Please try again.",
+  "auth/user-not-found": "No account found with this email.",
+  "auth/user-disabled": "This account has been disabled.",
+  "auth/user-token-expired": "Session expired. Please sign in again.",
+  "auth/email-already-in-use": "An account already exists with this email.",
+  "auth/weak-password": "Password is too weak. Use at least 6 characters.",
+  "auth/invalid-email": "Please enter a valid email address.",
+  "auth/too-many-requests": "Too many attempts. Please try again later.",
+  "auth/network-request-failed": "Network error. Check your connection.",
+  "auth/invalid-phone-number": "Invalid phone number. Use format: +15551234567",
+  "auth/missing-phone-number": "Please enter a phone number.",
+  "auth/invalid-verification-code": "Invalid verification code.",
+  "auth/code-expired": "Verification code has expired. Request a new one.",
+  "auth/operation-not-allowed":
+    "This sign-in method is not enabled. Enable it in Firebase Console > Authentication > Sign-in method.",
+  "permission-denied":
+    "Permission denied. Update Firestore rules to allow this user.",
+};
+
 const mapFirebaseAuthError = (error: unknown): AuthError => {
   if (error && typeof error === "object" && "code" in error) {
     const code = String((error as { code?: string }).code);
+    const friendly = FIREBASE_ERROR_MESSAGES[code];
+    if (friendly) {
+      const authCode =
+        code === "auth/network-request-failed"
+          ? AuthErrorCode.NETWORK
+          : AuthErrorCode.UNAUTHORIZED;
+      return { code: authCode, message: friendly };
+    }
     const maybeMessage =
       "message" in error ? (error as { message?: unknown }).message : undefined;
     const details =
-      typeof maybeMessage === "string"
-        ? maybeMessage
-        : code;
-    if (code === "auth/network-request-failed") {
-      return { code: AuthErrorCode.NETWORK, message: "Network error." };
-    }
-    if (
-      code === "auth/invalid-credential" ||
-      code === "auth/user-disabled" ||
-      code === "auth/user-token-expired"
-    ) {
-      return { code: AuthErrorCode.UNAUTHORIZED, message: "Unauthorized." };
-    }
-    if (code === "auth/operation-not-allowed") {
-      return {
-        code: AuthErrorCode.UNAUTHORIZED,
-        message:
-          "Anonymous Auth is disabled in Firebase. Enable it in Authentication > Sign-in method.",
-      };
-    }
-    if (code === "permission-denied") {
-      return {
-        code: AuthErrorCode.UNAUTHORIZED,
-        message:
-          "Firestore permission denied. Update Firestore rules to allow this signed-in user.",
-      };
-    }
+      typeof maybeMessage === "string" ? maybeMessage : code;
     return {
       code: AuthErrorCode.UNKNOWN,
       message: `Auth error (${code}): ${details}`,
@@ -296,6 +301,46 @@ export const confirmPhoneSignIn = async ({
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
+};
+
+export const sendVerification = async (): Promise<void> => {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("No signed-in user.");
+  }
+  if (user.emailVerified) {
+    return;
+  }
+  await sendEmailVerification(user);
+};
+
+export const checkEmailVerified = async (): Promise<boolean> => {
+  const user = auth.currentUser;
+  if (!user) {
+    return false;
+  }
+  await user.reload();
+  return user.emailVerified;
+};
+
+export const isEmailProvider = (): boolean => {
+  const user = auth.currentUser;
+  if (!user) {
+    return false;
+  }
+  return user.providerData.some((p) => p.providerId === "password");
+};
+
+export const isCurrentUserEmailVerified = (): boolean => {
+  return auth.currentUser?.emailVerified ?? false;
+};
+
+export const resetPassword = async (email: string): Promise<void> => {
+  const trimmed = email.trim();
+  if (!trimmed) {
+    throw new Error("Email is required.");
+  }
+  await sendPasswordResetEmail(auth, trimmed);
 };
 
 export const signOut = async (): Promise<void> => {

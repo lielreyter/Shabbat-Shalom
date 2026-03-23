@@ -44,8 +44,13 @@ import {
 import { scheduleShabbatMode } from "./src/shabbatMode/shabbatModeScheduler";
 import { getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
 import {
+  checkEmailVerified,
   confirmPhoneSignIn,
+  isCurrentUserEmailVerified,
+  isEmailProvider,
   registerWithEmailPassword,
+  resetPassword,
+  sendVerification,
   signInWithApple,
   signInWithEmailPassword,
   signInWithGoogle,
@@ -190,6 +195,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [authMode, setAuthMode] = useState<"choose" | "login" | "signup">("choose");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authPhone, setAuthPhone] = useState("");
@@ -197,6 +203,17 @@ export default function App() {
   const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(
     null
   );
+  const [signupName, setSignupName] = useState("");
+  const [signupGender, setSignupGender] = useState<GenderOption | "">("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [pendingEmailVerification, setPendingEmailVerification] = useState(false);
+  const [verificationChecking, setVerificationChecking] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetSent, setResetSent] = useState(false);
   const [city, setCity] = useState("Unknown city");
 
   const [restrictions, setRestrictions] =
@@ -318,10 +335,25 @@ export default function App() {
         } else {
           setProfileGender("");
         }
+        if (isEmailProvider() && !isCurrentUserEmailVerified()) {
+          setPendingEmailVerification(true);
+        } else {
+          setPendingEmailVerification(false);
+        }
+      } else {
+        setPendingEmailVerification(false);
       }
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return;
+    }
+    const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   useEffect(() => {
     if (
@@ -486,22 +518,73 @@ export default function App() {
   }, [runAuthAction]);
 
   const onPressEmailSignIn = useCallback(async () => {
-    await runAuthAction(() =>
-      signInWithEmailPassword({
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      const profile = await signInWithEmailPassword({
         email: authEmail,
         password: authPassword,
-      })
-    );
-  }, [authEmail, authPassword, runAuthAction]);
+      });
+      setUser(profile);
+      if (isEmailProvider() && !isCurrentUserEmailVerified()) {
+        setPendingEmailVerification(true);
+      }
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to sign in."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [authEmail, authPassword]);
 
   const onPressEmailRegister = useCallback(async () => {
-    await runAuthAction(() =>
-      registerWithEmailPassword({
-        email: authEmail,
-        password: authPassword,
-      })
-    );
-  }, [authEmail, authPassword, runAuthAction]);
+    const name = signupName.trim();
+    const gender = signupGender;
+    const email = signupEmail.trim();
+    if (!name) {
+      setAuthError("Please enter your name.");
+      return;
+    }
+    if (!gender) {
+      setAuthError("Please select your gender.");
+      return;
+    }
+    if (!email) {
+      setAuthError("Please enter your email.");
+      return;
+    }
+    if (!signupPassword) {
+      setAuthError("Please enter a password.");
+      return;
+    }
+    if (signupPassword.length < 6) {
+      setAuthError("Password must be at least 6 characters.");
+      return;
+    }
+    if (signupPassword !== signupConfirmPassword) {
+      setAuthError("Passwords do not match.");
+      return;
+    }
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      const profile = await registerWithEmailPassword({
+        email,
+        password: signupPassword,
+      });
+      const updated = await updateUserProfile(profile.uid, {
+        displayName: name,
+        gender,
+      });
+      setUser(updated);
+      await sendVerification();
+      setResendCooldown(60);
+      setPendingEmailVerification(true);
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to create account."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [signupConfirmPassword, signupEmail, signupGender, signupName, signupPassword]);
 
   const onPressSendPhoneCode = useCallback(async () => {
     setAuthError(null);
@@ -535,9 +618,59 @@ export default function App() {
     try {
       await signOut();
       setUser(null);
+      setPendingEmailVerification(false);
     } finally {
       setActionLoading(false);
     }
+  }, []);
+
+  const onPressResendVerification = useCallback(async () => {
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      await sendVerification();
+      setResendCooldown(60);
+      Alert.alert("Email sent", "A new verification email has been sent. Check your inbox and spam folder.");
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to resend verification email."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, []);
+
+  const onPressCheckVerification = useCallback(async () => {
+    setAuthError(null);
+    setVerificationChecking(true);
+    try {
+      const verified = await checkEmailVerified();
+      if (verified) {
+        setPendingEmailVerification(false);
+      } else {
+        setAuthError("Email not yet verified. Please check your inbox and click the verification link.");
+      }
+    } catch (error) {
+      setAuthError(errorMessage(error, "Could not check verification status."));
+    } finally {
+      setVerificationChecking(false);
+    }
+  }, []);
+
+  const onPressForgotPassword = useCallback(async () => {
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      await resetPassword(resetEmail || authEmail);
+      setResetSent(true);
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to send password reset email."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [authEmail, resetEmail]);
+
+  const switchAuthMode = useCallback((mode: "choose" | "login" | "signup") => {
+    setAuthError(null);
+    setAuthMode(mode);
   }, []);
 
   const onToggleMode = useCallback(async () => {
@@ -1329,89 +1462,339 @@ export default function App() {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
+        <ScrollView contentContainerStyle={s.authScrollContent} keyboardShouldPersistTaps="handled">
+          {authMode === "choose" && (
+            <>
+              <View style={s.authLogoArea}>
+                <Text style={s.authTitle}>Shabbat Shalom</Text>
+                <Text style={s.authSubtitle}>Keep Shabbat with intention</Text>
+              </View>
+
+              <View style={s.authForm}>
+                <Pressable
+                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                  onPress={() => switchAuthMode("login")}
+                  disabled={actionLoading}
+                >
+                  <Text style={s.primaryButtonText}>Log In</Text>
+                </Pressable>
+                <Pressable
+                  style={[s.secondaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                  onPress={() => switchAuthMode("signup")}
+                  disabled={actionLoading}
+                >
+                  <Text style={s.secondaryButtonText}>Sign Up</Text>
+                </Pressable>
+
+                <View style={s.authDivider}>
+                  <View style={s.authDividerLine} />
+                  <Text style={s.authDividerText}>or continue with</Text>
+                  <View style={s.authDividerLine} />
+                </View>
+
+                <View style={s.authSocialRow}>
+                  <Pressable
+                    style={[s.authSocialButton, actionLoading && s.disabled]}
+                    onPress={onPressContinueApple}
+                    disabled={actionLoading}
+                  >
+                    <Text style={s.authSocialButtonText}>Apple</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[s.authSocialButton, actionLoading && s.disabled]}
+                    onPress={onPressContinueGoogle}
+                    disabled={actionLoading}
+                  >
+                    <Text style={s.authSocialButtonText}>Google</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {authError ? <Text style={s.errorText}>{authError}</Text> : null}
+            </>
+          )}
+
+          {authMode === "login" && (
+            <>
+              <Pressable style={s.authBackButton} onPress={() => switchAuthMode("choose")}>
+                <Text style={s.authBackText}>Back</Text>
+              </Pressable>
+              <View style={s.authLogoArea}>
+                <Text style={s.authTitle}>Welcome back</Text>
+                <Text style={s.authSubtitle}>Sign in to your account</Text>
+              </View>
+
+              <View style={s.authForm}>
+                <TextInput
+                  placeholder="Email"
+                  value={authEmail}
+                  onChangeText={setAuthEmail}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  editable={!actionLoading}
+                />
+                <TextInput
+                  placeholder="Password"
+                  value={authPassword}
+                  onChangeText={setAuthPassword}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  secureTextEntry
+                  editable={!actionLoading}
+                />
+                <Pressable
+                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                  onPress={onPressEmailSignIn}
+                  disabled={actionLoading}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={s.primaryButtonText}>Log In</Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  style={s.authLinkButton}
+                  onPress={() => {
+                    setResetEmail(authEmail);
+                    setResetSent(false);
+                    setAuthError(null);
+                    setForgotPasswordVisible(true);
+                  }}
+                >
+                  <Text style={s.authLinkText}>Forgot password?</Text>
+                </Pressable>
+
+                <View style={s.authDivider}>
+                  <View style={s.authDividerLine} />
+                  <Text style={s.authDividerText}>or sign in with phone</Text>
+                  <View style={s.authDividerLine} />
+                </View>
+
+                <TextInput
+                  placeholder="Phone number (e.g. +15551234567)"
+                  value={authPhone}
+                  onChangeText={setAuthPhone}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  keyboardType="phone-pad"
+                  editable={!actionLoading}
+                />
+                <Pressable
+                  style={[s.secondaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                  onPress={onPressSendPhoneCode}
+                  disabled={actionLoading}
+                >
+                  <Text style={s.secondaryButtonText}>Send Phone Code</Text>
+                </Pressable>
+                {phoneConfirmation ? (
+                  <>
+                    <TextInput
+                      placeholder="Verification code"
+                      value={authPhoneCode}
+                      onChangeText={setAuthPhoneCode}
+                      style={s.authInput}
+                      placeholderTextColor="#999"
+                      keyboardType="number-pad"
+                      editable={!actionLoading}
+                    />
+                    <Pressable
+                      style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                      onPress={onPressVerifyPhoneCode}
+                      disabled={actionLoading}
+                    >
+                      <Text style={s.primaryButtonText}>Verify Code</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+              </View>
+
+              {authError ? <Text style={s.errorText}>{authError}</Text> : null}
+
+              <View style={s.authFooter}>
+                <Text style={s.authFooterText}>Don't have an account? </Text>
+                <Pressable onPress={() => switchAuthMode("signup")}>
+                  <Text style={s.authFooterLink}>Sign Up</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {authMode === "signup" && (
+            <>
+              <Pressable style={s.authBackButton} onPress={() => switchAuthMode("choose")}>
+                <Text style={s.authBackText}>Back</Text>
+              </Pressable>
+              <View style={s.authLogoArea}>
+                <Text style={s.authTitle}>Create account</Text>
+                <Text style={s.authSubtitle}>Join the Shabbat Shalom community</Text>
+              </View>
+
+              <View style={s.authForm}>
+                <TextInput
+                  placeholder="Full name"
+                  value={signupName}
+                  onChangeText={setSignupName}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  editable={!actionLoading}
+                />
+                <GenderPicker value={signupGender} onChange={setSignupGender} />
+                <TextInput
+                  placeholder="Email"
+                  value={signupEmail}
+                  onChangeText={setSignupEmail}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  editable={!actionLoading}
+                />
+                <TextInput
+                  placeholder="Password"
+                  value={signupPassword}
+                  onChangeText={setSignupPassword}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  secureTextEntry
+                  editable={!actionLoading}
+                />
+                <TextInput
+                  placeholder="Confirm password"
+                  value={signupConfirmPassword}
+                  onChangeText={setSignupConfirmPassword}
+                  style={s.authInput}
+                  placeholderTextColor="#999"
+                  secureTextEntry
+                  editable={!actionLoading}
+                />
+                <Pressable
+                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                  onPress={onPressEmailRegister}
+                  disabled={actionLoading}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={s.primaryButtonText}>Create Account</Text>
+                  )}
+                </Pressable>
+              </View>
+
+              {authError ? <Text style={s.errorText}>{authError}</Text> : null}
+
+              <View style={s.authFooter}>
+                <Text style={s.authFooterText}>Already have an account? </Text>
+                <Pressable onPress={() => switchAuthMode("login")}>
+                  <Text style={s.authFooterLink}>Log In</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </ScrollView>
+
+        <Modal visible={forgotPasswordVisible} transparent animationType="fade">
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.cardTitle}>Reset password</Text>
+              {resetSent ? (
+                <>
+                  <Text style={[s.subText, { textAlign: "center" }]}>
+                    A password reset link has been sent to{"\n"}
+                    <Text style={{ fontWeight: "700" }}>{resetEmail || authEmail}</Text>
+                    {"\n\n"}Check your inbox and spam folder.
+                  </Text>
+                  <Pressable
+                    style={s.primaryButton}
+                    onPress={() => {
+                      setForgotPasswordVisible(false);
+                      setResetSent(false);
+                    }}
+                  >
+                    <Text style={s.primaryButtonText}>Done</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={s.subText}>
+                    Enter your email and we'll send you a link to reset your password.
+                  </Text>
+                  <TextInput
+                    placeholder="Email"
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    style={s.input}
+                    placeholderTextColor="#777"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    editable={!actionLoading}
+                  />
+                  <Pressable
+                    style={[s.primaryButton, actionLoading && s.disabled]}
+                    onPress={onPressForgotPassword}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={s.primaryButtonText}>Send reset link</Text>
+                    )}
+                  </Pressable>
+                  <Pressable
+                    style={s.ghostButton}
+                    onPress={() => {
+                      setForgotPasswordVisible(false);
+                      setAuthError(null);
+                    }}
+                  >
+                    <Text style={s.ghostButtonText}>Cancel</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
+
+  if (pendingEmailVerification) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <StatusBar barStyle="dark-content" />
         <View style={s.centered}>
-          <Text style={s.title}>Shabbat Shalom</Text>
-          <Text style={s.subText}>Choose a sign-in method to enter the app.</Text>
+          <Text style={s.title}>Verify your email</Text>
+          <Text style={[s.subText, { textAlign: "center", marginTop: 12 }]}>
+            We sent a verification link to{"\n"}
+            <Text style={{ fontWeight: "700" }}>{user.email ?? "your email"}</Text>
+            {"\n\n"}Open the link to verify your account, then tap the button below.
+          </Text>
           <Pressable
-            style={[s.primaryButton, actionLoading && s.disabled]}
-            onPress={onPressContinueApple}
-            disabled={actionLoading}
+            style={[s.primaryButton, { width: "100%" }, (verificationChecking || actionLoading) && s.disabled]}
+            onPress={onPressCheckVerification}
+            disabled={verificationChecking || actionLoading}
           >
-            <Text style={s.primaryButtonText}>Continue with Apple</Text>
+            {verificationChecking ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={s.primaryButtonText}>I've verified my email</Text>
+            )}
           </Pressable>
           <Pressable
-            style={[s.secondaryButton, actionLoading && s.disabled]}
-            onPress={onPressContinueGoogle}
-            disabled={actionLoading}
+            style={[s.secondaryButton, { width: "100%" }, (actionLoading || resendCooldown > 0) && s.disabled]}
+            onPress={onPressResendVerification}
+            disabled={actionLoading || resendCooldown > 0}
           >
-            <Text style={s.secondaryButtonText}>Continue with Google</Text>
+            <Text style={s.secondaryButtonText}>
+              {resendCooldown > 0
+                ? `Resend available in ${resendCooldown}s`
+                : "Resend verification email"}
+            </Text>
           </Pressable>
-
-          <TextInput
-            placeholder="Email"
-            value={authEmail}
-            onChangeText={setAuthEmail}
-            style={s.input}
-            placeholderTextColor="#777"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            editable={!actionLoading}
-          />
-          <TextInput
-            placeholder="Password"
-            value={authPassword}
-            onChangeText={setAuthPassword}
-            style={s.input}
-            placeholderTextColor="#777"
-            secureTextEntry
-            editable={!actionLoading}
-          />
-          <Pressable
-            style={[s.primaryButton, actionLoading && s.disabled]}
-            onPress={onPressEmailSignIn}
-            disabled={actionLoading}
-          >
-            <Text style={s.primaryButtonText}>Sign in with Email</Text>
-          </Pressable>
-          <Pressable
-            style={[s.secondaryButton, actionLoading && s.disabled]}
-            onPress={onPressEmailRegister}
-            disabled={actionLoading}
-          >
-            <Text style={s.secondaryButtonText}>Create Email Account</Text>
-          </Pressable>
-
-          <TextInput
-            placeholder="Phone number (e.g. +15551234567)"
-            value={authPhone}
-            onChangeText={setAuthPhone}
-            style={s.input}
-            placeholderTextColor="#777"
-            keyboardType="phone-pad"
-            editable={!actionLoading}
-          />
-          <Pressable
-            style={[s.secondaryButton, actionLoading && s.disabled]}
-            onPress={onPressSendPhoneCode}
-            disabled={actionLoading}
-          >
-            <Text style={s.secondaryButtonText}>Send Phone Code</Text>
-          </Pressable>
-          <TextInput
-            placeholder="Verification code"
-            value={authPhoneCode}
-            onChangeText={setAuthPhoneCode}
-            style={s.input}
-            placeholderTextColor="#777"
-            keyboardType="number-pad"
-            editable={!actionLoading}
-          />
-          <Pressable
-            style={[s.primaryButton, actionLoading && s.disabled]}
-            onPress={onPressVerifyPhoneCode}
-            disabled={actionLoading}
-          >
-            <Text style={s.primaryButtonText}>Verify Phone Code</Text>
+          <Pressable style={s.ghostButton} onPress={onPressSignOut}>
+            <Text style={s.ghostButtonText}>Sign out</Text>
           </Pressable>
           {authError ? <Text style={s.errorText}>{authError}</Text> : null}
         </View>
@@ -1870,5 +2253,114 @@ const s = StyleSheet.create({
     borderColor: COLORS.border,
     borderWidth: 1,
     padding: 16,
+  },
+  authScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    paddingVertical: 40,
+  },
+  authLogoArea: {
+    alignItems: "center",
+    marginBottom: 32,
+  },
+  authTitle: {
+    color: COLORS.accent,
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: 0.3,
+  },
+  authSubtitle: {
+    marginTop: 8,
+    color: COLORS.text,
+    fontSize: 15,
+    opacity: 0.6,
+  },
+  authForm: {
+    width: "100%",
+    alignItems: "center",
+    gap: 10,
+  },
+  authInput: {
+    width: "100%",
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    color: COLORS.text,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+  },
+  authDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    marginVertical: 8,
+  },
+  authDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  authDividerText: {
+    marginHorizontal: 12,
+    color: COLORS.text,
+    fontSize: 12,
+    opacity: 0.5,
+  },
+  authSocialRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  authSocialButton: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  authSocialButtonText: {
+    color: COLORS.text,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  authBackButton: {
+    alignSelf: "flex-start",
+    marginBottom: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  authBackText: {
+    color: COLORS.accent,
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  authLinkButton: {
+    alignSelf: "flex-end",
+    paddingVertical: 2,
+  },
+  authLinkText: {
+    color: COLORS.accent,
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  authFooter: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 24,
+  },
+  authFooterText: {
+    color: COLORS.text,
+    fontSize: 14,
+    opacity: 0.6,
+  },
+  authFooterLink: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: "700",
   },
 });
