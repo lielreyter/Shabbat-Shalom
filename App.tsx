@@ -2,10 +2,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
   Alert,
+  Animated,
   Easing,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
   LayoutAnimation,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -30,7 +34,11 @@ import {
 import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
 import { getCurrentLocation } from "./src/location/locationService";
-import { geocodeCity, geocodeCitySuggestions, GeocodingResult } from "./src/location/geocodingService";
+import {
+  geocodeCity,
+  geocodeCitySuggestions,
+  GeocodingResult,
+} from "./src/location/geocodingService";
 import { LocationResult } from "./src/location/locationTypes";
 import {
   cancelReminder,
@@ -76,23 +84,51 @@ import {
   rejectJoinRequest,
   setCongregationJoinPolicy,
 } from "./src/congregation/congregationService";
-import { Congregation, NearbyCongregation } from "./src/congregation/congregationTypes";
+import {
+  Congregation,
+  NearbyCongregation,
+} from "./src/congregation/congregationTypes";
+import {
+  searchUsersByName,
+  sendFriendRequest,
+  acceptFriendRequest,
+  rejectFriendRequest,
+  getFriendProfiles,
+} from "./src/friends/friendsService";
+import { getParashaInfo, getChabadParashaUrl } from "./src/parasha/parashaData";
+import {
+  sendCongregationMessage,
+  subscribeToCongregationMessages,
+  type CongregationMessage,
+} from "./src/congregation/congregationMessages";
 
-const COLORS = {
-  background: "#F9EFD5",
-  accent: "#1F2C5D",
-  text: "#000000",
+/* ─── theme ──────────────────────────────────────────────────── */
+
+const C = {
+  bg: "#FFFFFF",
+  primary: "#2563EB",
+  primaryLight: "#DBEAFE",
+  primaryDark: "#1E40AF",
+  text: "#1E293B",
+  textSecondary: "#64748B",
+  textLight: "#94A3B8",
+  border: "#E2E8F0",
+  surface: "#F1F5F9",
   card: "#FFFFFF",
-  border: "#D7CBA8",
-  danger: "#B3261E",
+  danger: "#EF4444",
+  dangerLight: "#FEE2E2",
+  success: "#10B981",
+  successLight: "#D1FAE5",
+  streak: "#F59E0B",
+  streakBg: "#FEF3C7",
 };
 
-const RESTRICTIONS_KEY = "restrictions:v1";
-const SHABBAT_UI_STATE_KEY = "shabbatUiState:v1";
-const GENDER_OPTIONS = ["Male", "Female"] as const;
-type GenderOption = (typeof GENDER_OPTIONS)[number];
+/* ─── types ──────────────────────────────────────────────────── */
 
-type TabKey = "account" | "restrictions" | "home" | "congregations" | "notifications";
+type TabKey = "home" | "social" | "parasha";
+type SocialSubTab = "friends" | "chat" | "buddies";
+type BlockLevel = "full" | "medium" | "custom" | "none";
+type GenderOption = "Male" | "Female";
 
 type RestrictionSetting = {
   id: string;
@@ -109,31 +145,28 @@ type ShabbatUiState = {
   firstRestrictionPromptWeekId: string | null;
 };
 
+/* ─── constants ──────────────────────────────────────────────── */
+
+const RESTRICTIONS_KEY = "restrictions:v1";
+const SHABBAT_UI_STATE_KEY = "shabbatUiState:v1";
+const BLOCK_LEVEL_KEY = "blockLevel:v1";
+const CUSTOM_BLOCKS_KEY = "customBlocks:v1";
+const GENDER_OPTIONS: GenderOption[] = ["Male", "Female"];
+
+const WAKE_TIMES = [
+  "5:00 AM", "5:30 AM", "6:00 AM", "6:30 AM", "7:00 AM",
+  "7:30 AM", "8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 AM",
+];
+
+const BED_TIMES = [
+  "8:00 PM", "8:30 PM", "9:00 PM", "9:30 PM", "10:00 PM",
+  "10:30 PM", "11:00 PM", "11:30 PM", "12:00 AM",
+];
+
 const defaultRestrictions: RestrictionSetting[] = [
-  {
-    id: "social",
-    label: "Social apps",
-    enabled: true,
-    currentStreak: 0,
-    longestStreak: 0,
-    lastWeekId: null,
-  },
-  {
-    id: "video",
-    label: "Streaming apps",
-    enabled: true,
-    currentStreak: 0,
-    longestStreak: 0,
-    lastWeekId: null,
-  },
-  {
-    id: "games",
-    label: "Games",
-    enabled: true,
-    currentStreak: 0,
-    longestStreak: 0,
-    lastWeekId: null,
-  },
+  { id: "social", label: "Social apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
+  { id: "video", label: "Streaming apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
+  { id: "games", label: "Games", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
 ];
 
 const defaultShabbatUiState: ShabbatUiState = {
@@ -142,9 +175,12 @@ const defaultShabbatUiState: ShabbatUiState = {
   firstRestrictionPromptWeekId: null,
 };
 
-const formatTime = (date: Date): string => {
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-};
+const defaultCustomBlocks = { social: true, games: true, streaming: false };
+
+/* ─── helpers ────────────────────────────────────────────────── */
+
+const formatTime = (date: Date): string =>
+  date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 const formatTime24 = (date: Date): string => {
   const h = date.getHours().toString().padStart(2, "0");
@@ -158,25 +194,20 @@ const formatDay = (date: Date): string => {
 };
 
 const cleanCity = (raw: string | null | undefined): string => {
-  if (!raw) {
-    return "Unknown city";
-  }
+  if (!raw) return "Unknown city";
   const first = raw.split(",")[0]?.trim();
   return first || raw.trim();
 };
 
 const errorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+  if (error instanceof Error && error.message) return error.message;
   if (
     error &&
     typeof error === "object" &&
     "message" in error &&
     typeof (error as { message?: unknown }).message === "string"
-  ) {
+  )
     return (error as { message: string }).message;
-  }
   return fallback;
 };
 
@@ -194,8 +225,17 @@ const withTimeout = async <T,>(
   return Promise.race([promise, timeoutPromise]);
 };
 
+const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string; emoji: string }> = {
+  full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!", emoji: "🛡️" },
+  medium: { title: "Medium", desc: "Block social media & games. Start reclaiming your Shabbat.", emoji: "⚡" },
+  custom: { title: "Custom", desc: "Choose which apps to block during Shabbat.", emoji: "🎯" },
+  none: { title: "No Block", desc: "No apps blocked. Keep Shabbat in your own way.", emoji: "🕊️" },
+};
+
+/* ─── app ─────────────────────────────────────────────────────── */
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>("home");
+  /* ── auth state ── */
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -205,9 +245,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authPhone, setAuthPhone] = useState("");
   const [authPhoneCode, setAuthPhoneCode] = useState("");
-  const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(
-    null
-  );
+  const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(null);
   const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
   const [signupName, setSignupName] = useState("");
   const [signupGender, setSignupGender] = useState<GenderOption | "">("");
@@ -216,100 +254,95 @@ export default function App() {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
   const [signupPhone, setSignupPhone] = useState("");
   const [signupPhoneCode, setSignupPhoneCode] = useState("");
-  const [signupPhoneConfirmation, setSignupPhoneConfirmation] =
-    useState<PhoneAuthConfirmation | null>(null);
+  const [signupPhoneConfirmation, setSignupPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(null);
   const [pendingEmailVerification, setPendingEmailVerification] = useState(false);
-  const [pendingSignupData, setPendingSignupData] = useState<{
-    name: string;
-    gender: string;
-  } | null>(null);
+  const [pendingSignupData, setPendingSignupData] = useState<{ name: string; gender: string } | null>(null);
   const [verificationChecking, setVerificationChecking] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
-  const [resetEmail, setResetEmail] = useState("");
+  const [resetEmailValue, setResetEmailValue] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [showSignupConfirm, setShowSignupConfirm] = useState(false);
   const [city, setCity] = useState("Unknown city");
 
-  const [restrictions, setRestrictions] =
-    useState<RestrictionSetting[]>(defaultRestrictions);
-  const [shabbatUiState, setShabbatUiState] =
-    useState<ShabbatUiState>(defaultShabbatUiState);
+  /* ── tab state ── */
+  const [activeTab, setActiveTab] = useState<TabKey>("home");
+  const [socialSubTab, setSocialSubTab] = useState<SocialSubTab>("friends");
 
+  /* ── profile / settings ── */
+  const [profileName, setProfileName] = useState("");
+  const [profileGender, setProfileGender] = useState<GenderOption | "">("");
+  const [settingsVisible, setSettingsVisible] = useState(false);
+
+  /* ── shabbat / restrictions ── */
+  const [restrictions, setRestrictions] = useState<RestrictionSetting[]>(defaultRestrictions);
+  const [shabbatUiState, setShabbatUiState] = useState<ShabbatUiState>(defaultShabbatUiState);
+  const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
+  const [customBlocks, setCustomBlocks] = useState(defaultCustomBlocks);
   const [intentDraft, setIntentDraft] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
 
-  const [nearbyCongregations, setNearbyCongregations] = useState<NearbyCongregation[]>(
-    []
-  );
+  /* ── congregation ── */
+  const [nearbyCongregations, setNearbyCongregations] = useState<NearbyCongregation[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [newCongregationName, setNewCongregationName] = useState("");
-  const [newCongregationCity, setNewCongregationCity] = useState("");
+  const [currentLocation, setCurrentLocation] = useState<LocationResult | null>(null);
+  const [currentCongregationName, setCurrentCongregationName] = useState<string | null>(null);
+  const [currentCongregation, setCurrentCongregation] = useState<Congregation | null>(null);
+  const [congregationMembers, setCongregationMembers] = useState<UserProfile[]>([]);
+  const [pendingMembers, setPendingMembers] = useState<UserProfile[]>([]);
+  const [joinCongregationVisible, setJoinCongregationVisible] = useState(false);
   const [congregationCitySearch, setCongregationCitySearch] = useState("");
   const [citySuggestions, setCitySuggestions] = useState<GeocodingResult[]>([]);
   const citySearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [currentLocation, setCurrentLocation] = useState<LocationResult | null>(null);
-  const [currentCongregationName, setCurrentCongregationName] = useState<string | null>(
-    null
-  );
-  const [currentCongregation, setCurrentCongregation] =
-    useState<Congregation | null>(null);
-  const [congregationMembers, setCongregationMembers] = useState<UserProfile[]>([]);
-  const [pendingMembers, setPendingMembers] = useState<UserProfile[]>([]);
-  const [lastJoinRequestStatus, setLastJoinRequestStatus] = useState<
-    "JOINED" | "REQUESTED" | null
-  >(null);
 
-  const [profileName, setProfileName] = useState("");
-  const [profileGender, setProfileGender] = useState<GenderOption | "">("");
+  /* ── friends ── */
+  const [friends, setFriends] = useState<UserProfile[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<UserProfile[]>([]);
+  const [addFriendVisible, setAddFriendVisible] = useState(false);
+  const [friendSearchQuery, setFriendSearchQuery] = useState("");
+  const [friendSearchResults, setFriendSearchResults] = useState<UserProfile[]>([]);
+  const [friendSearching, setFriendSearching] = useState(false);
+  const friendSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* ── chat ── */
+  const [chatMessages, setChatMessages] = useState<CongregationMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+
+  /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
 
-  const {
-    shabbatTimes,
-    loading: timesLoading,
-    error: timesError,
-    refresh: refreshTimes,
-  } = useShabbatTimes();
-  const {
-    status: modeStatus,
-    isActive: isModeActive,
-    start: startMode,
-    end: endMode,
-    breakShabbat,
-  } = useShabbatMode();
+  /* ── hooks ── */
+  const { shabbatTimes, loading: timesLoading, error: timesError, refresh: refreshTimes } = useShabbatTimes();
+  const { status: modeStatus, isActive: isModeActive, start: startMode, end: endMode, breakShabbat } = useShabbatMode();
 
   const weekId = useMemo(() => {
     const existing = getCurrentWeekId();
-    if (existing) {
-      return existing;
-    }
-    if (shabbatTimes) {
-      return `week-${shabbatTimes.shabbatStart.toISOString().slice(0, 10)}`;
-    }
+    if (existing) return existing;
+    if (shabbatTimes) return `week-${shabbatTimes.shabbatStart.toISOString().slice(0, 10)}`;
     return `week-${new Date().toISOString().slice(0, 10)}`;
   }, [shabbatTimes]);
 
   const isShabbatNow = useMemo(() => {
-    if (!shabbatTimes) {
-      return false;
-    }
+    if (!shabbatTimes) return false;
     const now = Date.now();
-    return (
-      now >= shabbatTimes.shabbatStart.getTime() &&
-      now < shabbatTimes.shabbatEnd.getTime()
-    );
+    return now >= shabbatTimes.shabbatStart.getTime() && now < shabbatTimes.shabbatEnd.getTime();
   }, [shabbatTimes]);
 
   const homeCity = useMemo(() => {
-    if (city !== "Unknown city") {
-      return cleanCity(city);
-    }
+    if (city !== "Unknown city") return cleanCity(city);
     return cleanCity(shabbatTimes?.cityName);
   }, [city, shabbatTimes?.cityName]);
 
+  const parashaInfo = useMemo(() => {
+    if (!shabbatTimes?.parsha) return null;
+    return getParashaInfo(shabbatTimes.parsha);
+  }, [shabbatTimes?.parsha]);
+
+  /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
     setShabbatUiState(next);
     await AsyncStorage.setItem(SHABBAT_UI_STATE_KEY, JSON.stringify(next));
@@ -320,26 +353,29 @@ export default function App() {
     await AsyncStorage.setItem(RESTRICTIONS_KEY, JSON.stringify(next));
   }, []);
 
+  const saveBlockLevel = useCallback(async (level: BlockLevel) => {
+    setBlockLevel(level);
+    await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
+  }, []);
+
+  const saveCustomBlocks = useCallback(async (next: typeof defaultCustomBlocks) => {
+    setCustomBlocks(next);
+    await AsyncStorage.setItem(CUSTOM_BLOCKS_KEY, JSON.stringify(next));
+  }, []);
+
+  /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawRestrictions, rawUiState] = await Promise.all([
+      const [rawR, rawU, rawB, rawCb] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
+        AsyncStorage.getItem(BLOCK_LEVEL_KEY),
+        AsyncStorage.getItem(CUSTOM_BLOCKS_KEY),
       ]);
-      if (rawRestrictions) {
-        try {
-          setRestrictions(JSON.parse(rawRestrictions) as RestrictionSetting[]);
-        } catch {
-          setRestrictions(defaultRestrictions);
-        }
-      }
-      if (rawUiState) {
-        try {
-          setShabbatUiState(JSON.parse(rawUiState) as ShabbatUiState);
-        } catch {
-          setShabbatUiState(defaultShabbatUiState);
-        }
-      }
+      if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
+      if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
+      if (rawB && ["full", "medium", "custom", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
+      if (rawCb) { try { setCustomBlocks(JSON.parse(rawCb)); } catch { /* use defaults */ } }
     };
     loadLocal().catch(() => {});
   }, []);
@@ -350,16 +386,10 @@ export default function App() {
       setAuthLoading(false);
       if (profile) {
         setProfileName(profile.displayName ?? "");
-        if (profile.gender === "Male" || profile.gender === "Female") {
-          setProfileGender(profile.gender);
-        } else {
-          setProfileGender("");
-        }
-        if (isEmailProvider() && !isCurrentUserEmailVerified()) {
-          setPendingEmailVerification(true);
-        } else {
-          setPendingEmailVerification(false);
-        }
+        if (profile.gender === "Male" || profile.gender === "Female") setProfileGender(profile.gender);
+        else setProfileGender("");
+        if (isEmailProvider() && !isCurrentUserEmailVerified()) setPendingEmailVerification(true);
+        else setPendingEmailVerification(false);
       } else {
         setPendingEmailVerification(false);
       }
@@ -368,18 +398,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (resendCooldown <= 0) {
-      return;
-    }
+    if (resendCooldown <= 0) return;
     const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
   }, [resendCooldown]);
 
   useEffect(() => {
-    if (
-      Platform.OS === "android" &&
-      UIManager.setLayoutAnimationEnabledExperimental
-    ) {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
@@ -388,7 +413,7 @@ export default function App() {
     tabContentAnim.setValue(0);
     Animated.timing(tabContentAnim, {
       toValue: 1,
-      duration: 220,
+      duration: 200,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
@@ -400,7 +425,7 @@ export default function App() {
         Alert.alert(
           "Pause and reflect",
           user?.shabbatIntentText
-            ? `Your intention:\n\n${user.shabbatIntentText}\n\nDo you still want to break Shabbat?`
+            ? `Your intention:\n\n"${user.shabbatIntentText}"\n\nDo you still want to break Shabbat?`
             : "Do you still want to break Shabbat?",
           [
             { text: "Go back", style: "cancel", onPress: () => resolve("ABORT") },
@@ -413,21 +438,15 @@ export default function App() {
     return () => clearIntentFlowHandler();
   }, [user?.shabbatIntentText]);
 
+  /* ── load location & congregations ── */
   const loadLocationAndCongregations = useCallback(async () => {
-    if (!user) {
-      return;
-    }
+    if (!user) return;
     setNearbyLoading(true);
     setNearbyError(null);
     try {
       const location = await getCurrentLocation();
       setCurrentLocation(location);
-      if (location.city) {
-        setCity(location.city);
-      }
-      if (!newCongregationCity && location.city) {
-        setNewCongregationCity(location.city);
-      }
+      if (location.city) setCity(location.city);
       const nearby = await listNearbyCongregations(location, 8, 50);
       setNearbyCongregations(nearby);
     } catch (error) {
@@ -436,62 +455,10 @@ export default function App() {
     } finally {
       setNearbyLoading(false);
     }
-  }, [newCongregationCity, user]);
-
-  const searchCongregationsByCity = useCallback(
-    async (geo: GeocodingResult) => {
-      setNearbyLoading(true);
-      setNearbyError(null);
-      setCitySuggestions([]);
-      try {
-        const fakeLocation: LocationResult = {
-          city: geo.displayName.split(",")[0]?.trim() ?? geo.displayName,
-          latitude: geo.latitude,
-          longitude: geo.longitude,
-          timezone: currentLocation?.timezone ?? "UTC",
-          source: "manual",
-          fetchedAt: new Date(),
-        };
-        const nearby = await listNearbyCongregations(fakeLocation, 8, 50);
-        setNearbyCongregations(nearby);
-      } catch (error) {
-        setNearbyError(errorMessage(error, "Search failed."));
-        setNearbyCongregations([]);
-      } finally {
-        setNearbyLoading(false);
-      }
-    },
-    [currentLocation?.timezone]
-  );
-
-  const onCitySearchChange = useCallback(
-    (text: string) => {
-      setCongregationCitySearch(text);
-      if (citySearchTimer.current) {
-        clearTimeout(citySearchTimer.current);
-      }
-      if (text.trim().length < 2) {
-        setCitySuggestions([]);
-        return;
-      }
-      citySearchTimer.current = setTimeout(async () => {
-        const results = await geocodeCitySuggestions(text, 5);
-        setCitySuggestions(results);
-      }, 400);
-    },
-    []
-  );
-
-  const onClearCitySearch = useCallback(() => {
-    setCongregationCitySearch("");
-    setCitySuggestions([]);
-    loadLocationAndCongregations().catch(() => {});
-  }, [loadLocationAndCongregations]);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
+    if (!user) return;
     loadLocationAndCongregations().catch(() => {});
   }, [loadLocationAndCongregations, user]);
 
@@ -507,30 +474,22 @@ export default function App() {
       .then(async (found) => {
         setCurrentCongregation(found);
         setCurrentCongregationName(found?.name ?? "Unknown");
-        if (!found) {
-          return;
-        }
+        if (!found) return;
         const members = await listCongregationMembers(user.congregationId!);
         setCongregationMembers(members);
         const pending = await Promise.all(found.pendingUids.map((uid) => getUserProfile(uid)));
-        setPendingMembers(
-          pending.filter((profile): profile is UserProfile => Boolean(profile))
-        );
+        setPendingMembers(pending.filter((p): p is UserProfile => Boolean(p)));
       })
       .catch(() => setCurrentCongregationName("Unknown"));
   }, [user?.congregationId]);
 
   useEffect(() => {
-    if (!shabbatTimes || !user) {
-      return;
-    }
+    if (!shabbatTimes || !user) return;
     scheduleShabbatMode(shabbatTimes).catch(() => {});
   }, [shabbatTimes, user]);
 
   useEffect(() => {
-    if (!isShabbatNow || !user) {
-      return;
-    }
+    if (!isShabbatNow || !user) return;
     const hasPrompted = shabbatUiState.lastIntentPromptWeekId === weekId;
     const optedOut = shabbatUiState.optedOutWeekId === weekId;
     if (!hasPrompted && !optedOut) {
@@ -539,31 +498,48 @@ export default function App() {
     }
   }, [isShabbatNow, shabbatUiState.lastIntentPromptWeekId, shabbatUiState.optedOutWeekId, user, weekId]);
 
+  /* ── load friends ── */
+  useEffect(() => {
+    if (!user) return;
+    const loadFriends = async () => {
+      if (user.friendUids.length > 0) {
+        const profiles = await getFriendProfiles(user.friendUids);
+        setFriends(profiles.sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0)));
+      } else {
+        setFriends([]);
+      }
+      if (user.pendingFriendUids.length > 0) {
+        const profiles = await getFriendProfiles(user.pendingFriendUids);
+        setPendingRequests(profiles);
+      } else {
+        setPendingRequests([]);
+      }
+    };
+    loadFriends().catch(() => {});
+  }, [user?.friendUids, user?.pendingFriendUids, user]);
+
+  /* ── chat subscription ── */
+  useEffect(() => {
+    if (!user?.congregationId || socialSubTab !== "chat") return;
+    const unsubscribe = subscribeToCongregationMessages(user.congregationId, setChatMessages);
+    return () => unsubscribe();
+  }, [user?.congregationId, socialSubTab]);
+
+  /* ── restriction week outcomes ── */
   const applyRestrictionWeekOutcome = useCallback(
     async (kept: boolean) => {
-      const next = restrictions.map((restriction) => {
-        if (!restriction.enabled) {
-          return restriction;
-        }
-        if (restriction.lastWeekId === weekId) {
-          return restriction;
-        }
-        if (!kept) {
-          return { ...restriction, currentStreak: 0, lastWeekId: weekId };
-        }
-        const nextCurrent = restriction.currentStreak + 1;
-        return {
-          ...restriction,
-          currentStreak: nextCurrent,
-          longestStreak: Math.max(restriction.longestStreak, nextCurrent),
-          lastWeekId: weekId,
-        };
+      const next = restrictions.map((r) => {
+        if (!r.enabled || r.lastWeekId === weekId) return r;
+        if (!kept) return { ...r, currentStreak: 0, lastWeekId: weekId };
+        const nextC = r.currentStreak + 1;
+        return { ...r, currentStreak: nextC, longestStreak: Math.max(r.longestStreak, nextC), lastWeekId: weekId };
       });
       await saveRestrictions(next);
     },
     [restrictions, saveRestrictions, weekId]
   );
 
+  /* ── auth callbacks ── */
   const runAuthAction = useCallback(async (action: () => Promise<UserProfile>) => {
     setAuthError(null);
     setActionLoading(true);
@@ -577,26 +553,16 @@ export default function App() {
     }
   }, []);
 
-  const onPressContinueApple = useCallback(async () => {
-    await runAuthAction(signInWithApple);
-  }, [runAuthAction]);
-
-  const onPressContinueGoogle = useCallback(async () => {
-    await runAuthAction(signInWithGoogle);
-  }, [runAuthAction]);
+  const onPressContinueApple = useCallback(() => runAuthAction(signInWithApple), [runAuthAction]);
+  const onPressContinueGoogle = useCallback(() => runAuthAction(signInWithGoogle), [runAuthAction]);
 
   const onPressEmailSignIn = useCallback(async () => {
     setAuthError(null);
     setActionLoading(true);
     try {
-      const profile = await signInWithEmailPassword({
-        email: authEmail,
-        password: authPassword,
-      });
+      const profile = await signInWithEmailPassword({ email: authEmail, password: authPassword });
       setUser(profile);
-      if (isEmailProvider() && !isCurrentUserEmailVerified()) {
-        setPendingEmailVerification(true);
-      }
+      if (isEmailProvider() && !isCurrentUserEmailVerified()) setPendingEmailVerification(true);
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to sign in."));
     } finally {
@@ -608,37 +574,16 @@ export default function App() {
     const name = signupName.trim();
     const gender = signupGender;
     const email = signupEmail.trim();
-    if (!name) {
-      setAuthError("Please enter your name.");
-      return;
-    }
-    if (!gender) {
-      setAuthError("Please select your gender.");
-      return;
-    }
-    if (!email) {
-      setAuthError("Please enter your email.");
-      return;
-    }
-    if (!signupPassword) {
-      setAuthError("Please enter a password.");
-      return;
-    }
-    if (signupPassword.length < 6) {
-      setAuthError("Password must be at least 6 characters.");
-      return;
-    }
-    if (signupPassword !== signupConfirmPassword) {
-      setAuthError("Passwords do not match.");
-      return;
-    }
+    if (!name) { setAuthError("Please enter your name."); return; }
+    if (!gender) { setAuthError("Please select your gender."); return; }
+    if (!email) { setAuthError("Please enter your email."); return; }
+    if (!signupPassword) { setAuthError("Please enter a password."); return; }
+    if (signupPassword.length < 6) { setAuthError("Password must be at least 6 characters."); return; }
+    if (signupPassword !== signupConfirmPassword) { setAuthError("Passwords do not match."); return; }
     setAuthError(null);
     setActionLoading(true);
     try {
-      const profile = await registerWithEmailPassword({
-        email,
-        password: signupPassword,
-      });
+      const profile = await registerWithEmailPassword({ email, password: signupPassword });
       setUser({ ...profile, displayName: name, gender });
       setPendingSignupData({ name, gender });
       await sendVerification();
@@ -666,33 +611,15 @@ export default function App() {
   }, [authPhone]);
 
   const onPressVerifyPhoneCode = useCallback(async () => {
-    if (!phoneConfirmation) {
-      setAuthError("Please request a verification code first.");
-      return;
-    }
-    await runAuthAction(() =>
-      confirmPhoneSignIn({
-        confirmation: phoneConfirmation,
-        code: authPhoneCode,
-      })
-    );
+    if (!phoneConfirmation) { setAuthError("Please request a verification code first."); return; }
+    await runAuthAction(() => confirmPhoneSignIn({ confirmation: phoneConfirmation, code: authPhoneCode }));
   }, [authPhoneCode, phoneConfirmation, runAuthAction]);
 
   const onPressSignupSendPhoneCode = useCallback(async () => {
     const name = signupName.trim();
-    const gender = signupGender;
-    if (!name) {
-      setAuthError("Please enter your name.");
-      return;
-    }
-    if (!gender) {
-      setAuthError("Please select your gender.");
-      return;
-    }
-    if (!signupPhone.trim()) {
-      setAuthError("Please enter your phone number.");
-      return;
-    }
+    if (!name) { setAuthError("Please enter your name."); return; }
+    if (!signupGender) { setAuthError("Please select your gender."); return; }
+    if (!signupPhone.trim()) { setAuthError("Please enter your phone number."); return; }
     setAuthError(null);
     setActionLoading(true);
     try {
@@ -707,23 +634,12 @@ export default function App() {
   }, [signupGender, signupName, signupPhone]);
 
   const onPressSignupVerifyPhoneCode = useCallback(async () => {
-    if (!signupPhoneConfirmation) {
-      setAuthError("Please request a verification code first.");
-      return;
-    }
-    const name = signupName.trim();
-    const gender = signupGender;
+    if (!signupPhoneConfirmation) { setAuthError("Please request a verification code first."); return; }
     setAuthError(null);
     setActionLoading(true);
     try {
-      await confirmPhoneSignUp({
-        confirmation: signupPhoneConfirmation,
-        code: signupPhoneCode,
-      });
-      const profile = await createProfileAfterVerification({
-        displayName: name,
-        gender: gender as string,
-      });
+      await confirmPhoneSignUp({ confirmation: signupPhoneConfirmation, code: signupPhoneCode });
+      const profile = await createProfileAfterVerification({ displayName: signupName.trim(), gender: signupGender });
       setUser(profile);
       setSignupPhoneConfirmation(null);
       setSignupPhoneCode("");
@@ -737,11 +653,8 @@ export default function App() {
   const onPressSignOut = useCallback(async () => {
     setActionLoading(true);
     try {
-      if (pendingEmailVerification && isEmailProvider() && !isCurrentUserEmailVerified()) {
-        await deleteCurrentUser();
-      } else {
-        await signOut();
-      }
+      if (pendingEmailVerification && isEmailProvider() && !isCurrentUserEmailVerified()) await deleteCurrentUser();
+      else await signOut();
       setUser(null);
       setPendingEmailVerification(false);
       setPendingSignupData(null);
@@ -756,7 +669,7 @@ export default function App() {
     try {
       await sendVerification();
       setResendCooldown(60);
-      Alert.alert("Email sent", "A new verification email has been sent. Check your inbox and spam folder.");
+      Alert.alert("Email sent", "A new verification email has been sent.");
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to resend verification email."));
     } finally {
@@ -771,16 +684,13 @@ export default function App() {
       const verified = await checkEmailVerified();
       if (verified) {
         if (pendingSignupData) {
-          const profile = await createProfileAfterVerification({
-            displayName: pendingSignupData.name,
-            gender: pendingSignupData.gender,
-          });
+          const profile = await createProfileAfterVerification({ displayName: pendingSignupData.name, gender: pendingSignupData.gender });
           setUser(profile);
           setPendingSignupData(null);
         }
         setPendingEmailVerification(false);
       } else {
-        setAuthError("Email not yet verified. Please check your inbox and click the verification link.");
+        setAuthError("Email not yet verified. Please check your inbox.");
       }
     } catch (error) {
       setAuthError(errorMessage(error, "Could not check verification status."));
@@ -793,29 +703,25 @@ export default function App() {
     setAuthError(null);
     setActionLoading(true);
     try {
-      await resetPassword(resetEmail || authEmail);
+      await resetPassword(resetEmailValue || authEmail);
       setResetSent(true);
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to send password reset email."));
     } finally {
       setActionLoading(false);
     }
-  }, [authEmail, resetEmail]);
+  }, [authEmail, resetEmailValue]);
 
   const switchAuthMode = useCallback((mode: "choose" | "login" | "signup") => {
     setAuthError(null);
     setAuthMode(mode);
   }, []);
 
+  /* ── shabbat mode callbacks ── */
   const onToggleMode = useCallback(async () => {
-    if (!user) {
-      return;
-    }
+    if (!user) return;
     if (!isModeActive && !isShabbatNow) {
-      Alert.alert(
-        "Shabbat mode",
-        "Shabbat mode can only be activated during Shabbat."
-      );
+      Alert.alert("Shabbat mode", "Shabbat mode can only be activated during Shabbat.");
       return;
     }
     setActionLoading(true);
@@ -833,20 +739,10 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [
-    applyRestrictionWeekOutcome,
-    endMode,
-    isModeActive,
-    isShabbatNow,
-    startMode,
-    user,
-    weekId,
-  ]);
+  }, [applyRestrictionWeekOutcome, endMode, isModeActive, isShabbatNow, startMode, user, weekId]);
 
   const onBreakShabbatNow = useCallback(async () => {
-    if (!user) {
-      return;
-    }
+    if (!user) return;
     setActionLoading(true);
     try {
       const result = await breakShabbat();
@@ -862,117 +758,182 @@ export default function App() {
     }
   }, [applyRestrictionWeekOutcome, breakShabbat, user, weekId]);
 
-  const onToggleRestriction = useCallback(
-    async (id: string) => {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      const next = restrictions.map((item) =>
-        item.id === id ? { ...item, enabled: !item.enabled } : item
-      );
-      await saveRestrictions(next);
-    },
-    [restrictions, saveRestrictions]
-  );
+  /* ── profile callbacks ── */
+  const onSaveProfile = useCallback(async () => {
+    if (!user) return;
+    const nextName = profileName.trim();
+    const nextGender = profileGender;
+    if (!nextName || !nextGender) { Alert.alert("Profile", "Name and gender are required."); return; }
+    setActionLoading(true);
+    try {
+      if (user.uid.startsWith("dev-local-")) {
+        setUser((prev) => prev ? { ...prev, displayName: nextName, gender: nextGender } : prev);
+        return;
+      }
+      try {
+        const updated = await withTimeout(updateUserProfile(user.uid, { displayName: nextName, gender: nextGender }), 6000, "Profile save timed out.");
+        setUser(updated);
+      } catch {
+        setUser((prev) => prev ? { ...prev, displayName: nextName, gender: nextGender } : prev);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }, [profileGender, profileName, user]);
 
-  const onSimulateRestrictedOpen = useCallback(
-    async (restriction: RestrictionSetting) => {
-      if (!restriction.enabled) {
-        Alert.alert("Allowed", `${restriction.label} is not restricted.`);
-        return;
+  /* ── reminder callbacks ── */
+  const onToggleMorningReminder = useCallback(async () => {
+    if (!user || !shabbatTimes) return;
+    const next = !user.wantsMorningReminders;
+    setActionLoading(true);
+    try {
+      if (next) {
+        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: user.wakeUpTime ?? "07:00", title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
+      } else {
+        await cancelReminder(ReminderType.TEFILLIN);
       }
-      if (!isShabbatNow) {
-        Alert.alert("Allowed", "It is not currently Shabbat.");
-        return;
-      }
-      if (shabbatUiState.optedOutWeekId === weekId) {
-        Alert.alert("Not keeping this week", "You opted out for this week.");
-        return;
-      }
-      if (shabbatUiState.firstRestrictionPromptWeekId !== weekId) {
-        const intent =
-          user?.shabbatIntentText ??
-          "You chose to keep Shabbat with intention this week.";
-        Alert.alert(
-          "Pause and remember",
-          `Your intention:\n\n${intent}\n\nStay strong.`,
-          [{ text: "Continue" }]
-        );
-        await saveShabbatUiState({
-          ...shabbatUiState,
-          firstRestrictionPromptWeekId: weekId,
-        });
-        return;
-      }
-      Alert.alert("Blocked", `${restriction.label} is blocked during Shabbat.`);
-    },
-    [isShabbatNow, saveShabbatUiState, shabbatUiState, user?.shabbatIntentText, weekId]
-  );
+      const updated = await updateUserProfile(user.uid, { wantsMorningReminders: next });
+      setUser(updated);
+    } catch (error) {
+      Alert.alert("Reminder", errorMessage(error, "Failed to update."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [shabbatTimes, user]);
 
+  const onToggleShabbatReminder = useCallback(async () => {
+    if (!user || !shabbatTimes) return;
+    const next = !user.wantsShabbatReminders;
+    setActionLoading(true);
+    try {
+      if (next) {
+        const reminderDate = new Date(shabbatTimes.shabbatStart.getTime() - 15 * 60000);
+        await scheduleNextReminder({ type: ReminderType.SHABBAT_PREP, enabled: true, time: formatTime24(reminderDate), title: "Shabbat starts soon", body: "Shabbat starts in about 15 minutes." }, shabbatTimes);
+      } else {
+        await cancelReminder(ReminderType.SHABBAT_PREP);
+      }
+      const updated = await updateUserProfile(user.uid, { wantsShabbatReminders: next });
+      setUser(updated);
+    } catch (error) {
+      Alert.alert("Reminder", errorMessage(error, "Failed to update."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [shabbatTimes, user]);
+
+  const onToggleModehAni = useCallback(async () => {
+    if (!user) return;
+    const next = !user.wantsModehAniReminder;
+    setActionLoading(true);
+    try {
+      const updated = await updateUserProfile(user.uid, { wantsModehAniReminder: next });
+      setUser(updated);
+    } catch (error) {
+      Alert.alert("Reminder", errorMessage(error, "Failed to update."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [user]);
+
+  const onToggleShema = useCallback(async () => {
+    if (!user) return;
+    const next = !user.wantsShemaReminder;
+    setActionLoading(true);
+    try {
+      const updated = await updateUserProfile(user.uid, { wantsShemaReminder: next });
+      setUser(updated);
+    } catch (error) {
+      Alert.alert("Reminder", errorMessage(error, "Failed to update."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [user]);
+
+  const onSetWakeTime = useCallback(async (time: string) => {
+    if (!user) return;
+    try {
+      const updated = await updateUserProfile(user.uid, { wakeUpTime: time });
+      setUser(updated);
+    } catch { /* keep going */ }
+  }, [user]);
+
+  const onSetBedTime = useCallback(async (time: string) => {
+    if (!user) return;
+    try {
+      const updated = await updateUserProfile(user.uid, { bedTime: time });
+      setUser(updated);
+    } catch { /* keep going */ }
+  }, [user]);
+
+  /* ── intent callbacks ── */
+  const onSubmitIntent = useCallback(async () => {
+    if (!user) return;
+    const text = intentDraft.trim();
+    if (!text) { Alert.alert("Intent required", "Please write your intention for this week."); return; }
+    setActionLoading(true);
+    try {
+      const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
+      setUser(updated);
+      await saveShabbatUiState({ ...shabbatUiState, lastIntentPromptWeekId: weekId });
+      setIntentModalVisible(false);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [intentDraft, saveShabbatUiState, shabbatUiState, user, weekId]);
+
+  const onOptOutThisWeek = useCallback(async () => {
+    if (!user) return;
+    setActionLoading(true);
+    try {
+      const updated = await recordBrokenShabbatWeek(user.uid, weekId);
+      setUser(updated);
+      await applyRestrictionWeekOutcome(false);
+      await saveShabbatUiState({ ...shabbatUiState, optedOutWeekId: weekId, lastIntentPromptWeekId: weekId });
+      setIntentModalVisible(false);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [applyRestrictionWeekOutcome, saveShabbatUiState, shabbatUiState, user, weekId]);
+
+  /* ── congregation callbacks ── */
   const refreshCongregationData = useCallback(async () => {
-    if (!user?.congregationId) {
-      setCurrentCongregation(null);
-      setCongregationMembers([]);
-      setPendingMembers([]);
-      return;
-    }
+    if (!user?.congregationId) { setCurrentCongregation(null); setCongregationMembers([]); setPendingMembers([]); return; }
     const congregation = await getCongregationById(user.congregationId);
-    if (!congregation) {
-      setCurrentCongregation(null);
-      setCongregationMembers([]);
-      setPendingMembers([]);
-      return;
-    }
+    if (!congregation) { setCurrentCongregation(null); setCongregationMembers([]); setPendingMembers([]); return; }
     setCurrentCongregation(congregation);
     setCurrentCongregationName(congregation.name);
     const members = await listCongregationMembers(user.congregationId);
     setCongregationMembers(members);
-    const pending = await Promise.all(
-      congregation.pendingUids.map((uid) => getUserProfile(uid))
-    );
-    setPendingMembers(
-      pending.filter((profile): profile is UserProfile => Boolean(profile))
-    );
+    const pending = await Promise.all(congregation.pendingUids.map((uid) => getUserProfile(uid)));
+    setPendingMembers(pending.filter((p): p is UserProfile => Boolean(p)));
   }, [user?.congregationId]);
 
-  const onJoinCongregation = useCallback(
-    async (congregationId: string) => {
-      if (!user) {
-        return;
+  const onJoinCongregation = useCallback(async (congregationId: string) => {
+    if (!user) return;
+    setActionLoading(true);
+    try {
+      const result = await joinCongregationAsUser(congregationId, user.uid);
+      if (result === "JOINED") {
+        const profile = await getUserProfile(user.uid);
+        if (profile) setUser(profile);
+        await refreshCongregationData();
+      } else {
+        Alert.alert("Request sent", "The leader needs to approve your request.");
       }
-      setActionLoading(true);
-      try {
-        const result = await joinCongregationAsUser(congregationId, user.uid);
-        setLastJoinRequestStatus(result);
-        if (result === "JOINED") {
-          const profile = await getUserProfile(user.uid);
-          if (profile) {
-            setUser(profile);
-          }
-          await refreshCongregationData();
-        } else {
-          Alert.alert(
-            "Request sent",
-            "This congregation requires approval. The leader can approve your request."
-          );
-        }
-        await completeCongregationOnboarding(user.uid);
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [refreshCongregationData, user]
-  );
+      await completeCongregationOnboarding(user.uid);
+      setJoinCongregationVisible(false);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [refreshCongregationData, user]);
 
   const onLeaveCongregation = useCallback(async () => {
-    if (!user || !user.congregationId) {
-      return;
-    }
+    if (!user?.congregationId) return;
     setActionLoading(true);
     try {
       await leaveCongregationAsUser(user.congregationId, user.uid);
       const profile = await getUserProfile(user.uid);
-      if (profile) {
-        setUser(profile);
-      }
+      if (profile) setUser(profile);
       setCurrentCongregation(null);
       setCongregationMembers([]);
       setPendingMembers([]);
@@ -982,671 +943,625 @@ export default function App() {
   }, [user]);
 
   const onCreateCongregation = useCallback(async () => {
-    if (!user || !currentLocation) {
-      Alert.alert("Location required", "Allow location to create a congregation.");
-      return;
-    }
+    if (!user || !currentLocation) { Alert.alert("Location required", "Allow location to create a congregation."); return; }
     const name = newCongregationName.trim();
-    const cityValue = (newCongregationCity || cleanCity(currentLocation.city)).trim();
-    if (!name || !cityValue) {
-      Alert.alert("Missing info", "Please enter congregation name and city.");
-      return;
-    }
+    if (!name) { Alert.alert("Missing info", "Please enter a congregation name."); return; }
+    const cityValue = cleanCity(currentLocation.city);
     setActionLoading(true);
     try {
-      let lat = currentLocation.latitude;
-      let lon = currentLocation.longitude;
-
-      const geo = await geocodeCity(cityValue);
-      if (geo) {
-        lat = geo.latitude;
-        lon = geo.longitude;
-      }
-
-      const congregation = await createCongregation({
-        name,
-        city: cityValue,
-        latitude: lat,
-        longitude: lon,
-        timezone: currentLocation.timezone,
-        creatorUid: user.uid,
-      });
+      const congregation = await createCongregation({ name, city: cityValue, latitude: currentLocation.latitude, longitude: currentLocation.longitude, timezone: currentLocation.timezone, creatorUid: user.uid });
       const profile = await setUserCongregation(user.uid, congregation.id);
       setUser(profile);
       setNewCongregationName("");
       await loadLocationAndCongregations();
       await refreshCongregationData();
+      setJoinCongregationVisible(false);
     } catch (error) {
       Alert.alert("Create congregation", errorMessage(error, "Failed to create."));
     } finally {
       setActionLoading(false);
     }
-  }, [
-    currentLocation,
-    loadLocationAndCongregations,
-    newCongregationCity,
-    newCongregationName,
-    refreshCongregationData,
-    user,
-  ]);
+  }, [currentLocation, loadLocationAndCongregations, newCongregationName, refreshCongregationData, user]);
 
-  const onChangeJoinPolicy = useCallback(
-    async (policy: "OPEN" | "REQUEST" | "CLOSED") => {
-      if (!user || !currentCongregation) {
-        return;
-      }
-      setActionLoading(true);
-      try {
-        await setCongregationJoinPolicy({
-          congregationId: currentCongregation.id,
-          leaderUid: user.uid,
-          policy,
-        });
-        await refreshCongregationData();
-      } catch (error) {
-        Alert.alert("Join policy", errorMessage(error, "Failed to update policy."));
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [currentCongregation, refreshCongregationData, user]
-  );
-
-  const onApproveRequest = useCallback(
-    async (targetUid: string) => {
-      if (!user || !currentCongregation) {
-        return;
-      }
-      setActionLoading(true);
-      try {
-        await approveJoinRequest({
-          congregationId: currentCongregation.id,
-          leaderUid: user.uid,
-          targetUid,
-        });
-        await refreshCongregationData();
-      } catch (error) {
-        Alert.alert("Approve request", errorMessage(error, "Failed to approve."));
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [currentCongregation, refreshCongregationData, user]
-  );
-
-  const onRejectRequest = useCallback(
-    async (targetUid: string) => {
-      if (!user || !currentCongregation) {
-        return;
-      }
-      setActionLoading(true);
-      try {
-        await rejectJoinRequest({
-          congregationId: currentCongregation.id,
-          leaderUid: user.uid,
-          targetUid,
-        });
-        await refreshCongregationData();
-      } catch (error) {
-        Alert.alert("Reject request", errorMessage(error, "Failed to reject."));
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [currentCongregation, refreshCongregationData, user]
-  );
-
-  const onKickMember = useCallback(
-    async (targetUid: string) => {
-      if (!user || !currentCongregation) {
-        return;
-      }
-      setActionLoading(true);
-      try {
-        await kickMember({
-          congregationId: currentCongregation.id,
-          leaderUid: user.uid,
-          targetUid,
-        });
-        await refreshCongregationData();
-      } catch (error) {
-        Alert.alert("Kick member", errorMessage(error, "Failed to kick member."));
-      } finally {
-        setActionLoading(false);
-      }
-    },
-    [currentCongregation, refreshCongregationData, user]
-  );
-
-  const onSaveProfile = useCallback(async () => {
-    if (!user) {
-      return;
-    }
-    const nextName = profileName.trim();
-    const nextGender = profileGender;
-    if (!nextName || !nextGender) {
-      Alert.alert("Profile", "Name and gender are required.");
-      return;
-    }
+  const onChangeJoinPolicy = useCallback(async (policy: "OPEN" | "REQUEST" | "CLOSED") => {
+    if (!user || !currentCongregation) return;
     setActionLoading(true);
     try {
-      // Local-only dev profile: do not wait on Firestore.
-      if (user.uid.startsWith("dev-local-")) {
-        setUser((prev) =>
-          prev
-            ? {
-                ...prev,
-                displayName: nextName,
-                gender: nextGender,
-              }
-            : prev
-        );
-        return;
-      }
-
-      try {
-        const updated = await withTimeout(
-          updateUserProfile(user.uid, {
-            displayName: nextName,
-            gender: nextGender,
-          }),
-          6000,
-          "Profile save timed out."
-        );
-        setUser(updated);
-      } catch (error) {
-        // DEV/local fallback: keep UX unblocked even when Firestore doc isn't present.
-        setUser((prev) =>
-          prev
-            ? {
-                ...prev,
-                displayName: nextName,
-                gender: nextGender,
-              }
-            : prev
-        );
-        console.warn("Profile save fell back to local state:", error);
-      }
-    } finally {
-      setActionLoading(false);
-    }
-  }, [profileGender, profileName, user]);
-
-  const onToggleMorningReminder = useCallback(async () => {
-    if (!user || !shabbatTimes) {
-      return;
-    }
-    const next = !user.wantsMorningReminders;
-    setActionLoading(true);
-    try {
-      if (next) {
-        await scheduleNextReminder(
-          {
-            type: ReminderType.TEFILLIN,
-            enabled: true,
-            time: "07:00",
-            title: "Tefillin reminder",
-            body: "Morning reminder (except Saturday mornings).",
-          },
-          shabbatTimes
-        );
-      } else {
-        await cancelReminder(ReminderType.TEFILLIN);
-      }
-      const updated = await updateUserProfile(user.uid, {
-        wantsMorningReminders: next,
-      });
-      setUser(updated);
+      await setCongregationJoinPolicy({ congregationId: currentCongregation.id, leaderUid: user.uid, policy });
+      await refreshCongregationData();
     } catch (error) {
-      Alert.alert("Notifications", errorMessage(error, "Failed to update."));
+      Alert.alert("Join policy", errorMessage(error, "Failed to update policy."));
     } finally {
       setActionLoading(false);
     }
-  }, [shabbatTimes, user]);
+  }, [currentCongregation, refreshCongregationData, user]);
 
-  const onToggleShabbatReminder = useCallback(async () => {
-    if (!user || !shabbatTimes) {
-      return;
-    }
-    const next = !user.wantsShabbatReminders;
+  const onApproveRequest = useCallback(async (targetUid: string) => {
+    if (!user || !currentCongregation) return;
     setActionLoading(true);
     try {
-      if (next) {
-        const reminderDate = new Date(shabbatTimes.shabbatStart.getTime() - 15 * 60000);
-        await scheduleNextReminder(
-          {
-            type: ReminderType.SHABBAT_PREP,
-            enabled: true,
-            time: formatTime24(reminderDate),
-            title: "Shabbat starts soon",
-            body: "Shabbat starts in about 15 minutes.",
-          },
-          shabbatTimes
-        );
-      } else {
-        await cancelReminder(ReminderType.SHABBAT_PREP);
-      }
-      const updated = await updateUserProfile(user.uid, {
-        wantsShabbatReminders: next,
-      });
-      setUser(updated);
+      await approveJoinRequest({ congregationId: currentCongregation.id, leaderUid: user.uid, targetUid });
+      await refreshCongregationData();
+    } finally { setActionLoading(false); }
+  }, [currentCongregation, refreshCongregationData, user]);
+
+  const onRejectMemberRequest = useCallback(async (targetUid: string) => {
+    if (!user || !currentCongregation) return;
+    setActionLoading(true);
+    try {
+      await rejectJoinRequest({ congregationId: currentCongregation.id, leaderUid: user.uid, targetUid });
+      await refreshCongregationData();
+    } finally { setActionLoading(false); }
+  }, [currentCongregation, refreshCongregationData, user]);
+
+  const onKickMember = useCallback(async (targetUid: string) => {
+    if (!user || !currentCongregation) return;
+    setActionLoading(true);
+    try {
+      await kickMember({ congregationId: currentCongregation.id, leaderUid: user.uid, targetUid });
+      await refreshCongregationData();
+    } finally { setActionLoading(false); }
+  }, [currentCongregation, refreshCongregationData, user]);
+
+  /* ── city search for congregation ── */
+  const onCitySearchChange = useCallback((text: string) => {
+    setCongregationCitySearch(text);
+    if (citySearchTimer.current) clearTimeout(citySearchTimer.current);
+    if (text.trim().length < 2) { setCitySuggestions([]); return; }
+    citySearchTimer.current = setTimeout(async () => {
+      const results = await geocodeCitySuggestions(text, 5);
+      setCitySuggestions(results);
+    }, 400);
+  }, []);
+
+  const searchCongregationsByCity = useCallback(async (geo: GeocodingResult) => {
+    setNearbyLoading(true);
+    setNearbyError(null);
+    setCitySuggestions([]);
+    try {
+      const fakeLocation: LocationResult = {
+        city: geo.displayName.split(",")[0]?.trim() ?? geo.displayName,
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+        timezone: currentLocation?.timezone ?? "UTC",
+        source: "manual",
+        fetchedAt: new Date(),
+      };
+      const nearby = await listNearbyCongregations(fakeLocation, 8, 50);
+      setNearbyCongregations(nearby);
     } catch (error) {
-      Alert.alert("Notifications", errorMessage(error, "Failed to update."));
+      setNearbyError(errorMessage(error, "Search failed."));
     } finally {
-      setActionLoading(false);
+      setNearbyLoading(false);
     }
-  }, [shabbatTimes, user]);
+  }, [currentLocation?.timezone]);
 
-  const onSubmitIntent = useCallback(async () => {
-    if (!user) {
-      return;
+  /* ── friend callbacks ── */
+  const onFriendSearchChange = useCallback((text: string) => {
+    setFriendSearchQuery(text);
+    if (friendSearchTimer.current) clearTimeout(friendSearchTimer.current);
+    if (text.trim().length < 2) { setFriendSearchResults([]); return; }
+    friendSearchTimer.current = setTimeout(async () => {
+      if (!user) return;
+      setFriendSearching(true);
+      try {
+        const results = await searchUsersByName(text, user.uid);
+        setFriendSearchResults(results);
+      } finally {
+        setFriendSearching(false);
+      }
+    }, 500);
+  }, [user]);
+
+  const onSendFriendRequest = useCallback(async (toUid: string) => {
+    if (!user) return;
+    try {
+      await sendFriendRequest(user.uid, toUid);
+      Alert.alert("Request sent!", "They'll see your friend request.");
+      setFriendSearchResults((prev) => prev.filter((p) => p.uid !== toUid));
+    } catch (error) {
+      Alert.alert("Friend request", errorMessage(error, "Could not send request."));
     }
-    const text = intentDraft.trim();
-    if (!text) {
-      Alert.alert("Intent required", "Please write your intention for this week.");
-      return;
-    }
+  }, [user]);
+
+  const onAcceptFriendRequest = useCallback(async (friendUid: string) => {
+    if (!user) return;
     setActionLoading(true);
     try {
-      const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
-      setUser(updated);
-      await saveShabbatUiState({
-        ...shabbatUiState,
-        lastIntentPromptWeekId: weekId,
-      });
-      setIntentModalVisible(false);
-    } finally {
-      setActionLoading(false);
-    }
-  }, [intentDraft, saveShabbatUiState, shabbatUiState, user, weekId]);
+      await acceptFriendRequest(user.uid, friendUid);
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+    } finally { setActionLoading(false); }
+  }, [user]);
 
-  const onOptOutThisWeek = useCallback(async () => {
-    if (!user) {
-      return;
-    }
+  const onRejectFriendRequest = useCallback(async (friendUid: string) => {
+    if (!user) return;
     setActionLoading(true);
     try {
-      const updated = await recordBrokenShabbatWeek(user.uid, weekId);
-      setUser(updated);
-      await applyRestrictionWeekOutcome(false);
-      await saveShabbatUiState({
-        ...shabbatUiState,
-        optedOutWeekId: weekId,
-        lastIntentPromptWeekId: weekId,
-      });
-      setIntentModalVisible(false);
-    } finally {
-      setActionLoading(false);
-    }
-  }, [applyRestrictionWeekOutcome, saveShabbatUiState, shabbatUiState, user, weekId]);
+      await rejectFriendRequest(user.uid, friendUid);
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+    } finally { setActionLoading(false); }
+  }, [user]);
 
+  /* ── chat callbacks ── */
+  const onSendChat = useCallback(async () => {
+    if (!user?.congregationId || !chatInput.trim()) return;
+    const text = chatInput.trim();
+    setChatInput("");
+    Keyboard.dismiss();
+    try {
+      await sendCongregationMessage(user.congregationId, user.uid, user.displayName ?? "Anonymous", text);
+    } catch (error) {
+      Alert.alert("Chat", errorMessage(error, "Failed to send message."));
+    }
+  }, [chatInput, user]);
+
+  /* ── time display ── */
   const timesDisplay = useMemo(() => {
-    if (timesLoading) {
-      return "Loading...";
-    }
-    if (timesError) {
-      return timesError.message;
-    }
-    if (!shabbatTimes) {
-      return "No times loaded";
-    }
-    return `${formatDay(shabbatTimes.shabbatStart)} ${formatTime(
-      shabbatTimes.shabbatStart
-    )} - ${formatDay(shabbatTimes.shabbatEnd)} ${formatTime(shabbatTimes.shabbatEnd)}`;
+    if (timesLoading) return "Loading...";
+    if (timesError) return timesError.message;
+    if (!shabbatTimes) return "No times loaded";
+    return `${formatDay(shabbatTimes.shabbatStart)} ${formatTime(shabbatTimes.shabbatStart)} – ${formatDay(shabbatTimes.shabbatEnd)} ${formatTime(shabbatTimes.shabbatEnd)}`;
   }, [shabbatTimes, timesError, timesLoading]);
 
-  const totalRestrictionStreak = useMemo(
-    () =>
-      restrictions.reduce((sum, item) => sum + item.currentStreak, 0),
-    [restrictions]
-  );
+  /* ═══════════════════════════════════════════════════════════ */
+  /*                     RENDER: HOME TAB                       */
+  /* ═══════════════════════════════════════════════════════════ */
 
   const renderHomeTab = () => (
-    <ScrollView contentContainerStyle={s.content}>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Home</Text>
-        <Text style={s.rowText}>Streak: {user?.currentStreak ?? 0}</Text>
-        <Text style={s.rowText}>Restriction streak total: {totalRestrictionStreak}</Text>
-        <Text style={s.rowText}>Congregation: {currentCongregationName ?? "Not joined"}</Text>
-        <Text style={s.rowText}>Location: {homeCity}</Text>
-        <Text style={s.rowText}>Shabbat: {timesDisplay}</Text>
-        {user?.shabbatIntentText ? (
-          <Text style={s.metaText}>This week intention: "{user.shabbatIntentText}"</Text>
-        ) : null}
+    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+      {/* Greeting */}
+      <Text style={s.greeting}>Shabbat Shalom, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
+      <Text style={s.locationText}>{homeCity}</Text>
+
+      {/* Streaks */}
+      <View style={s.streakRow}>
+        <View style={[s.streakCard, { backgroundColor: C.streakBg }]}>
+          <Text style={s.streakEmoji}>🔥</Text>
+          <Text style={s.streakNumber}>{user?.currentStreak ?? 0}</Text>
+          <Text style={s.streakLabel}>Shabbat Streak</Text>
+        </View>
+        <View style={[s.streakCard, { backgroundColor: C.primaryLight }]}>
+          <Text style={s.streakEmoji}>✡️</Text>
+          <Text style={[s.streakNumber, { color: C.primary }]}>{user?.tefillinCurrentStreak ?? 0}</Text>
+          <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin Streak</Text>
+        </View>
       </View>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Shabbat mode</Text>
-        <View style={s.rowBetween}>
-          <Text style={s.rowText}>Status: {modeStatus}</Text>
+
+      {/* Shabbat Times */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionIcon}>🕯️</Text>
+        <Text style={s.sectionTitle}>This Shabbat</Text>
+        <Text style={s.sectionValue}>{timesDisplay}</Text>
+        {isShabbatNow && <View style={s.liveBadge}><Text style={s.liveBadgeText}>SHABBAT NOW</Text></View>}
+      </View>
+
+      {/* Shabbat Block Level */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>Shabbat Mode</Text>
+        <Text style={s.sectionDesc}>Choose your level of observance</Text>
+        <View style={s.blockGrid}>
+          {(["full", "medium", "custom", "none"] as BlockLevel[]).map((level) => {
+            const info = BLOCK_INFO[level];
+            const active = blockLevel === level;
+            return (
+              <Pressable
+                key={level}
+                style={[s.blockOption, active && s.blockOptionActive]}
+                onPress={() => saveBlockLevel(level)}
+              >
+                <Text style={s.blockEmoji}>{info.emoji}</Text>
+                <Text style={[s.blockTitle, active && s.blockTitleActive]}>{info.title}</Text>
+                <Text style={[s.blockDesc, active && s.blockDescActive]} numberOfLines={2}>{info.desc}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {blockLevel === "custom" && (
+          <View style={s.customBlockSection}>
+            <Text style={s.customBlockTitle}>Customize Blocking</Text>
+            {[
+              { key: "social" as const, label: "Social Media" },
+              { key: "games" as const, label: "Games" },
+              { key: "streaming" as const, label: "Streaming" },
+            ].map((item) => (
+              <View key={item.key} style={s.toggleRow}>
+                <Text style={s.toggleLabel}>{item.label}</Text>
+                <Switch
+                  value={customBlocks[item.key]}
+                  onValueChange={(val) => saveCustomBlocks({ ...customBlocks, [item.key]: val })}
+                  trackColor={{ false: C.border, true: C.primaryLight }}
+                  thumbColor={customBlocks[item.key] ? C.primary : "#f4f4f5"}
+                />
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Mode Toggle */}
+        <View style={[s.toggleRow, { marginTop: 16 }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.toggleLabel}>{isModeActive ? "Shabbat Mode Active" : "Activate Shabbat Mode"}</Text>
+            {!isShabbatNow && !isModeActive && <Text style={s.toggleHint}>Available when Shabbat begins</Text>}
+          </View>
           <Switch
             value={isModeActive}
             onValueChange={onToggleMode}
             disabled={!isShabbatNow && !isModeActive}
+            trackColor={{ false: C.border, true: C.successLight }}
+            thumbColor={isModeActive ? C.success : "#f4f4f5"}
           />
         </View>
-        {!isShabbatNow ? (
-          <Text style={s.metaText}>
-            Shabbat mode activates only during Shabbat.
-          </Text>
-        ) : null}
-        <Pressable
-          style={[s.dangerButton, !isModeActive && s.disabled]}
-          onPress={onBreakShabbatNow}
-          disabled={!isModeActive || actionLoading}
-        >
-          <Text style={s.dangerButtonText}>Break Shabbat now</Text>
-        </Pressable>
-        <Pressable style={s.secondaryButton} onPress={refreshTimes}>
-          <Text style={s.secondaryButtonText}>Refresh times</Text>
-        </Pressable>
-      </View>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Quick highlights</Text>
-        <Text style={s.rowText}>
-          Enabled restrictions: {restrictions.filter((r) => r.enabled).length}
-        </Text>
-        <Text style={s.rowText}>
-          Notifications: {user?.wantsShabbatReminders ? "Shabbat ON" : "Shabbat OFF"} /{" "}
-          {user?.wantsMorningReminders ? "Tefillin ON" : "Tefillin OFF"}
-        </Text>
-        <Text style={s.rowText}>
-          Congregation policy: {currentCongregation?.joinPolicy ?? "N/A"}
-        </Text>
-      </View>
-    </ScrollView>
-  );
 
-  const renderRestrictionsTab = () => (
-    <ScrollView contentContainerStyle={s.content}>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Restriction settings</Text>
-        <Text style={s.subText}>Each restriction has its own streak.</Text>
-        {restrictions.map((restriction) => (
-          <View key={restriction.id} style={s.listItem}>
-            <View style={s.rowBetween}>
-              <Text style={s.rowText}>{restriction.label}</Text>
-              <Switch
-                value={restriction.enabled}
-                onValueChange={() => onToggleRestriction(restriction.id)}
-              />
-            </View>
-            <Text style={s.metaText}>
-              Streak: {restriction.currentStreak} (best {restriction.longestStreak})
-            </Text>
-            <Pressable
-              style={s.secondaryButton}
-              onPress={() => onSimulateRestrictedOpen(restriction)}
-            >
-              <Text style={s.secondaryButtonText}>Simulate opening restricted app</Text>
-            </Pressable>
-          </View>
-        ))}
-      </View>
-    </ScrollView>
-  );
-
-  const renderAccountTab = () => (
-    <ScrollView contentContainerStyle={s.content}>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Account and stats</Text>
-        <Text style={s.rowText}>Global streak: {user?.currentStreak ?? 0}</Text>
-        <Text style={s.rowText}>Longest streak: {user?.longestStreak ?? 0}</Text>
-        <Text style={s.rowText}>Restriction streak total: {totalRestrictionStreak}</Text>
-        <Text style={s.rowText}>Congregation: {currentCongregationName ?? "None"}</Text>
-        <Text style={s.rowText}>Gender: {user?.gender ?? "Not set"}</Text>
-      </View>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Profile details</Text>
-        <TextInput
-          placeholder="Name"
-          value={profileName}
-          onChangeText={setProfileName}
-          style={s.input}
-          placeholderTextColor="#777"
-        />
-        <GenderPicker value={profileGender} onChange={setProfileGender} />
-        <Pressable style={s.secondaryButton} onPress={onSaveProfile}>
-          <Text style={s.secondaryButtonText}>Save profile</Text>
-        </Pressable>
-        <Pressable style={s.ghostButton} onPress={onPressSignOut}>
-          <Text style={s.ghostButtonText}>Sign out</Text>
-        </Pressable>
-      </View>
-    </ScrollView>
-  );
-
-  const renderCongregationsTab = () => (
-    <ScrollView contentContainerStyle={s.content}>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Join or create congregation</Text>
-        <Text style={s.rowText}>Current: {currentCongregationName ?? "Not joined"}</Text>
-        {lastJoinRequestStatus === "REQUESTED" ? (
-          <Text style={s.metaText}>Your latest join action is pending approval.</Text>
-        ) : null}
-        <View style={s.searchRow}>
-          <TextInput
-            placeholder="Search by city..."
-            value={congregationCitySearch}
-            onChangeText={onCitySearchChange}
-            style={[s.input, { flex: 1 }]}
-            placeholderTextColor="#777"
-          />
-          {congregationCitySearch.length > 0 ? (
-            <Pressable style={s.clearButton} onPress={onClearCitySearch}>
-              <Text style={s.clearButtonText}>Clear</Text>
-            </Pressable>
-          ) : null}
-        </View>
-        {citySuggestions.length > 0 ? (
-          <View style={s.suggestionsBox}>
-            {citySuggestions.map((suggestion, idx) => (
-              <Pressable
-                key={`${suggestion.latitude}-${suggestion.longitude}-${idx}`}
-                style={s.suggestionItem}
-                onPress={() => {
-                  setCongregationCitySearch(
-                    suggestion.displayName.split(",")[0]?.trim() ??
-                      suggestion.displayName
-                  );
-                  searchCongregationsByCity(suggestion);
-                }}
-              >
-                <Text style={s.metaText} numberOfLines={1}>
-                  {suggestion.displayName}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-        {nearbyLoading ? <ActivityIndicator color={COLORS.accent} /> : null}
-        {nearbyError ? <Text style={s.errorText}>{nearbyError}</Text> : null}
-        {nearbyCongregations.length === 0 && !nearbyLoading ? (
-          <Text style={s.subText}>
-            There are no congregations near you yet. Would you like to start one?
-          </Text>
-        ) : null}
-        {nearbyCongregations.map((congregation) => (
-          <Pressable
-            key={congregation.id}
-            style={s.listItem}
-            onPress={() => onJoinCongregation(congregation.id)}
-          >
-            <Text style={s.rowText}>{congregation.name}</Text>
-            <Text style={s.metaText}>
-              {congregation.city} ({congregation.distanceMiles.toFixed(1)} mi away)
-            </Text>
+        {isModeActive && (
+          <Pressable style={s.dangerBtn} onPress={onBreakShabbatNow} disabled={actionLoading}>
+            <Text style={s.dangerBtnText}>Break Shabbat</Text>
           </Pressable>
-        ))}
-        {user?.congregationId ? (
-          <Pressable style={s.dangerButton} onPress={onLeaveCongregation}>
-            <Text style={s.dangerButtonText}>Leave congregation</Text>
-          </Pressable>
-        ) : null}
-        {currentCongregation?.leaderUid === user?.uid ? (
-          <View style={s.policyWrap}>
-            <Text style={s.rowText}>Leader controls</Text>
-            <Text style={s.metaText}>
-              Join policy: {currentCongregation?.joinPolicy ?? "OPEN"}
-            </Text>
-            <View style={s.policyButtons}>
-              <Pressable
-                style={s.smallPill}
-                onPress={() => onChangeJoinPolicy("OPEN")}
-              >
-                <Text style={s.smallPillText}>Open</Text>
-              </Pressable>
-              <Pressable
-                style={s.smallPill}
-                onPress={() => onChangeJoinPolicy("REQUEST")}
-              >
-                <Text style={s.smallPillText}>Request</Text>
-              </Pressable>
-              <Pressable
-                style={s.smallPill}
-                onPress={() => onChangeJoinPolicy("CLOSED")}
-              >
-                <Text style={s.smallPillText}>Closed</Text>
-              </Pressable>
-            </View>
-            {pendingMembers.length > 0 ? (
-              <View style={s.listSubsection}>
-                <Text style={s.rowText}>Pending requests</Text>
-                {pendingMembers.map((member) => (
-                  <View key={member.uid} style={s.memberRow}>
-                    <Text style={s.metaText}>
-                      {(member.displayName ?? "Unnamed") +
-                        " • " +
-                        (member.gender ?? "Unspecified")}
-                    </Text>
-                    <View style={s.memberActions}>
-                      <Pressable
-                        style={s.smallPill}
-                        onPress={() => onApproveRequest(member.uid)}
-                      >
-                        <Text style={s.smallPillText}>Approve</Text>
-                      </Pressable>
-                      <Pressable
-                        style={s.smallDangerPill}
-                        onPress={() => onRejectRequest(member.uid)}
-                      >
-                        <Text style={s.smallDangerPillText}>Reject</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            <View style={s.listSubsection}>
-              <Text style={s.rowText}>
-                Members ({congregationMembers.length})
-              </Text>
-              {congregationMembers.length === 0 ? (
-                <Text style={s.metaText}>No members yet.</Text>
-              ) : null}
-              {congregationMembers.map((member) => (
-                <View key={member.uid} style={s.memberRow}>
-                  <Text style={s.metaText}>
-                    {(member.displayName ?? "Unnamed") +
-                      " • " +
-                      (member.gender ?? "Unspecified")}
-                  </Text>
-                  {member.uid !== user?.uid ? (
-                    <Pressable
-                      style={s.smallDangerPill}
-                      onPress={() => onKickMember(member.uid)}
-                    >
-                      <Text style={s.smallDangerPillText}>Kick</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-        {currentCongregation &&
-        currentCongregation.leaderUid !== user?.uid &&
-        congregationMembers.length > 0 ? (
-          <View style={s.listSubsection}>
-            <Text style={s.rowText}>
-              Members ({congregationMembers.length})
-            </Text>
-            {congregationMembers.map((member) => (
-              <View key={member.uid} style={s.memberRow}>
-                <Text style={s.metaText}>
-                  {(member.displayName ?? "Unnamed") +
-                    " • " +
-                    (member.gender ?? "Unspecified")}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-        <TextInput
-          placeholder="New congregation name"
-          value={newCongregationName}
-          onChangeText={setNewCongregationName}
-          style={s.input}
-          placeholderTextColor="#777"
-        />
-        <TextInput
-          placeholder="City"
-          value={newCongregationCity}
-          onChangeText={setNewCongregationCity}
-          style={s.input}
-          placeholderTextColor="#777"
-        />
-        <Pressable style={s.secondaryButton} onPress={onCreateCongregation}>
-          <Text style={s.secondaryButtonText}>Create and join</Text>
-        </Pressable>
-        {!user?.congregationOnboardingCompleted ? (
-          <Pressable
-            style={s.ghostButton}
-            onPress={async () => {
-              if (!user) {
-                return;
-              }
-              const updated = await completeCongregationOnboarding(user.uid);
-              setUser(updated);
-            }}
-          >
-            <Text style={s.ghostButtonText}>Skip for now</Text>
-          </Pressable>
-        ) : null}
+        )}
       </View>
-    </ScrollView>
-  );
 
-  const renderNotificationsTab = () => (
-    <ScrollView contentContainerStyle={s.content}>
-      <View style={s.card}>
-        <Text style={s.cardTitle}>Notifications</Text>
-        <View style={s.rowBetween}>
-          <Text style={s.rowText}>Shabbat reminder (15 min before start)</Text>
-          <Switch
-            value={Boolean(user?.wantsShabbatReminders)}
-            onValueChange={onToggleShabbatReminder}
-          />
-        </View>
-        <View style={s.rowBetween}>
-          <Text style={s.rowText}>
-            Tefillin reminder (morning, except Saturday)
-          </Text>
+      {/* Intention */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>Your Shabbat Intention</Text>
+        <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. This will remind you if you try to break it.</Text>
+        <TextInput
+          multiline
+          value={user?.shabbatIntentText ?? ""}
+          onChangeText={(text) => {
+            setIntentDraft(text);
+            setUser((prev) => prev ? { ...prev, shabbatIntentText: text } : prev);
+          }}
+          style={s.intentInput}
+          placeholder="I am keeping Shabbat because..."
+          placeholderTextColor={C.textLight}
+        />
+        {intentDraft.trim() !== (user?.shabbatIntentText ?? "") && intentDraft.trim() && (
+          <Pressable style={s.primaryBtn} onPress={async () => {
+            if (!user) return;
+            const updated = await updateUserProfile(user.uid, { shabbatIntentText: intentDraft.trim() });
+            setUser(updated);
+            Alert.alert("Saved", "Your intention has been saved.");
+          }}>
+            <Text style={s.primaryBtnText}>Save Intention</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Daily Practice Reminders */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>Daily Practice</Text>
+
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.toggleLabel}>🕐 Tefillin Reminder</Text>
+            <Text style={s.toggleHint}>Morning notification to wrap tefillin</Text>
+          </View>
           <Switch
             value={Boolean(user?.wantsMorningReminders)}
             onValueChange={onToggleMorningReminder}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
           />
         </View>
+
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.toggleLabel}>🌅 Modeh Ani</Text>
+            <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsModehAniReminder)}
+            onValueChange={onToggleModehAni}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
+
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.toggleLabel}>🌙 Shema Before Bed</Text>
+            <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsShemaReminder)}
+            onValueChange={onToggleShema}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
+
+        {/* Wake / Bed Times */}
+        {(user?.wantsMorningReminders || user?.wantsModehAniReminder) && (
+          <View style={s.timeSection}>
+            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {WAKE_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
+                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {user?.wantsShemaReminder && (
+          <View style={s.timeSection}>
+            <Text style={s.timeSectionTitle}>Bed Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {BED_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.bedTime === t && s.timePillActive]} onPress={() => onSetBedTime(t)}>
+                  <Text style={[s.timePillText, user?.bedTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </View>
+
+      <View style={{ height: 24 }} />
     </ScrollView>
   );
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /*                    RENDER: SOCIAL TAB                      */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  const renderSocialTab = () => (
+    <View style={{ flex: 1 }}>
+      {/* Congregation Banner */}
+      <View style={s.congBanner}>
+        {user?.congregationId && currentCongregation ? (
+          <>
+            <Text style={s.congBannerName}>{currentCongregation.name}</Text>
+            <Text style={s.congBannerDetail}>{currentCongregation.city} · {congregationMembers.length} members</Text>
+          </>
+        ) : (
+          <>
+            <Text style={s.congBannerName}>No Congregation</Text>
+            <Text style={s.congBannerDetail}>Join or create one to connect</Text>
+          </>
+        )}
+        <View style={s.congBannerActions}>
+          {user?.congregationId ? (
+            <>
+              <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("chat")}>
+                <Text style={s.congBannerBtnText}>💬 Chat</Text>
+              </Pressable>
+              <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("friends")}>
+                <Text style={s.congBannerBtnText}>👥 Members</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable style={s.congBannerBtn} onPress={() => setJoinCongregationVisible(true)}>
+              <Text style={s.congBannerBtnText}>Join / Create</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* Social Sub-tabs */}
+      <View style={s.subTabRow}>
+        {([
+          { key: "friends" as SocialSubTab, label: "Leaderboard" },
+          { key: "chat" as SocialSubTab, label: "Chat" },
+          { key: "buddies" as SocialSubTab, label: "Buddies" },
+        ]).map((tab) => (
+          <Pressable
+            key={tab.key}
+            style={[s.subTab, socialSubTab === tab.key && s.subTabActive]}
+            onPress={() => setSocialSubTab(tab.key)}
+          >
+            <Text style={[s.subTabText, socialSubTab === tab.key && s.subTabTextActive]}>{tab.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Sub-tab Content */}
+      {socialSubTab === "friends" && (
+        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+          {/* Pending friend requests */}
+          {pendingRequests.length > 0 && (
+            <View style={s.sectionCard}>
+              <Text style={s.sectionTitle}>Friend Requests</Text>
+              {pendingRequests.map((req) => (
+                <View key={req.uid} style={s.friendRow}>
+                  <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(req.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.friendName}>{req.displayName ?? "Unknown"}</Text>
+                  </View>
+                  <Pressable style={s.acceptBtn} onPress={() => onAcceptFriendRequest(req.uid)}><Text style={s.acceptBtnText}>Accept</Text></Pressable>
+                  <Pressable style={s.rejectBtn} onPress={() => onRejectFriendRequest(req.uid)}><Text style={s.rejectBtnText}>Decline</Text></Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Friends Leaderboard */}
+          <View style={s.sectionCard}>
+            <Text style={s.sectionTitle}>Friends</Text>
+            {friends.length === 0 ? (
+              <Text style={s.emptyText}>Add friends to see them here!</Text>
+            ) : (
+              friends.map((friend, idx) => (
+                <LeaderboardRow key={friend.uid} profile={friend} rank={idx + 1} />
+              ))
+            )}
+          </View>
+
+          {/* Congregation Members */}
+          {congregationMembers.length > 0 && (
+            <View style={s.sectionCard}>
+              <Text style={s.sectionTitle}>{currentCongregation?.name ?? "Congregation"}</Text>
+              {congregationMembers
+                .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
+                .map((member, idx) => (
+                  <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} />
+                ))}
+            </View>
+          )}
+
+          {/* Leader Controls */}
+          {currentCongregation?.leaderUid === user?.uid && (
+            <View style={s.sectionCard}>
+              <Text style={s.sectionTitle}>Leader Controls</Text>
+              <Text style={s.sectionDesc}>Join policy: {currentCongregation?.joinPolicy}</Text>
+              <View style={s.policyRow}>
+                {(["OPEN", "REQUEST", "CLOSED"] as const).map((p) => (
+                  <Pressable key={p} style={[s.policyPill, currentCongregation?.joinPolicy === p && s.policyPillActive]} onPress={() => onChangeJoinPolicy(p)}>
+                    <Text style={[s.policyPillText, currentCongregation?.joinPolicy === p && s.policyPillTextActive]}>{p}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {pendingMembers.length > 0 && (
+                <>
+                  <Text style={[s.sectionTitle, { marginTop: 12 }]}>Pending Requests</Text>
+                  {pendingMembers.map((m) => (
+                    <View key={m.uid} style={s.friendRow}>
+                      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                      <Text style={[s.friendName, { flex: 1 }]}>{m.displayName ?? "Unknown"}</Text>
+                      <Pressable style={s.acceptBtn} onPress={() => onApproveRequest(m.uid)}><Text style={s.acceptBtnText}>Approve</Text></Pressable>
+                      <Pressable style={s.rejectBtn} onPress={() => onRejectMemberRequest(m.uid)}><Text style={s.rejectBtnText}>Reject</Text></Pressable>
+                    </View>
+                  ))}
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Add Friend + Congregation Actions */}
+          <View style={s.socialActions}>
+            <Pressable style={s.primaryBtn} onPress={() => { setFriendSearchQuery(""); setFriendSearchResults([]); setAddFriendVisible(true); }}>
+              <Text style={s.primaryBtnText}>+ Add Friends</Text>
+            </Pressable>
+            {user?.congregationId && (
+              <Pressable style={s.outlineBtn} onPress={() => Alert.alert("Leave Congregation", "Are you sure?", [{ text: "Cancel", style: "cancel" }, { text: "Leave", style: "destructive", onPress: onLeaveCongregation }])}>
+                <Text style={s.outlineBtnText}>Leave Congregation</Text>
+              </Pressable>
+            )}
+            {!user?.congregationId && (
+              <Pressable style={s.outlineBtn} onPress={() => setJoinCongregationVisible(true)}>
+                <Text style={s.outlineBtnText}>Join / Create Congregation</Text>
+              </Pressable>
+            )}
+          </View>
+          <View style={{ height: 24 }} />
+        </ScrollView>
+      )}
+
+      {socialSubTab === "chat" && (
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+          {!user?.congregationId ? (
+            <View style={s.emptyCentered}>
+              <Text style={s.emptyText}>Join a congregation to start chatting</Text>
+              <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setJoinCongregationVisible(true)}>
+                <Text style={s.primaryBtnText}>Join Congregation</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <FlatList
+                data={chatMessages}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={s.chatList}
+                renderItem={({ item }) => (
+                  <View style={[s.chatBubble, item.senderUid === user?.uid && s.chatBubbleMine]}>
+                    {item.senderUid !== user?.uid && <Text style={s.chatSender}>{item.senderName}</Text>}
+                    <Text style={[s.chatText, item.senderUid === user?.uid && s.chatTextMine]}>{item.text}</Text>
+                  </View>
+                )}
+              />
+              <View style={s.chatInputRow}>
+                <TextInput
+                  style={s.chatTextInput}
+                  value={chatInput}
+                  onChangeText={setChatInput}
+                  placeholder="Type a message..."
+                  placeholderTextColor={C.textLight}
+                  returnKeyType="send"
+                  onSubmitEditing={onSendChat}
+                />
+                <Pressable style={s.chatSendBtn} onPress={onSendChat}>
+                  <Text style={s.chatSendBtnText}>Send</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </KeyboardAvoidingView>
+      )}
+
+      {socialSubTab === "buddies" && (
+        <ScrollView contentContainerStyle={s.tabContent}>
+          <View style={s.sectionCard}>
+            <Text style={s.sectionIcon}>🤝</Text>
+            <Text style={s.sectionTitle}>Tefillin Buddies</Text>
+            <Text style={s.sectionDesc}>
+              Pair up with a friend and send each other a photo of you wrapping tefillin daily. Keep the streak going together — like Snapchat streaks but for your neshama!
+            </Text>
+            <View style={[s.highlightBox, { marginTop: 16 }]}>
+              <Text style={s.highlightText}>📸 Photo sharing coming soon! For now, use the congregation chat to share your tefillin moments with your community.</Text>
+            </View>
+            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setSocialSubTab("chat")}>
+              <Text style={s.primaryBtnText}>Go to Chat</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /*                   RENDER: PARASHA TAB                      */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  const renderParashaTab = () => (
+    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+      <Text style={s.parashaHeader}>This Week's Torah Portion</Text>
+      <View style={s.parashaCard}>
+        <Text style={s.parashaIcon}>📖</Text>
+        <Text style={s.parashaName}>{shabbatTimes?.parsha ?? "Loading..."}</Text>
+        {parashaInfo && (
+          <>
+            <View style={s.parashaBookBadge}>
+              <Text style={s.parashaBookText}>{parashaInfo.book}</Text>
+            </View>
+            <Text style={s.parashaSummary}>{parashaInfo.summary}</Text>
+          </>
+        )}
+        {!parashaInfo && shabbatTimes?.parsha && (
+          <Text style={s.parashaSummary}>Explore this week's Torah portion to discover timeless wisdom and inspiration for your week ahead.</Text>
+        )}
+      </View>
+
+      <Pressable style={s.primaryBtn} onPress={() => Linking.openURL(getChabadParashaUrl())}>
+        <Text style={s.primaryBtnText}>📚 Learn More on Chabad.org</Text>
+      </Pressable>
+
+      <View style={[s.sectionCard, { marginTop: 16 }]}>
+        <Text style={s.sectionIcon}>🎬</Text>
+        <Text style={s.sectionTitle}>Weekly Video</Text>
+        <Text style={s.sectionDesc}>Ask your rabbi to record a short weekly video about the parasha. It could be linked here for your community!</Text>
+        <View style={s.highlightBox}>
+          <Text style={s.highlightText}>Coming soon — connect with your rabbi to bring the parasha to life with a short video each week.</Text>
+        </View>
+      </View>
+
+      <View style={{ height: 24 }} />
+    </ScrollView>
+  );
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /*                      AUTH SCREENS                          */
+  /* ═══════════════════════════════════════════════════════════ */
 
   if (authLoading) {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
         <View style={s.centered}>
-          <ActivityIndicator color={COLORS.accent} />
-          <Text style={s.subText}>Loading account...</Text>
+          <ActivityIndicator color={C.primary} size="large" />
+          <Text style={[s.sectionDesc, { marginTop: 16 }]}>Loading...</Text>
         </View>
       </SafeAreaView>
     );
@@ -1656,424 +1571,116 @@ export default function App() {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
-        <ScrollView contentContainerStyle={s.authScrollContent} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
           {authMode === "choose" && (
             <>
               <View style={s.authLogoArea}>
+                <Text style={s.authLogo}>✡️</Text>
                 <Text style={s.authTitle}>Shabbat Shalom</Text>
                 <Text style={s.authSubtitle}>Keep Shabbat with intention</Text>
               </View>
-
               <View style={s.authForm}>
-                <Pressable
-                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                  onPress={() => switchAuthMode("login")}
-                  disabled={actionLoading}
-                >
-                  <Text style={s.primaryButtonText}>Log In</Text>
+                <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={() => switchAuthMode("login")} disabled={actionLoading}>
+                  <Text style={s.primaryBtnText}>Log In</Text>
                 </Pressable>
-                <Pressable
-                  style={[s.secondaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                  onPress={() => switchAuthMode("signup")}
-                  disabled={actionLoading}
-                >
-                  <Text style={s.secondaryButtonText}>Sign Up</Text>
+                <Pressable style={[s.outlineBtn, s.fullWidth, actionLoading && s.disabled]} onPress={() => switchAuthMode("signup")} disabled={actionLoading}>
+                  <Text style={s.outlineBtnText}>Sign Up</Text>
                 </Pressable>
-
-                <View style={s.authDivider}>
-                  <View style={s.authDividerLine} />
-                  <Text style={s.authDividerText}>or continue with</Text>
-                  <View style={s.authDividerLine} />
-                </View>
-
+                <View style={s.authDivider}><View style={s.authDividerLine} /><Text style={s.authDividerText}>or continue with</Text><View style={s.authDividerLine} /></View>
                 <View style={s.authSocialRow}>
-                  <Pressable
-                    style={[s.authSocialButton, actionLoading && s.disabled]}
-                    onPress={onPressContinueApple}
-                    disabled={actionLoading}
-                  >
-                    <Text style={s.authSocialButtonText}>Apple</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[s.authSocialButton, actionLoading && s.disabled]}
-                    onPress={onPressContinueGoogle}
-                    disabled={actionLoading}
-                  >
-                    <Text style={s.authSocialButtonText}>Google</Text>
-                  </Pressable>
+                  <Pressable style={[s.authSocialBtn, actionLoading && s.disabled]} onPress={onPressContinueApple} disabled={actionLoading}><Text style={s.authSocialBtnText}> Apple</Text></Pressable>
+                  <Pressable style={[s.authSocialBtn, actionLoading && s.disabled]} onPress={onPressContinueGoogle} disabled={actionLoading}><Text style={s.authSocialBtnText}> Google</Text></Pressable>
                 </View>
               </View>
-
               {authError ? <Text style={s.errorText}>{authError}</Text> : null}
             </>
           )}
 
           {authMode === "login" && (
             <>
-              <Pressable style={s.authBackButton} onPress={() => switchAuthMode("choose")}>
-                <Text style={s.authBackText}>Back</Text>
-              </Pressable>
-              <View style={s.authLogoArea}>
-                <Text style={s.authTitle}>Welcome back</Text>
-                <Text style={s.authSubtitle}>Sign in to your account</Text>
-              </View>
-
+              <Pressable style={s.authBack} onPress={() => switchAuthMode("choose")}><Text style={s.authBackText}>← Back</Text></Pressable>
+              <View style={s.authLogoArea}><Text style={s.authTitle}>Welcome back</Text><Text style={s.authSubtitle}>Sign in to your account</Text></View>
               <View style={s.authForm}>
-                <TextInput
-                  placeholder="Email"
-                  value={authEmail}
-                  onChangeText={setAuthEmail}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  editable={!actionLoading}
-                />
+                <TextInput placeholder="Email" value={authEmail} onChangeText={setAuthEmail} style={s.authInput} placeholderTextColor={C.textLight} autoCapitalize="none" keyboardType="email-address" editable={!actionLoading} />
                 <View style={s.passwordRow}>
-                  <TextInput
-                    placeholder="Password"
-                    value={authPassword}
-                    onChangeText={setAuthPassword}
-                    style={s.passwordInput}
-                    placeholderTextColor="#999"
-                    secureTextEntry={!showLoginPassword}
-                    editable={!actionLoading}
-                  />
-                  <Pressable
-                    style={s.passwordToggle}
-                    onPress={() => setShowLoginPassword((v) => !v)}
-                  >
-                    <Text style={s.passwordToggleText}>
-                      {showLoginPassword ? "Hide" : "Show"}
-                    </Text>
-                  </Pressable>
+                  <TextInput placeholder="Password" value={authPassword} onChangeText={setAuthPassword} style={s.passwordInput} placeholderTextColor={C.textLight} secureTextEntry={!showLoginPassword} editable={!actionLoading} />
+                  <Pressable style={s.passwordToggle} onPress={() => setShowLoginPassword((v) => !v)}><Text style={s.passwordToggleText}>{showLoginPassword ? "Hide" : "Show"}</Text></Pressable>
                 </View>
-                <Pressable
-                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                  onPress={onPressEmailSignIn}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={s.primaryButtonText}>Log In</Text>
-                  )}
+                <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressEmailSignIn} disabled={actionLoading}>
+                  {actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Log In</Text>}
                 </Pressable>
-                <Pressable
-                  style={s.authLinkButton}
-                  onPress={() => {
-                    setResetEmail(authEmail);
-                    setResetSent(false);
-                    setAuthError(null);
-                    setForgotPasswordVisible(true);
-                  }}
-                >
-                  <Text style={s.authLinkText}>Forgot password?</Text>
-                </Pressable>
-
-                <View style={s.authDivider}>
-                  <View style={s.authDividerLine} />
-                  <Text style={s.authDividerText}>or sign in with phone</Text>
-                  <View style={s.authDividerLine} />
-                </View>
-
-                <TextInput
-                  placeholder="Phone number (e.g. +15551234567)"
-                  value={authPhone}
-                  onChangeText={setAuthPhone}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  keyboardType="phone-pad"
-                  editable={!actionLoading}
-                />
-                <Pressable
-                  style={[s.secondaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                  onPress={onPressSendPhoneCode}
-                  disabled={actionLoading}
-                >
-                  <Text style={s.secondaryButtonText}>Send Phone Code</Text>
-                </Pressable>
-                {phoneConfirmation ? (
+                <Pressable style={s.authLink} onPress={() => { setResetEmailValue(authEmail); setResetSent(false); setAuthError(null); setForgotPasswordVisible(true); }}><Text style={s.authLinkText}>Forgot password?</Text></Pressable>
+                <View style={s.authDivider}><View style={s.authDividerLine} /><Text style={s.authDividerText}>or sign in with phone</Text><View style={s.authDividerLine} /></View>
+                <TextInput placeholder="Phone (e.g. +15551234567)" value={authPhone} onChangeText={setAuthPhone} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="phone-pad" editable={!actionLoading} />
+                <Pressable style={[s.outlineBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressSendPhoneCode} disabled={actionLoading}><Text style={s.outlineBtnText}>Send Phone Code</Text></Pressable>
+                {phoneConfirmation && (
                   <>
-                    <TextInput
-                      placeholder="Verification code"
-                      value={authPhoneCode}
-                      onChangeText={setAuthPhoneCode}
-                      style={s.authInput}
-                      placeholderTextColor="#999"
-                      keyboardType="number-pad"
-                      editable={!actionLoading}
-                    />
-                    <Pressable
-                      style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                      onPress={onPressVerifyPhoneCode}
-                      disabled={actionLoading}
-                    >
-                      <Text style={s.primaryButtonText}>Verify Code</Text>
-                    </Pressable>
+                    <TextInput placeholder="Verification code" value={authPhoneCode} onChangeText={setAuthPhoneCode} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="number-pad" editable={!actionLoading} />
+                    <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressVerifyPhoneCode} disabled={actionLoading}><Text style={s.primaryBtnText}>Verify Code</Text></Pressable>
                   </>
-                ) : null}
+                )}
               </View>
-
               {authError ? <Text style={s.errorText}>{authError}</Text> : null}
-
-              <View style={s.authFooter}>
-                <Text style={s.authFooterText}>Don't have an account? </Text>
-                <Pressable onPress={() => switchAuthMode("signup")}>
-                  <Text style={s.authFooterLink}>Sign Up</Text>
-                </Pressable>
-              </View>
+              <View style={s.authFooter}><Text style={s.authFooterText}>Don't have an account? </Text><Pressable onPress={() => switchAuthMode("signup")}><Text style={s.authFooterLink}>Sign Up</Text></Pressable></View>
             </>
           )}
 
           {authMode === "signup" && (
             <>
-              <Pressable style={s.authBackButton} onPress={() => switchAuthMode("choose")}>
-                <Text style={s.authBackText}>Back</Text>
-              </Pressable>
-              <View style={s.authLogoArea}>
-                <Text style={s.authTitle}>Create account</Text>
-                <Text style={s.authSubtitle}>Join the Shabbat Shalom community</Text>
-              </View>
-
+              <Pressable style={s.authBack} onPress={() => switchAuthMode("choose")}><Text style={s.authBackText}>← Back</Text></Pressable>
+              <View style={s.authLogoArea}><Text style={s.authTitle}>Create account</Text><Text style={s.authSubtitle}>Join the community</Text></View>
               <View style={s.authForm}>
-                <TextInput
-                  placeholder="Full name"
-                  value={signupName}
-                  onChangeText={setSignupName}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  editable={!actionLoading}
-                />
+                <TextInput placeholder="Full name" value={signupName} onChangeText={setSignupName} style={s.authInput} placeholderTextColor={C.textLight} editable={!actionLoading} />
                 <GenderPicker value={signupGender} onChange={setSignupGender} />
-
                 <View style={s.authMethodToggle}>
-                  <Pressable
-                    style={[
-                      s.authMethodTab,
-                      signupMethod === "email" && s.authMethodTabActive,
-                    ]}
-                    onPress={() => { setSignupMethod("email"); setAuthError(null); }}
-                  >
-                    <Text
-                      style={[
-                        s.authMethodTabText,
-                        signupMethod === "email" && s.authMethodTabTextActive,
-                      ]}
-                    >
-                      Email
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[
-                      s.authMethodTab,
-                      signupMethod === "phone" && s.authMethodTabActive,
-                    ]}
-                    onPress={() => { setSignupMethod("phone"); setAuthError(null); }}
-                  >
-                    <Text
-                      style={[
-                        s.authMethodTabText,
-                        signupMethod === "phone" && s.authMethodTabTextActive,
-                      ]}
-                    >
-                      Phone
-                    </Text>
-                  </Pressable>
+                  <Pressable style={[s.authMethodTab, signupMethod === "email" && s.authMethodTabActive]} onPress={() => { setSignupMethod("email"); setAuthError(null); }}><Text style={[s.authMethodTabText, signupMethod === "email" && s.authMethodTabTextActive]}>Email</Text></Pressable>
+                  <Pressable style={[s.authMethodTab, signupMethod === "phone" && s.authMethodTabActive]} onPress={() => { setSignupMethod("phone"); setAuthError(null); }}><Text style={[s.authMethodTabText, signupMethod === "phone" && s.authMethodTabTextActive]}>Phone</Text></Pressable>
                 </View>
-
                 {signupMethod === "email" && (
                   <>
-                    <TextInput
-                      placeholder="Email"
-                      value={signupEmail}
-                      onChangeText={setSignupEmail}
-                      style={s.authInput}
-                      placeholderTextColor="#999"
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      editable={!actionLoading}
-                    />
-                    <View style={s.passwordRow}>
-                      <TextInput
-                        placeholder="Password"
-                        value={signupPassword}
-                        onChangeText={setSignupPassword}
-                        style={s.passwordInput}
-                        placeholderTextColor="#999"
-                        secureTextEntry={!showSignupPassword}
-                        editable={!actionLoading}
-                      />
-                      <Pressable
-                        style={s.passwordToggle}
-                        onPress={() => setShowSignupPassword((v) => !v)}
-                      >
-                        <Text style={s.passwordToggleText}>
-                          {showSignupPassword ? "Hide" : "Show"}
-                        </Text>
-                      </Pressable>
-                    </View>
-                    <View style={s.passwordRow}>
-                      <TextInput
-                        placeholder="Confirm password"
-                        value={signupConfirmPassword}
-                        onChangeText={setSignupConfirmPassword}
-                        style={s.passwordInput}
-                        placeholderTextColor="#999"
-                        secureTextEntry={!showSignupConfirm}
-                        editable={!actionLoading}
-                      />
-                      <Pressable
-                        style={s.passwordToggle}
-                        onPress={() => setShowSignupConfirm((v) => !v)}
-                      >
-                        <Text style={s.passwordToggleText}>
-                          {showSignupConfirm ? "Hide" : "Show"}
-                        </Text>
-                      </Pressable>
-                    </View>
-                    <Pressable
-                      style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                      onPress={onPressEmailRegister}
-                      disabled={actionLoading}
-                    >
-                      {actionLoading ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <Text style={s.primaryButtonText}>Create Account</Text>
-                      )}
-                    </Pressable>
+                    <TextInput placeholder="Email" value={signupEmail} onChangeText={setSignupEmail} style={s.authInput} placeholderTextColor={C.textLight} autoCapitalize="none" keyboardType="email-address" editable={!actionLoading} />
+                    <View style={s.passwordRow}><TextInput placeholder="Password" value={signupPassword} onChangeText={setSignupPassword} style={s.passwordInput} placeholderTextColor={C.textLight} secureTextEntry={!showSignupPassword} editable={!actionLoading} /><Pressable style={s.passwordToggle} onPress={() => setShowSignupPassword((v) => !v)}><Text style={s.passwordToggleText}>{showSignupPassword ? "Hide" : "Show"}</Text></Pressable></View>
+                    <View style={s.passwordRow}><TextInput placeholder="Confirm password" value={signupConfirmPassword} onChangeText={setSignupConfirmPassword} style={s.passwordInput} placeholderTextColor={C.textLight} secureTextEntry={!showSignupConfirm} editable={!actionLoading} /><Pressable style={s.passwordToggle} onPress={() => setShowSignupConfirm((v) => !v)}><Text style={s.passwordToggleText}>{showSignupConfirm ? "Hide" : "Show"}</Text></Pressable></View>
+                    <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressEmailRegister} disabled={actionLoading}>{actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Create Account</Text>}</Pressable>
                   </>
                 )}
-
                 {signupMethod === "phone" && (
                   <>
-                    <TextInput
-                      placeholder="Phone number (e.g. +15551234567)"
-                      value={signupPhone}
-                      onChangeText={setSignupPhone}
-                      style={s.authInput}
-                      placeholderTextColor="#999"
-                      keyboardType="phone-pad"
-                      editable={!actionLoading}
-                    />
+                    <TextInput placeholder="Phone (e.g. +15551234567)" value={signupPhone} onChangeText={setSignupPhone} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="phone-pad" editable={!actionLoading} />
                     {!signupPhoneConfirmation ? (
-                      <Pressable
-                        style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                        onPress={onPressSignupSendPhoneCode}
-                        disabled={actionLoading}
-                      >
-                        {actionLoading ? (
-                          <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                          <Text style={s.primaryButtonText}>Send Verification Code</Text>
-                        )}
-                      </Pressable>
+                      <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressSignupSendPhoneCode} disabled={actionLoading}>{actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Send Verification Code</Text>}</Pressable>
                     ) : (
                       <>
-                        <TextInput
-                          placeholder="Verification code"
-                          value={signupPhoneCode}
-                          onChangeText={setSignupPhoneCode}
-                          style={s.authInput}
-                          placeholderTextColor="#999"
-                          keyboardType="number-pad"
-                          editable={!actionLoading}
-                        />
-                        <Pressable
-                          style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                          onPress={onPressSignupVerifyPhoneCode}
-                          disabled={actionLoading}
-                        >
-                          {actionLoading ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                          ) : (
-                            <Text style={s.primaryButtonText}>Verify and Create Account</Text>
-                          )}
-                        </Pressable>
-                        <Pressable
-                          style={s.authLinkButton}
-                          onPress={() => {
-                            setSignupPhoneConfirmation(null);
-                            setSignupPhoneCode("");
-                          }}
-                        >
-                          <Text style={s.authLinkText}>Change phone number</Text>
-                        </Pressable>
+                        <TextInput placeholder="Verification code" value={signupPhoneCode} onChangeText={setSignupPhoneCode} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="number-pad" editable={!actionLoading} />
+                        <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressSignupVerifyPhoneCode} disabled={actionLoading}>{actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Verify and Create Account</Text>}</Pressable>
+                        <Pressable style={s.authLink} onPress={() => { setSignupPhoneConfirmation(null); setSignupPhoneCode(""); }}><Text style={s.authLinkText}>Change phone number</Text></Pressable>
                       </>
                     )}
                   </>
                 )}
               </View>
-
               {authError ? <Text style={s.errorText}>{authError}</Text> : null}
-
-              <View style={s.authFooter}>
-                <Text style={s.authFooterText}>Already have an account? </Text>
-                <Pressable onPress={() => switchAuthMode("login")}>
-                  <Text style={s.authFooterLink}>Log In</Text>
-                </Pressable>
-              </View>
+              <View style={s.authFooter}><Text style={s.authFooterText}>Already have an account? </Text><Pressable onPress={() => switchAuthMode("login")}><Text style={s.authFooterLink}>Log In</Text></Pressable></View>
             </>
           )}
         </ScrollView>
 
+        {/* Forgot Password Modal */}
         <Modal visible={forgotPasswordVisible} transparent animationType="fade">
           <View style={s.modalOverlay}>
             <View style={s.modalCard}>
-              <Text style={s.cardTitle}>Reset password</Text>
+              <Text style={s.modalTitle}>Reset password</Text>
               {resetSent ? (
                 <>
-                  <Text style={[s.subText, { textAlign: "center" }]}>
-                    A password reset link has been sent to{"\n"}
-                    <Text style={{ fontWeight: "700" }}>{resetEmail || authEmail}</Text>
-                    {"\n\n"}Check your inbox and spam folder.
-                  </Text>
-                  <Pressable
-                    style={s.primaryButton}
-                    onPress={() => {
-                      setForgotPasswordVisible(false);
-                      setResetSent(false);
-                    }}
-                  >
-                    <Text style={s.primaryButtonText}>Done</Text>
-                  </Pressable>
+                  <Text style={s.sectionDesc}>A reset link has been sent to {resetEmailValue || authEmail}. Check your inbox.</Text>
+                  <Pressable style={s.primaryBtn} onPress={() => { setForgotPasswordVisible(false); setResetSent(false); }}><Text style={s.primaryBtnText}>Done</Text></Pressable>
                 </>
               ) : (
                 <>
-                  <Text style={s.subText}>
-                    Enter your email and we'll send you a link to reset your password.
-                  </Text>
-                  <TextInput
-                    placeholder="Email"
-                    value={resetEmail}
-                    onChangeText={setResetEmail}
-                    style={s.input}
-                    placeholderTextColor="#777"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    editable={!actionLoading}
-                  />
-                  <Pressable
-                    style={[s.primaryButton, actionLoading && s.disabled]}
-                    onPress={onPressForgotPassword}
-                    disabled={actionLoading}
-                  >
-                    {actionLoading ? (
-                      <ActivityIndicator color="#FFFFFF" />
-                    ) : (
-                      <Text style={s.primaryButtonText}>Send reset link</Text>
-                    )}
-                  </Pressable>
-                  <Pressable
-                    style={s.ghostButton}
-                    onPress={() => {
-                      setForgotPasswordVisible(false);
-                      setAuthError(null);
-                    }}
-                  >
-                    <Text style={s.ghostButtonText}>Cancel</Text>
-                  </Pressable>
+                  <Text style={s.sectionDesc}>Enter your email and we'll send you a reset link.</Text>
+                  <TextInput placeholder="Email" value={resetEmailValue} onChangeText={setResetEmailValue} style={s.authInput} placeholderTextColor={C.textLight} autoCapitalize="none" keyboardType="email-address" editable={!actionLoading} />
+                  <Pressable style={[s.primaryBtn, actionLoading && s.disabled]} onPress={onPressForgotPassword} disabled={actionLoading}>{actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Send reset link</Text>}</Pressable>
+                  <Pressable style={s.ghostBtn} onPress={() => { setForgotPasswordVisible(false); setAuthError(null); }}><Text style={s.ghostBtnText}>Cancel</Text></Pressable>
                 </>
               )}
             </View>
@@ -2088,158 +1695,220 @@ export default function App() {
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
         <View style={s.centered}>
-          <Text style={s.title}>Verify your email</Text>
-          <Text style={[s.subText, { textAlign: "center", marginTop: 12 }]}>
-            We sent a verification link to{"\n"}
-            <Text style={{ fontWeight: "700" }}>{user.email ?? "your email"}</Text>
-            {"\n\n"}Open the link to verify your account, then tap the button below.
+          <Text style={s.authTitle}>Verify your email</Text>
+          <Text style={[s.sectionDesc, { textAlign: "center", marginTop: 12 }]}>
+            We sent a verification link to {user.email ?? "your email"}. Open the link then tap below.
           </Text>
-          <Pressable
-            style={[s.primaryButton, { width: "100%" }, (verificationChecking || actionLoading) && s.disabled]}
-            onPress={onPressCheckVerification}
-            disabled={verificationChecking || actionLoading}
-          >
-            {verificationChecking ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={s.primaryButtonText}>I've verified my email</Text>
-            )}
+          <Pressable style={[s.primaryBtn, s.fullWidth, (verificationChecking || actionLoading) && s.disabled]} onPress={onPressCheckVerification} disabled={verificationChecking || actionLoading}>
+            {verificationChecking ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>I've verified my email</Text>}
           </Pressable>
-          <Pressable
-            style={[s.secondaryButton, { width: "100%" }, (actionLoading || resendCooldown > 0) && s.disabled]}
-            onPress={onPressResendVerification}
-            disabled={actionLoading || resendCooldown > 0}
-          >
-            <Text style={s.secondaryButtonText}>
-              {resendCooldown > 0
-                ? `Resend available in ${resendCooldown}s`
-                : "Resend verification email"}
-            </Text>
+          <Pressable style={[s.outlineBtn, s.fullWidth, (actionLoading || resendCooldown > 0) && s.disabled]} onPress={onPressResendVerification} disabled={actionLoading || resendCooldown > 0}>
+            <Text style={s.outlineBtnText}>{resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend verification email"}</Text>
           </Pressable>
-          <Pressable style={s.ghostButton} onPress={onPressSignOut}>
-            <Text style={s.ghostButtonText}>Sign out</Text>
-          </Pressable>
+          <Pressable style={s.ghostBtn} onPress={onPressSignOut}><Text style={s.ghostBtnText}>Sign out</Text></Pressable>
           {authError ? <Text style={s.errorText}>{authError}</Text> : null}
         </View>
       </SafeAreaView>
     );
   }
 
-  const needsProfileSetup =
-    !user.displayName?.trim() || !user.gender?.trim();
+  const needsProfileSetup = !user.displayName?.trim() || !user.gender?.trim();
   if (needsProfileSetup) {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
         <View style={s.centered}>
-          <Text style={s.title}>Welcome</Text>
-          <Text style={s.subText}>
-            Please enter your name and gender to continue. These are shown to your
-            congregation and can be edited later in Stats.
-          </Text>
-          <TextInput
-            placeholder="Name"
-            value={profileName}
-            onChangeText={setProfileName}
-            style={s.input}
-            placeholderTextColor="#777"
-          />
+          <Text style={s.authTitle}>Welcome!</Text>
+          <Text style={s.sectionDesc}>Set up your profile to get started.</Text>
+          <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={[s.authInput, s.fullWidth]} placeholderTextColor={C.textLight} />
           <GenderPicker value={profileGender} onChange={setProfileGender} />
-          <Pressable
-            style={[s.primaryButton, actionLoading && s.disabled]}
-            onPress={onSaveProfile}
-            disabled={actionLoading}
-          >
-            <Text style={s.primaryButtonText}>Save and continue</Text>
+          <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onSaveProfile} disabled={actionLoading}>
+            <Text style={s.primaryBtnText}>Save and continue</Text>
           </Pressable>
         </View>
       </SafeAreaView>
     );
   }
 
+  /* ═══════════════════════════════════════════════════════════ */
+  /*                      MAIN RETURN                           */
+  /* ═══════════════════════════════════════════════════════════ */
+
   return (
     <SafeAreaView style={s.safe}>
       <StatusBar barStyle="dark-content" />
+
+      {/* Header */}
       <View style={s.header}>
         <Text style={s.headerTitle}>
-          {activeTab === "home"
-            ? "Home"
-            : activeTab === "account"
-              ? "Account"
-              : activeTab === "restrictions"
-                ? "Restrictions"
-                : activeTab === "congregations"
-                  ? "Congregations"
-                  : "Notifications"}
+          {activeTab === "home" ? "Home" : activeTab === "social" ? "Social" : "Torah"}
         </Text>
-        <Text style={s.headerSub}>
-          {user.displayName ?? "User"} | {homeCity}
-        </Text>
+        <Pressable style={s.settingsBtn} onPress={() => setSettingsVisible(true)}>
+          <Text style={s.settingsBtnText}>⚙️</Text>
+        </Pressable>
       </View>
 
-      <Animated.View
-        style={[
-          s.body,
-          {
-            opacity: tabContentAnim,
-            transform: [
-              {
-                translateY: tabContentAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [6, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        {activeTab === "home" ? renderHomeTab() : null}
-        {activeTab === "restrictions" ? renderRestrictionsTab() : null}
-        {activeTab === "account" ? renderAccountTab() : null}
-        {activeTab === "congregations" ? renderCongregationsTab() : null}
-        {activeTab === "notifications" ? renderNotificationsTab() : null}
+      {/* Body */}
+      <Animated.View style={[s.body, { opacity: tabContentAnim, transform: [{ translateY: tabContentAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}>
+        {activeTab === "home" && renderHomeTab()}
+        {activeTab === "social" && renderSocialTab()}
+        {activeTab === "parasha" && renderParashaTab()}
       </Animated.View>
 
+      {/* Tab Bar */}
       <View style={s.tabBar}>
-        <TabItem label="Stats" active={activeTab === "account"} onPress={() => setActiveTab("account")} />
-        <TabItem
-          label="Restrict"
-          active={activeTab === "restrictions"}
-          onPress={() => setActiveTab("restrictions")}
-        />
-        <TabItem label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
-        <TabItem
-          label="Congregate"
-          active={activeTab === "congregations"}
-          onPress={() => setActiveTab("congregations")}
-        />
-        <TabItem
-          label="Notify"
-          active={activeTab === "notifications"}
-          onPress={() => setActiveTab("notifications")}
-        />
+        <TabItem icon="🏠" label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
+        <TabItem icon="👥" label="Social" active={activeTab === "social"} onPress={() => setActiveTab("social")} />
+        <TabItem icon="📖" label="Torah" active={activeTab === "parasha"} onPress={() => setActiveTab("parasha")} />
       </View>
 
+      {/* ── Modals ── */}
+
+      {/* Intent Modal */}
       <Modal visible={intentModalVisible} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
-            <Text style={s.cardTitle}>Shabbat is starting</Text>
-            <Text style={s.subText}>
-              Write your intention for keeping Shabbat this week.
-            </Text>
-            <TextInput
-              multiline
-              value={intentDraft}
-              onChangeText={setIntentDraft}
-              style={[s.input, s.intentInput]}
-              placeholder="I am keeping Shabbat because..."
-              placeholderTextColor="#777"
-            />
-            <Pressable style={s.primaryButton} onPress={onSubmitIntent}>
-              <Text style={s.primaryButtonText}>Save intention</Text>
+            <Text style={s.modalTitle}>Shabbat is starting ✨</Text>
+            <Text style={s.sectionDesc}>Write your intention for keeping Shabbat this week. This will remind you if you try to break it.</Text>
+            <TextInput multiline value={intentDraft} onChangeText={setIntentDraft} style={s.intentInput} placeholder="I am keeping Shabbat because..." placeholderTextColor={C.textLight} />
+            <Pressable style={s.primaryBtn} onPress={onSubmitIntent}><Text style={s.primaryBtnText}>Save intention</Text></Pressable>
+            <Pressable style={s.dangerBtn} onPress={onOptOutThisWeek}><Text style={s.dangerBtnText}>Not keeping this week</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Settings Modal */}
+      <Modal visible={settingsVisible} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "80%" }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={s.modalTitle}>Settings</Text>
+
+              <Text style={[s.sectionTitle, { marginTop: 16 }]}>Profile</Text>
+              <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={s.authInput} placeholderTextColor={C.textLight} />
+              <GenderPicker value={profileGender} onChange={setProfileGender} />
+              <Pressable style={s.outlineBtn} onPress={async () => {
+                await onSaveProfile();
+                Alert.alert("Saved", "Profile updated.");
+              }}>
+                <Text style={s.outlineBtnText}>Save Profile</Text>
+              </Pressable>
+
+              <Text style={[s.sectionTitle, { marginTop: 20 }]}>Shabbat Reminder</Text>
+              <View style={s.toggleRow}>
+                <Text style={s.toggleLabel}>15 min before Shabbat</Text>
+                <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: C.primaryLight }} thumbColor={user?.wantsShabbatReminders ? C.primary : "#f4f4f5"} />
+              </View>
+
+              <Pressable style={[s.dangerBtn, { marginTop: 24 }]} onPress={() => { setSettingsVisible(false); onPressSignOut(); }}>
+                <Text style={s.dangerBtnText}>Sign Out</Text>
+              </Pressable>
+            </ScrollView>
+
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setSettingsVisible(false)}>
+              <Text style={s.ghostBtnText}>Close</Text>
             </Pressable>
-            <Pressable style={s.dangerButton} onPress={onOptOutThisWeek}>
-              <Text style={s.dangerButtonText}>No, I am not keeping Shabbat this week</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add Friend Modal */}
+      <Modal visible={addFriendVisible} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "80%" }]}>
+            <Text style={s.modalTitle}>Add Friends</Text>
+
+            <View style={[s.highlightBox, { marginBottom: 12 }]}>
+              <Text style={s.highlightText}>Your Friend Code: {user.uid.slice(0, 8).toUpperCase()}</Text>
+              <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can find you. QR code coming soon!</Text>
+            </View>
+
+            <TextInput
+              placeholder="Search by name..."
+              value={friendSearchQuery}
+              onChangeText={onFriendSearchChange}
+              style={s.authInput}
+              placeholderTextColor={C.textLight}
+              autoCapitalize="none"
+            />
+
+            {friendSearching && <ActivityIndicator color={C.primary} style={{ marginTop: 8 }} />}
+
+            <ScrollView style={{ maxHeight: 300, marginTop: 8 }}>
+              {friendSearchResults.map((result) => {
+                const alreadyFriend = user.friendUids.includes(result.uid);
+                const alreadyPending = result.pendingFriendUids?.includes(user.uid);
+                return (
+                  <View key={result.uid} style={s.friendRow}>
+                    <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(result.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.friendName}>{result.displayName ?? "Unknown"}</Text>
+                    </View>
+                    {alreadyFriend ? (
+                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Friends ✓</Text>
+                    ) : alreadyPending ? (
+                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Sent</Text>
+                    ) : (
+                      <Pressable style={s.acceptBtn} onPress={() => onSendFriendRequest(result.uid)}><Text style={s.acceptBtnText}>Add</Text></Pressable>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setAddFriendVisible(false)}>
+              <Text style={s.ghostBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Join/Create Congregation Modal */}
+      <Modal visible={joinCongregationVisible} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "85%" }]}>
+            <Text style={s.modalTitle}>Congregation</Text>
+
+            {/* Search */}
+            <TextInput placeholder="Search by city..." value={congregationCitySearch} onChangeText={onCitySearchChange} style={s.authInput} placeholderTextColor={C.textLight} />
+
+            {citySuggestions.length > 0 && (
+              <View style={s.suggestionsBox}>
+                {citySuggestions.map((sug, idx) => (
+                  <Pressable key={`${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => { setCongregationCitySearch(sug.displayName.split(",")[0]?.trim() ?? sug.displayName); searchCongregationsByCity(sug); }}>
+                    <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {nearbyLoading && <ActivityIndicator color={C.primary} style={{ marginTop: 12 }} />}
+            {nearbyError && <Text style={s.errorText}>{nearbyError}</Text>}
+
+            <ScrollView style={{ maxHeight: 240, marginTop: 8 }}>
+              {nearbyCongregations.map((cong) => (
+                <Pressable key={cong.id} style={s.congListItem} onPress={() => onJoinCongregation(cong.id)}>
+                  <Text style={s.congListName}>{cong.name}</Text>
+                  <Text style={s.congListCity}>{cong.city}</Text>
+                </Pressable>
+              ))}
+              {nearbyCongregations.length === 0 && !nearbyLoading && (
+                <Text style={[s.emptyText, { marginTop: 12 }]}>No congregations found nearby. Create one below!</Text>
+              )}
+            </ScrollView>
+
+            {/* Create */}
+            <View style={s.createCongSection}>
+              <Text style={s.sectionTitle}>Create New</Text>
+              <TextInput placeholder="Congregation name" value={newCongregationName} onChangeText={setNewCongregationName} style={s.authInput} placeholderTextColor={C.textLight} />
+              <Text style={[s.sectionDesc, { marginTop: 4 }]}>City: {cleanCity(currentLocation?.city)}</Text>
+              <Pressable style={[s.primaryBtn, actionLoading && s.disabled]} onPress={onCreateCongregation} disabled={actionLoading}>
+                <Text style={s.primaryBtnText}>Create and Join</Text>
+              </Pressable>
+            </View>
+
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setJoinCongregationVisible(false)}>
+              <Text style={s.ghostBtnText}>Close</Text>
             </Pressable>
           </View>
         </View>
@@ -2248,44 +1917,26 @@ export default function App() {
   );
 }
 
-function TabItem({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
+/* ─── sub-components ────────────────────────────────────────── */
+
+function TabItem({ icon, label, active, onPress }: { icon: string; label: string; active: boolean; onPress: () => void }) {
   return (
     <Pressable style={[s.tabItem, active && s.tabItemActive]} onPress={onPress}>
+      <Text style={s.tabIcon}>{icon}</Text>
       <Text style={[s.tabLabel, active && s.tabLabelActive]}>{label}</Text>
     </Pressable>
   );
 }
 
-function GenderPicker({
-  value,
-  onChange,
-}: {
-  value: GenderOption | "";
-  onChange: (next: GenderOption) => void;
-}) {
+function GenderPicker({ value, onChange }: { value: GenderOption | ""; onChange: (next: GenderOption) => void }) {
   return (
     <View style={s.genderWrap}>
-      <Text style={s.metaText}>Gender</Text>
       <View style={s.genderRow}>
-        {GENDER_OPTIONS.map((option) => {
-          const active = value === option;
+        {GENDER_OPTIONS.map((opt) => {
+          const active = value === opt;
           return (
-            <Pressable
-              key={option}
-              style={[s.genderChip, active && s.genderChipActive]}
-              onPress={() => onChange(option)}
-            >
-              <Text style={[s.genderChipText, active && s.genderChipTextActive]}>
-                {option}
-              </Text>
+            <Pressable key={opt} style={[s.genderChip, active && s.genderChipActive]} onPress={() => onChange(opt)}>
+              <Text style={[s.genderChipText, active && s.genderChipTextActive]}>{opt}</Text>
             </Pressable>
           );
         })}
@@ -2294,476 +1945,244 @@ function GenderPicker({
   );
 }
 
+function LeaderboardRow({ profile, rank, isCurrentUser }: { profile: UserProfile; rank: number; isCurrentUser?: boolean }) {
+  return (
+    <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
+      <Text style={s.leaderRank}>{rank}</Text>
+      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(profile.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+      <View style={{ flex: 1 }}>
+        <Text style={s.friendName}>{profile.displayName ?? "Unknown"}{isCurrentUser ? " (You)" : ""}</Text>
+        <Text style={s.friendCong}>{profile.congregationId ? "In a congregation" : "No congregation"}</Text>
+      </View>
+      <View style={s.streakBadges}>
+        <View style={s.streakBadge}><Text style={s.streakBadgeText}>🔥 {profile.currentStreak ?? 0}</Text></View>
+        <View style={[s.streakBadge, { backgroundColor: C.primaryLight }]}><Text style={[s.streakBadgeText, { color: C.primary }]}>✡️ {profile.tefillinCurrentStreak ?? 0}</Text></View>
+      </View>
+    </View>
+  );
+}
+
+/* ─── styles ─────────────────────────────────────────────────── */
+
 const s = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: COLORS.background,
-  },
-  headerTitle: {
-    color: COLORS.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  headerSub: {
-    marginTop: 4,
-    color: COLORS.accent,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  body: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 14,
-    paddingBottom: 24,
-  },
-  card: {
-    marginTop: 12,
-    backgroundColor: COLORS.card,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: COLORS.text,
-  },
-  rowText: {
-    marginTop: 8,
-    color: COLORS.text,
-    fontSize: 15,
-  },
-  subText: {
-    marginTop: 8,
-    color: COLORS.text,
-    fontSize: 13,
-  },
-  metaText: {
-    marginTop: 4,
-    color: COLORS.accent,
-    fontSize: 12,
-  },
-  rowBetween: {
-    marginTop: 10,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-  },
-  primaryButton: {
-    marginTop: 12,
-    backgroundColor: COLORS.accent,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  secondaryButton: {
-    marginTop: 10,
-    backgroundColor: "#EBEEF8",
-    borderColor: COLORS.accent,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  secondaryButtonText: {
-    color: COLORS.accent,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  ghostButton: {
-    marginTop: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    alignSelf: "flex-start",
-  },
-  ghostButtonText: {
-    color: COLORS.accent,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  dangerButton: {
-    marginTop: 10,
-    backgroundColor: "#FDECEB",
-    borderColor: COLORS.danger,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  dangerButtonText: {
-    color: COLORS.danger,
-    fontWeight: "700",
-    fontSize: 13,
-    textAlign: "center",
-  },
-  input: {
-    marginTop: 10,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    color: COLORS.text,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  intentInput: {
-    minHeight: 90,
-    textAlignVertical: "top",
-  },
-  listItem: {
-    marginTop: 10,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    backgroundColor: "#FFFDF8",
-  },
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 6,
-  },
-  clearButton: {
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  clearButtonText: {
-    color: COLORS.accent,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  suggestionsBox: {
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: "#FFFDF8",
-    marginTop: 4,
-  },
-  suggestionItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomColor: COLORS.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  policyWrap: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 10,
-  },
-  policyButtons: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  smallPill: {
-    borderRadius: 999,
-    backgroundColor: "#EBEEF8",
-    borderColor: COLORS.accent,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  smallPillText: {
-    color: COLORS.accent,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  smallDangerPill: {
-    borderRadius: 999,
-    backgroundColor: "#FDECEB",
-    borderColor: COLORS.danger,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  smallDangerPillText: {
-    color: COLORS.danger,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  listSubsection: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 10,
-  },
-  memberRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-  },
-  memberActions: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  genderWrap: {
-    marginTop: 10,
-  },
-  genderRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  genderChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#FFFDF8",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  genderChipActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: "#EBEEF8",
-  },
-  genderChipText: {
-    color: COLORS.text,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-  genderChipTextActive: {
-    color: COLORS.accent,
-    fontWeight: "700",
-  },
-  tabBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    borderTopColor: COLORS.border,
-    borderTopWidth: 1,
-    backgroundColor: COLORS.background,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  tabItemActive: {
-    backgroundColor: COLORS.accent,
-  },
-  tabLabel: {
-    color: COLORS.accent,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  tabLabelActive: {
-    color: "#FFFFFF",
-  },
-  centered: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 24,
-  },
-  title: {
-    color: COLORS.text,
-    fontSize: 26,
-    fontWeight: "800",
-  },
-  errorText: {
-    marginTop: 8,
-    color: COLORS.danger,
-    textAlign: "center",
-  },
-  disabled: {
-    opacity: 0.6,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-  modalCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 14,
-    borderColor: COLORS.border,
-    borderWidth: 1,
+  safe: { flex: 1, backgroundColor: C.bg },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
+  body: { flex: 1 },
+  fullWidth: { width: "100%" },
+  disabled: { opacity: 0.5 },
+
+  /* header */
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, backgroundColor: C.bg },
+  headerTitle: { fontSize: 26, fontWeight: "800", color: C.text },
+  settingsBtn: { padding: 8 },
+  settingsBtnText: { fontSize: 22 },
+
+  /* tab bar */
+  tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingBottom: 4, paddingTop: 8 },
+  tabItem: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: 16 },
+  tabItemActive: {},
+  tabIcon: { fontSize: 22 },
+  tabLabel: { fontSize: 11, fontWeight: "600", color: C.textLight, marginTop: 2 },
+  tabLabelActive: { color: C.primary, fontWeight: "800" },
+
+  /* tab content */
+  tabContent: { paddingHorizontal: 16, paddingBottom: 16 },
+
+  /* home greeting */
+  greeting: { fontSize: 24, fontWeight: "800", color: C.text, marginTop: 8 },
+  locationText: { fontSize: 14, color: C.textSecondary, marginTop: 2, marginBottom: 16 },
+
+  /* streaks */
+  streakRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
+  streakCard: { flex: 1, borderRadius: 20, padding: 16, alignItems: "center" },
+  streakEmoji: { fontSize: 28 },
+  streakNumber: { fontSize: 32, fontWeight: "900", color: C.streak, marginTop: 4 },
+  streakLabel: { fontSize: 12, fontWeight: "700", color: "#92400E", marginTop: 2 },
+
+  /* section cards */
+  sectionCard: {
+    backgroundColor: C.card,
+    borderRadius: 20,
     padding: 16,
-  },
-  authScrollContent: {
-    flexGrow: 1,
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingVertical: 40,
-  },
-  authLogoArea: {
-    alignItems: "center",
-    marginBottom: 32,
-  },
-  authTitle: {
-    color: COLORS.accent,
-    fontSize: 30,
-    fontWeight: "900",
-    letterSpacing: 0.3,
-  },
-  authSubtitle: {
-    marginTop: 8,
-    color: COLORS.text,
-    fontSize: 15,
-    opacity: 0.6,
-  },
-  authForm: {
-    width: "100%",
-    alignItems: "center",
-    gap: 10,
-  },
-  authInput: {
-    width: "100%",
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    color: COLORS.text,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-  },
-  passwordRow: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-  },
-  passwordInput: {
-    flex: 1,
-    color: COLORS.text,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 15,
-  },
-  passwordToggle: {
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  passwordToggleText: {
-    color: COLORS.accent,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  authMethodToggle: {
-    flexDirection: "row",
-    width: "100%",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#FFFFFF",
-    overflow: "hidden",
-  },
-  authMethodTab: {
-    flex: 1,
-    paddingVertical: 11,
-    alignItems: "center",
-  },
-  authMethodTabActive: {
-    backgroundColor: COLORS.accent,
-  },
-  authMethodTabText: {
-    color: COLORS.text,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  authMethodTabTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
-  authDivider: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    marginVertical: 8,
-  },
-  authDividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  authDividerText: {
-    marginHorizontal: 12,
-    color: COLORS.text,
-    fontSize: 12,
-    opacity: 0.5,
-  },
-  authSocialRow: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
-  authSocialButton: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  authSocialButtonText: {
-    color: COLORS.text,
-    fontWeight: "700",
-    fontSize: 14,
-  },
-  authBackButton: {
-    alignSelf: "flex-start",
     marginBottom: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  authBackText: {
-    color: COLORS.accent,
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  authLinkButton: {
-    alignSelf: "flex-end",
-    paddingVertical: 2,
-  },
-  authLinkText: {
-    color: COLORS.accent,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-  authFooter: {
-    flexDirection: "row",
-    justifyContent: "center",
-    marginTop: 24,
-  },
-  authFooterText: {
-    color: COLORS.text,
-    fontSize: 14,
-    opacity: 0.6,
-  },
-  authFooterLink: {
-    color: COLORS.accent,
-    fontSize: 14,
-    fontWeight: "700",
-  },
+  sectionIcon: { fontSize: 28, marginBottom: 4 },
+  sectionTitle: { fontSize: 18, fontWeight: "800", color: C.text },
+  sectionValue: { fontSize: 15, color: C.textSecondary, marginTop: 4 },
+  sectionDesc: { fontSize: 13, color: C.textSecondary, marginTop: 6, lineHeight: 18 },
+
+  /* live badge */
+  liveBadge: { backgroundColor: C.success, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, alignSelf: "flex-start", marginTop: 8 },
+  liveBadgeText: { color: "#FFF", fontSize: 11, fontWeight: "800" },
+
+  /* block level */
+  blockGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  blockOption: { width: "47%", borderRadius: 16, borderWidth: 2, borderColor: C.border, padding: 12, alignItems: "center" },
+  blockOptionActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  blockEmoji: { fontSize: 24 },
+  blockTitle: { fontSize: 13, fontWeight: "800", color: C.text, marginTop: 4 },
+  blockTitleActive: { color: C.primaryDark },
+  blockDesc: { fontSize: 10, color: C.textSecondary, textAlign: "center", marginTop: 2 },
+  blockDescActive: { color: C.primaryDark },
+
+  customBlockSection: { marginTop: 12, backgroundColor: C.surface, borderRadius: 14, padding: 12 },
+  customBlockTitle: { fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 4 },
+
+  /* toggle rows */
+  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  toggleLabel: { fontSize: 15, fontWeight: "600", color: C.text },
+  toggleHint: { fontSize: 11, color: C.textLight, marginTop: 1 },
+
+  /* time pickers */
+  timeSection: { marginTop: 12 },
+  timeSectionTitle: { fontSize: 13, fontWeight: "700", color: C.textSecondary, marginBottom: 8 },
+  timePills: { gap: 8 },
+  timePill: { borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: C.bg },
+  timePillActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  timePillText: { fontSize: 13, fontWeight: "600", color: C.textSecondary },
+  timePillTextActive: { color: C.primaryDark, fontWeight: "700" },
+
+  /* buttons */
+  primaryBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginTop: 12 },
+  primaryBtnText: { color: "#FFF", fontSize: 15, fontWeight: "700" },
+  outlineBtn: { borderWidth: 2, borderColor: C.primary, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginTop: 10 },
+  outlineBtnText: { color: C.primary, fontSize: 14, fontWeight: "700" },
+  dangerBtn: { backgroundColor: C.dangerLight, borderRadius: 16, paddingVertical: 12, alignItems: "center", marginTop: 10 },
+  dangerBtnText: { color: C.danger, fontSize: 14, fontWeight: "700" },
+  ghostBtn: { paddingVertical: 8, paddingHorizontal: 8 },
+  ghostBtnText: { color: C.primary, fontWeight: "700", fontSize: 14 },
+
+  /* intent */
+  intentInput: { marginTop: 10, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.surface, color: C.text, paddingHorizontal: 14, paddingVertical: 12, minHeight: 80, textAlignVertical: "top", fontSize: 14 },
+
+  /* highlight box */
+  highlightBox: { backgroundColor: C.primaryLight, borderRadius: 14, padding: 14, marginTop: 8 },
+  highlightText: { fontSize: 13, color: C.primaryDark, lineHeight: 18 },
+
+  /* congregation banner */
+  congBanner: { backgroundColor: C.primary, paddingHorizontal: 20, paddingVertical: 16, marginHorizontal: 16, borderRadius: 20, marginTop: 8 },
+  congBannerName: { fontSize: 20, fontWeight: "800", color: "#FFF" },
+  congBannerDetail: { fontSize: 13, color: "rgba(255,255,255,0.8)", marginTop: 2 },
+  congBannerActions: { flexDirection: "row", gap: 10, marginTop: 12 },
+  congBannerBtn: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 8 },
+  congBannerBtnText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+
+  /* sub-tabs */
+  subTabRow: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 },
+  subTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: C.surface },
+  subTabActive: { backgroundColor: C.primary },
+  subTabText: { fontSize: 13, fontWeight: "700", color: C.textSecondary },
+  subTabTextActive: { color: "#FFF" },
+
+  /* friend / leaderboard rows */
+  friendRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  friendAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
+  friendAvatarText: { fontSize: 16, fontWeight: "800", color: C.primary },
+  friendName: { fontSize: 15, fontWeight: "700", color: C.text },
+  friendCong: { fontSize: 11, color: C.textLight, marginTop: 1 },
+
+  leaderRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  leaderRowHighlight: { backgroundColor: C.primaryLight, marginHorizontal: -16, paddingHorizontal: 16, borderRadius: 12 },
+  leaderRank: { fontSize: 16, fontWeight: "800", color: C.textLight, width: 24, textAlign: "center" },
+
+  streakBadges: { flexDirection: "row", gap: 6 },
+  streakBadge: { backgroundColor: C.streakBg, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  streakBadgeText: { fontSize: 12, fontWeight: "700", color: "#92400E" },
+
+  acceptBtn: { backgroundColor: C.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
+  acceptBtnText: { color: C.primary, fontWeight: "700", fontSize: 12 },
+  rejectBtn: { backgroundColor: C.dangerLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
+  rejectBtnText: { color: C.danger, fontWeight: "700", fontSize: 12 },
+
+  socialActions: { marginTop: 8, gap: 8 },
+  emptyText: { fontSize: 14, color: C.textLight, textAlign: "center", paddingVertical: 20 },
+  emptyCentered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
+
+  /* chat */
+  chatList: { paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1, justifyContent: "flex-end" },
+  chatBubble: { backgroundColor: C.surface, borderRadius: 16, padding: 10, marginBottom: 8, alignSelf: "flex-start", maxWidth: "80%" },
+  chatBubbleMine: { backgroundColor: C.primaryLight, alignSelf: "flex-end" },
+  chatSender: { fontSize: 11, fontWeight: "700", color: C.primary, marginBottom: 2 },
+  chatText: { fontSize: 14, color: C.text },
+  chatTextMine: { color: C.primaryDark },
+  chatInputRow: { flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.border, gap: 8, backgroundColor: C.bg },
+  chatTextInput: { flex: 1, backgroundColor: C.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: C.text },
+  chatSendBtn: { backgroundColor: C.primary, borderRadius: 20, paddingHorizontal: 20, justifyContent: "center" },
+  chatSendBtnText: { color: "#FFF", fontWeight: "700", fontSize: 14 },
+
+  /* parasha */
+  parashaHeader: { fontSize: 16, fontWeight: "700", color: C.textSecondary, marginTop: 8, marginBottom: 8 },
+  parashaCard: { backgroundColor: C.card, borderRadius: 24, padding: 24, alignItems: "center", marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+  parashaIcon: { fontSize: 48, marginBottom: 8 },
+  parashaName: { fontSize: 22, fontWeight: "900", color: C.text, textAlign: "center" },
+  parashaBookBadge: { backgroundColor: C.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, marginTop: 8 },
+  parashaBookText: { fontSize: 12, fontWeight: "700", color: C.primary },
+  parashaSummary: { fontSize: 15, color: C.textSecondary, lineHeight: 22, marginTop: 16, textAlign: "center" },
+
+  /* policy */
+  policyRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  policyPill: { borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 6, backgroundColor: C.bg },
+  policyPillActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  policyPillText: { fontSize: 12, fontWeight: "700", color: C.textSecondary },
+  policyPillTextActive: { color: C.primary },
+
+  /* congregation modal list */
+  congListItem: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  congListName: { fontSize: 15, fontWeight: "700", color: C.text },
+  congListCity: { fontSize: 12, color: C.textSecondary, marginTop: 2 },
+  createCongSection: { marginTop: 16, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 16 },
+  suggestionsBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.surface, marginTop: 4 },
+  suggestionItem: { paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+
+  /* modal */
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", paddingHorizontal: 16 },
+  modalCard: { backgroundColor: C.bg, borderRadius: 24, padding: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 24, elevation: 8 },
+  modalTitle: { fontSize: 22, fontWeight: "800", color: C.text },
+
+  /* auth */
+  authScroll: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 28, paddingVertical: 40 },
+  authLogoArea: { alignItems: "center", marginBottom: 32 },
+  authLogo: { fontSize: 48, marginBottom: 8 },
+  authTitle: { fontSize: 28, fontWeight: "900", color: C.primaryDark, letterSpacing: 0.3 },
+  authSubtitle: { marginTop: 8, fontSize: 15, color: C.textSecondary },
+  authForm: { width: "100%", alignItems: "center", gap: 10 },
+  authInput: { width: "100%", borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.surface, color: C.text, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15 },
+  passwordRow: { width: "100%", flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.surface },
+  passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15 },
+  passwordToggle: { paddingHorizontal: 14, paddingVertical: 14 },
+  passwordToggleText: { color: C.primary, fontWeight: "700", fontSize: 13 },
+  authMethodToggle: { flexDirection: "row", width: "100%", borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, overflow: "hidden" },
+  authMethodTab: { flex: 1, paddingVertical: 12, alignItems: "center" },
+  authMethodTabActive: { backgroundColor: C.primary },
+  authMethodTabText: { color: C.text, fontWeight: "600", fontSize: 14 },
+  authMethodTabTextActive: { color: "#FFF", fontWeight: "700" },
+  authDivider: { flexDirection: "row", alignItems: "center", width: "100%", marginVertical: 8 },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: C.border },
+  authDividerText: { marginHorizontal: 12, color: C.textLight, fontSize: 12 },
+  authSocialRow: { flexDirection: "row", gap: 12, width: "100%" },
+  authSocialBtn: { flex: 1, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 16, paddingVertical: 14, alignItems: "center" },
+  authSocialBtnText: { color: C.text, fontWeight: "700", fontSize: 14 },
+  authBack: { alignSelf: "flex-start", marginBottom: 12, paddingVertical: 4 },
+  authBackText: { color: C.primary, fontWeight: "700", fontSize: 15 },
+  authLink: { alignSelf: "flex-end", paddingVertical: 2 },
+  authLinkText: { color: C.primary, fontWeight: "600", fontSize: 13 },
+  authFooter: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
+  authFooterText: { color: C.textSecondary, fontSize: 14 },
+  authFooterLink: { color: C.primary, fontSize: 14, fontWeight: "700" },
+
+  /* error */
+  errorText: { marginTop: 8, color: C.danger, textAlign: "center", fontSize: 13 },
+
+  /* gender picker */
+  genderWrap: { width: "100%", marginTop: 4 },
+  genderRow: { flexDirection: "row", gap: 10 },
+  genderChip: { flex: 1, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, paddingVertical: 12, alignItems: "center" },
+  genderChipActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  genderChipText: { color: C.text, fontWeight: "600", fontSize: 14 },
+  genderChipTextActive: { color: C.primaryDark, fontWeight: "700" },
 });

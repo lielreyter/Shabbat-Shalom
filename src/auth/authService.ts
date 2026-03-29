@@ -133,6 +133,17 @@ const hydrateProfileWithFallback = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      tefillinCurrentStreak: 0,
+      tefillinLongestStreak: 0,
+      lastTefillinDate: null,
+      wakeUpTime: null,
+      bedTime: null,
+      shabbatBlockLevel: "none",
+      wantsModehAniReminder: false,
+      wantsShemaReminder: false,
+      intentVisibility: "private",
+      friendUids: [],
+      pendingFriendUids: [],
     };
   }
   cachedUserProfile = profile;
@@ -194,6 +205,17 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         lastStreakWeekId: null,
         congregationId: null,
         congregationOnboardingCompleted: false,
+        tefillinCurrentStreak: 0,
+        tefillinLongestStreak: 0,
+        lastTefillinDate: null,
+        wakeUpTime: null,
+        bedTime: null,
+        shabbatBlockLevel: "none",
+        wantsModehAniReminder: false,
+        wantsShemaReminder: false,
+        intentVisibility: "private",
+        friendUids: [],
+        pendingFriendUids: [],
       };
       cachedUserProfile = fallbackProfile;
       return fallbackProfile;
@@ -284,6 +306,17 @@ export const registerWithEmailPassword = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      tefillinCurrentStreak: 0,
+      tefillinLongestStreak: 0,
+      lastTefillinDate: null,
+      wakeUpTime: null,
+      bedTime: null,
+      shabbatBlockLevel: "none",
+      wantsModehAniReminder: false,
+      wantsShemaReminder: false,
+      intentVisibility: "private",
+      friendUids: [],
+      pendingFriendUids: [],
     };
     cachedUserProfile = stub;
     return stub;
@@ -357,6 +390,17 @@ export const confirmPhoneSignUp = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      tefillinCurrentStreak: 0,
+      tefillinLongestStreak: 0,
+      lastTefillinDate: null,
+      wakeUpTime: null,
+      bedTime: null,
+      shabbatBlockLevel: "none",
+      wantsModehAniReminder: false,
+      wantsShemaReminder: false,
+      intentVisibility: "private",
+      friendUids: [],
+      pendingFriendUids: [],
     };
     cachedUserProfile = stub;
     return stub;
@@ -497,6 +541,17 @@ export const subscribeToAuthState = (
         lastStreakWeekId: null,
         congregationId: null,
         congregationOnboardingCompleted: false,
+        tefillinCurrentStreak: 0,
+        tefillinLongestStreak: 0,
+        lastTefillinDate: null,
+        wakeUpTime: null,
+        bedTime: null,
+        shabbatBlockLevel: "none",
+        wantsModehAniReminder: false,
+        wantsShemaReminder: false,
+        intentVisibility: "private",
+        friendUids: [],
+        pendingFriendUids: [],
       };
       cachedUserProfile = stub;
       callback(stub);

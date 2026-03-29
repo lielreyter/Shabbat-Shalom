@@ -23,4 +23,21 @@ export interface UserProfile {
 
   congregationId: string | null;
   congregationOnboardingCompleted: boolean;
+
+  tefillinCurrentStreak: number;
+  tefillinLongestStreak: number;
+  lastTefillinDate: string | null;
+
+  wakeUpTime: string | null;
+  bedTime: string | null;
+
+  shabbatBlockLevel: "full" | "medium" | "custom" | "none";
+
+  wantsModehAniReminder: boolean;
+  wantsShemaReminder: boolean;
+
+  intentVisibility: "public" | "friends" | "private";
+
+  friendUids: string[];
+  pendingFriendUids: string[];
 }

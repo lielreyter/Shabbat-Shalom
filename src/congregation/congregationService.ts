@@ -13,7 +13,7 @@ import {
 import { firestore } from "../firebase/firebaseConfig";
 import { LocationResult } from "../location/locationTypes";
 import { Congregation, NearbyCongregation } from "./congregationTypes";
-import { setUserCongregation } from "../firebase/firestore";
+import { setUserCongregation, hydrateUserProfile } from "../firebase/firestore";
 import { UserProfile } from "../types/UserProfile";
 
 const CONGREGATIONS_COLLECTION = "congregations";
@@ -396,28 +396,7 @@ export const listCongregationMembers = async (
   const snapshot = await getDocs(
     query(collection(firestore, "users"), where("congregationId", "==", congregationId))
   );
-  return snapshot.docs.map((docSnapshot) => {
-    const data = docSnapshot.data() as Partial<UserProfile>;
-    return {
-      uid: docSnapshot.id,
-      createdAt: (data.createdAt as UserProfile["createdAt"]) ?? ({} as UserProfile["createdAt"]),
-      lastLoginAt:
-        (data.lastLoginAt as UserProfile["lastLoginAt"]) ??
-        ({} as UserProfile["lastLoginAt"]),
-      displayName: data.displayName ?? null,
-      email: data.email ?? null,
-      shabbatIntentText: data.shabbatIntentText ?? null,
-      wantsMorningReminders: data.wantsMorningReminders ?? true,
-      wantsShabbatReminders: data.wantsShabbatReminders ?? true,
-      timeZone: data.timeZone ?? "UTC",
-      platform: "ios",
-      gender: data.gender ?? null,
-      profileImageUrl: data.profileImageUrl ?? null,
-      currentStreak: data.currentStreak ?? 0,
-      longestStreak: data.longestStreak ?? 0,
-      lastStreakWeekId: data.lastStreakWeekId ?? null,
-      congregationId: data.congregationId ?? null,
-      congregationOnboardingCompleted: data.congregationOnboardingCompleted ?? false,
-    };
-  });
+  return snapshot.docs.map((docSnapshot) =>
+    hydrateUserProfile(docSnapshot.id, docSnapshot.data() as Partial<UserProfile>)
+  );
 };

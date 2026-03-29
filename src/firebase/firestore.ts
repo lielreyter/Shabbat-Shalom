@@ -27,11 +27,10 @@ const userDocRef = (uid: string) => doc(firestore, "users", uid);
 const normalizeWeekId = (weekId: string): string => weekId.trim();
 
 const ensureTimestamp = (value: unknown): Timestamp => {
-  // Server timestamps can be null immediately after writes; fall back safely.
   return value instanceof Timestamp ? value : Timestamp.now();
 };
 
-const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): UserProfile => {
+export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): UserProfile => {
   return {
     uid,
     createdAt: ensureTimestamp(data.createdAt),
@@ -50,6 +49,17 @@ const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): UserProfil
     lastStreakWeekId: data.lastStreakWeekId ?? null,
     congregationId: data.congregationId ?? null,
     congregationOnboardingCompleted: data.congregationOnboardingCompleted ?? false,
+    tefillinCurrentStreak: data.tefillinCurrentStreak ?? 0,
+    tefillinLongestStreak: data.tefillinLongestStreak ?? 0,
+    lastTefillinDate: data.lastTefillinDate ?? null,
+    wakeUpTime: data.wakeUpTime ?? null,
+    bedTime: data.bedTime ?? null,
+    shabbatBlockLevel: data.shabbatBlockLevel ?? "none",
+    wantsModehAniReminder: data.wantsModehAniReminder ?? false,
+    wantsShemaReminder: data.wantsShemaReminder ?? false,
+    intentVisibility: data.intentVisibility ?? "private",
+    friendUids: Array.isArray(data.friendUids) ? data.friendUids : [],
+    pendingFriendUids: Array.isArray(data.pendingFriendUids) ? data.pendingFriendUids : [],
   };
 };
 
@@ -74,7 +84,6 @@ export const createUserProfile = async ({
 }): Promise<UserProfile> => {
   const payload: UserProfileWrite = {
     uid,
-    // Use serverTimestamp to keep time authoritative and consistent.
     createdAt: serverTimestamp(),
     lastLoginAt: serverTimestamp(),
     displayName,
@@ -91,6 +100,17 @@ export const createUserProfile = async ({
     lastStreakWeekId: null,
     congregationId: null,
     congregationOnboardingCompleted: false,
+    tefillinCurrentStreak: 0,
+    tefillinLongestStreak: 0,
+    lastTefillinDate: null,
+    wakeUpTime: null,
+    bedTime: null,
+    shabbatBlockLevel: "none",
+    wantsModehAniReminder: false,
+    wantsShemaReminder: false,
+    intentVisibility: "private",
+    friendUids: [],
+    pendingFriendUids: [],
   };
 
   await setDoc(userDocRef(uid), payload);
