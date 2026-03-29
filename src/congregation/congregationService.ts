@@ -50,13 +50,13 @@ const DEFAULT_CONGREGATIONS: Omit<
 
 const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
 
-const haversineDistanceKm = (
+const haversineDistanceMiles = (
   lat1: number,
   lon1: number,
   lat2: number,
   lon2: number
 ): number => {
-  const R = 6371;
+  const R = 3959;
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
   const a =
@@ -76,6 +76,23 @@ const congregationDoc = (id: string) =>
 
 const normalizeMatchText = (value: string): string =>
   value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const STOP_WORDS = new Set([
+  "of", "the", "a", "an", "in", "at", "by", "for", "and",
+]);
+
+const extractTokens = (name: string): string[] =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !STOP_WORDS.has(w))
+    .sort();
+
+const tokensMatch = (a: string[], b: string[]): boolean =>
+  a.length > 0 &&
+  a.length === b.length &&
+  a.every((tok, i) => tok === b[i]);
 
 const normalizeCongregation = (
   id: string,
@@ -124,25 +141,43 @@ export const listCongregations = async (): Promise<Congregation[]> => {
   );
 };
 
+const deduplicateCongregations = (
+  list: NearbyCongregation[]
+): NearbyCongregation[] => {
+  const seen = new Map<string, NearbyCongregation>();
+  for (const item of list) {
+    const key = [
+      ...extractTokens(item.name),
+      normalizeMatchText(item.city),
+    ].join("|");
+    const existing = seen.get(key);
+    if (!existing || item.distanceMiles < existing.distanceMiles) {
+      seen.set(key, item);
+    }
+  }
+  return Array.from(seen.values());
+};
+
 export const listNearbyCongregations = async (
   location: LocationResult,
   limit = 5,
-  maxDistanceKm = 75
+  maxDistanceMiles = 50
 ): Promise<NearbyCongregation[]> => {
   const congregations = await listCongregations();
-  return congregations
+  const withDistance = congregations
     .map((congregation) => ({
       ...congregation,
-      distanceKm: haversineDistanceKm(
+      distanceMiles: haversineDistanceMiles(
         location.latitude,
         location.longitude,
         congregation.latitude,
         congregation.longitude
       ),
     }))
-    .filter((item) => item.distanceKm <= maxDistanceKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .slice(0, limit);
+    .filter((item) => item.distanceMiles <= maxDistanceMiles)
+    .sort((a, b) => a.distanceMiles - b.distanceMiles);
+
+  return deduplicateCongregations(withDistance).slice(0, limit);
 };
 
 export const createCongregation = async ({
@@ -167,12 +202,18 @@ export const createCongregation = async ({
   }
   const normalizedName = normalizeMatchText(trimmedName);
   const normalizedCity = normalizeMatchText(trimmedCity);
+  const nameTokens = extractTokens(trimmedName);
   const existingCongregations = await listCongregations();
-  const duplicate = existingCongregations.find(
-    (existing) =>
-      normalizeMatchText(existing.name) === normalizedName &&
-      normalizeMatchText(existing.city) === normalizedCity
-  );
+  const duplicate = existingCongregations.find((existing) => {
+    const sameCity = normalizeMatchText(existing.city) === normalizedCity;
+    if (!sameCity) {
+      return false;
+    }
+    if (normalizeMatchText(existing.name) === normalizedName) {
+      return true;
+    }
+    return tokensMatch(extractTokens(existing.name), nameTokens);
+  });
   if (duplicate) {
     throw new Error(
       `A congregation named "${duplicate.name}" already exists in ${duplicate.city}.`

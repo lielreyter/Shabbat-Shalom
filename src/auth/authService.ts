@@ -2,6 +2,7 @@ import {
   ConfirmationResult,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  deleteUser,
   OAuthProvider,
   onAuthStateChanged,
   sendEmailVerification,
@@ -28,6 +29,7 @@ import { DEV_MODE } from "../config/devMode";
 import { Timestamp } from "firebase/firestore";
 
 let cachedUserProfile: UserProfile | null = null;
+let pendingSignup = false;
 
 const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
   "auth/invalid-credential": "Incorrect email or password.",
@@ -264,7 +266,27 @@ export const registerWithEmailPassword = async ({
   }
   try {
     const result = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
-    return hydrateProfileWithFallback({ firebaseUser: result.user, email: trimmedEmail });
+    const stub: UserProfile = {
+      uid: result.user.uid,
+      createdAt: Timestamp.now(),
+      lastLoginAt: Timestamp.now(),
+      displayName: null,
+      email: trimmedEmail,
+      shabbatIntentText: null,
+      wantsMorningReminders: true,
+      wantsShabbatReminders: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      platform: "ios",
+      gender: null,
+      profileImageUrl: null,
+      currentStreak: 0,
+      longestStreak: 0,
+      lastStreakWeekId: null,
+      congregationId: null,
+      congregationOnboardingCompleted: false,
+    };
+    cachedUserProfile = stub;
+    return stub;
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
@@ -298,6 +320,46 @@ export const confirmPhoneSignIn = async ({
   try {
     const result = await confirmation.confirm(trimmedCode);
     return hydrateProfileWithFallback({ firebaseUser: result.user });
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
+};
+
+export const confirmPhoneSignUp = async ({
+  confirmation,
+  code,
+}: {
+  confirmation: ConfirmationResult;
+  code: string;
+}): Promise<UserProfile> => {
+  const trimmedCode = code.trim();
+  if (!trimmedCode) {
+    throw new Error("Verification code is required.");
+  }
+  try {
+    pendingSignup = true;
+    const result = await confirmation.confirm(trimmedCode);
+    const stub: UserProfile = {
+      uid: result.user.uid,
+      createdAt: Timestamp.now(),
+      lastLoginAt: Timestamp.now(),
+      displayName: null,
+      email: result.user.email ?? null,
+      shabbatIntentText: null,
+      wantsMorningReminders: true,
+      wantsShabbatReminders: true,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      platform: "ios",
+      gender: null,
+      profileImageUrl: null,
+      currentStreak: 0,
+      longestStreak: 0,
+      lastStreakWeekId: null,
+      congregationId: null,
+      congregationOnboardingCompleted: false,
+    };
+    cachedUserProfile = stub;
+    return stub;
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
@@ -343,9 +405,45 @@ export const resetPassword = async (email: string): Promise<void> => {
   await sendPasswordResetEmail(auth, trimmed);
 };
 
+export const createProfileAfterVerification = async ({
+  displayName,
+  gender,
+}: {
+  displayName: string;
+  gender: string;
+}): Promise<UserProfile> => {
+  const firebaseUser = auth.currentUser;
+  if (!firebaseUser) {
+    throw new Error("No signed-in user.");
+  }
+  const profile = await getOrCreateUserProfileOnLogin({
+    uid: firebaseUser.uid,
+    displayName,
+    email: firebaseUser.email ?? null,
+  });
+  const updated = gender
+    ? await import("../firebase/firestore").then((m) =>
+        m.updateUserProfile(profile.uid, { displayName, gender })
+      )
+    : profile;
+  cachedUserProfile = updated;
+  pendingSignup = false;
+  return updated;
+};
+
+export const deleteCurrentUser = async (): Promise<void> => {
+  const firebaseUser = auth.currentUser;
+  if (firebaseUser) {
+    await deleteUser(firebaseUser);
+  }
+  cachedUserProfile = null;
+  pendingSignup = false;
+};
+
 export const signOut = async (): Promise<void> => {
   await firebaseSignOut(auth);
   cachedUserProfile = null;
+  pendingSignup = false;
 };
 
 export const getCurrentUser = (): UserProfile | null => {
@@ -355,11 +453,53 @@ export const getCurrentUser = (): UserProfile | null => {
 export const subscribeToAuthState = (
   callback: (profile: UserProfile | null) => void
 ): Unsubscribe => {
-  // Wrap onAuthStateChanged to always return a hydrated profile.
   return onAuthStateChanged(auth, async (firebaseUser) => {
     if (!firebaseUser) {
       cachedUserProfile = null;
       callback(null);
+      return;
+    }
+
+    // Validate the user still exists on the server (catches users
+    // deleted from Firebase Console while the local token is cached).
+    if (!pendingSignup) {
+      try {
+        await firebaseUser.reload();
+      } catch {
+        await firebaseSignOut(auth);
+        cachedUserProfile = null;
+        pendingSignup = false;
+        callback(null);
+        return;
+      }
+    }
+
+    const isUnverifiedEmail =
+      !firebaseUser.emailVerified &&
+      firebaseUser.providerData.some((p) => p.providerId === "password");
+
+    if (isUnverifiedEmail || pendingSignup) {
+      const stub: UserProfile = cachedUserProfile ?? {
+        uid: firebaseUser.uid,
+        createdAt: Timestamp.now(),
+        lastLoginAt: Timestamp.now(),
+        displayName: firebaseUser.displayName ?? null,
+        email: firebaseUser.email ?? null,
+        shabbatIntentText: null,
+        wantsMorningReminders: true,
+        wantsShabbatReminders: true,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        platform: "ios",
+        gender: null,
+        profileImageUrl: null,
+        currentStreak: 0,
+        longestStreak: 0,
+        lastStreakWeekId: null,
+        congregationId: null,
+        congregationOnboardingCompleted: false,
+      };
+      cachedUserProfile = stub;
+      callback(stub);
       return;
     }
 

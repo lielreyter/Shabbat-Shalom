@@ -13,5 +13,5 @@ export type Congregation = {
 };
 
 export type NearbyCongregation = Congregation & {
-  distanceKm: number;
+  distanceMiles: number;
 };

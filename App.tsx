@@ -30,6 +30,7 @@ import {
 import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
 import { getCurrentLocation } from "./src/location/locationService";
+import { geocodeCity, geocodeCitySuggestions, GeocodingResult } from "./src/location/geocodingService";
 import { LocationResult } from "./src/location/locationTypes";
 import {
   cancelReminder,
@@ -46,6 +47,9 @@ import { getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
 import {
   checkEmailVerified,
   confirmPhoneSignIn,
+  confirmPhoneSignUp,
+  createProfileAfterVerification,
+  deleteCurrentUser,
   isCurrentUserEmailVerified,
   isEmailProvider,
   registerWithEmailPassword,
@@ -67,6 +71,7 @@ import {
   joinCongregationAsUser,
   kickMember,
   leaveCongregationAsUser,
+  listCongregationMembers,
   listNearbyCongregations,
   rejectJoinRequest,
   setCongregationJoinPolicy,
@@ -203,17 +208,29 @@ export default function App() {
   const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(
     null
   );
+  const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
   const [signupName, setSignupName] = useState("");
   const [signupGender, setSignupGender] = useState<GenderOption | "">("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [signupPhone, setSignupPhone] = useState("");
+  const [signupPhoneCode, setSignupPhoneCode] = useState("");
+  const [signupPhoneConfirmation, setSignupPhoneConfirmation] =
+    useState<PhoneAuthConfirmation | null>(null);
   const [pendingEmailVerification, setPendingEmailVerification] = useState(false);
+  const [pendingSignupData, setPendingSignupData] = useState<{
+    name: string;
+    gender: string;
+  } | null>(null);
   const [verificationChecking, setVerificationChecking] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetSent, setResetSent] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirm, setShowSignupConfirm] = useState(false);
   const [city, setCity] = useState("Unknown city");
 
   const [restrictions, setRestrictions] =
@@ -231,6 +248,9 @@ export default function App() {
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [newCongregationName, setNewCongregationName] = useState("");
   const [newCongregationCity, setNewCongregationCity] = useState("");
+  const [congregationCitySearch, setCongregationCitySearch] = useState("");
+  const [citySuggestions, setCitySuggestions] = useState<GeocodingResult[]>([]);
+  const citySearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationResult | null>(null);
   const [currentCongregationName, setCurrentCongregationName] = useState<string | null>(
     null
@@ -408,7 +428,7 @@ export default function App() {
       if (!newCongregationCity && location.city) {
         setNewCongregationCity(location.city);
       }
-      const nearby = await listNearbyCongregations(location, 8, 75);
+      const nearby = await listNearbyCongregations(location, 8, 50);
       setNearbyCongregations(nearby);
     } catch (error) {
       setNearbyError(errorMessage(error, "Could not load nearby congregations."));
@@ -417,6 +437,56 @@ export default function App() {
       setNearbyLoading(false);
     }
   }, [newCongregationCity, user]);
+
+  const searchCongregationsByCity = useCallback(
+    async (geo: GeocodingResult) => {
+      setNearbyLoading(true);
+      setNearbyError(null);
+      setCitySuggestions([]);
+      try {
+        const fakeLocation: LocationResult = {
+          city: geo.displayName.split(",")[0]?.trim() ?? geo.displayName,
+          latitude: geo.latitude,
+          longitude: geo.longitude,
+          timezone: currentLocation?.timezone ?? "UTC",
+          source: "manual",
+          fetchedAt: new Date(),
+        };
+        const nearby = await listNearbyCongregations(fakeLocation, 8, 50);
+        setNearbyCongregations(nearby);
+      } catch (error) {
+        setNearbyError(errorMessage(error, "Search failed."));
+        setNearbyCongregations([]);
+      } finally {
+        setNearbyLoading(false);
+      }
+    },
+    [currentLocation?.timezone]
+  );
+
+  const onCitySearchChange = useCallback(
+    (text: string) => {
+      setCongregationCitySearch(text);
+      if (citySearchTimer.current) {
+        clearTimeout(citySearchTimer.current);
+      }
+      if (text.trim().length < 2) {
+        setCitySuggestions([]);
+        return;
+      }
+      citySearchTimer.current = setTimeout(async () => {
+        const results = await geocodeCitySuggestions(text, 5);
+        setCitySuggestions(results);
+      }, 400);
+    },
+    []
+  );
+
+  const onClearCitySearch = useCallback(() => {
+    setCongregationCitySearch("");
+    setCitySuggestions([]);
+    loadLocationAndCongregations().catch(() => {});
+  }, [loadLocationAndCongregations]);
 
   useEffect(() => {
     if (!user) {
@@ -440,10 +510,8 @@ export default function App() {
         if (!found) {
           return;
         }
-        const members = await Promise.all(found.memberUids.map((uid) => getUserProfile(uid)));
-        setCongregationMembers(
-          members.filter((profile): profile is UserProfile => Boolean(profile))
-        );
+        const members = await listCongregationMembers(user.congregationId!);
+        setCongregationMembers(members);
         const pending = await Promise.all(found.pendingUids.map((uid) => getUserProfile(uid)));
         setPendingMembers(
           pending.filter((profile): profile is UserProfile => Boolean(profile))
@@ -571,11 +639,8 @@ export default function App() {
         email,
         password: signupPassword,
       });
-      const updated = await updateUserProfile(profile.uid, {
-        displayName: name,
-        gender,
-      });
-      setUser(updated);
+      setUser({ ...profile, displayName: name, gender });
+      setPendingSignupData({ name, gender });
       await sendVerification();
       setResendCooldown(60);
       setPendingEmailVerification(true);
@@ -613,16 +678,77 @@ export default function App() {
     );
   }, [authPhoneCode, phoneConfirmation, runAuthAction]);
 
-  const onPressSignOut = useCallback(async () => {
+  const onPressSignupSendPhoneCode = useCallback(async () => {
+    const name = signupName.trim();
+    const gender = signupGender;
+    if (!name) {
+      setAuthError("Please enter your name.");
+      return;
+    }
+    if (!gender) {
+      setAuthError("Please select your gender.");
+      return;
+    }
+    if (!signupPhone.trim()) {
+      setAuthError("Please enter your phone number.");
+      return;
+    }
+    setAuthError(null);
     setActionLoading(true);
     try {
-      await signOut();
-      setUser(null);
-      setPendingEmailVerification(false);
+      const confirmation = await startPhoneSignIn(signupPhone);
+      setSignupPhoneConfirmation(confirmation);
+      Alert.alert("Code sent", "Enter the verification code you received.");
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to send verification code."));
     } finally {
       setActionLoading(false);
     }
-  }, []);
+  }, [signupGender, signupName, signupPhone]);
+
+  const onPressSignupVerifyPhoneCode = useCallback(async () => {
+    if (!signupPhoneConfirmation) {
+      setAuthError("Please request a verification code first.");
+      return;
+    }
+    const name = signupName.trim();
+    const gender = signupGender;
+    setAuthError(null);
+    setActionLoading(true);
+    try {
+      await confirmPhoneSignUp({
+        confirmation: signupPhoneConfirmation,
+        code: signupPhoneCode,
+      });
+      const profile = await createProfileAfterVerification({
+        displayName: name,
+        gender: gender as string,
+      });
+      setUser(profile);
+      setSignupPhoneConfirmation(null);
+      setSignupPhoneCode("");
+    } catch (error) {
+      setAuthError(errorMessage(error, "Failed to verify code."));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [signupGender, signupName, signupPhoneCode, signupPhoneConfirmation]);
+
+  const onPressSignOut = useCallback(async () => {
+    setActionLoading(true);
+    try {
+      if (pendingEmailVerification && isEmailProvider() && !isCurrentUserEmailVerified()) {
+        await deleteCurrentUser();
+      } else {
+        await signOut();
+      }
+      setUser(null);
+      setPendingEmailVerification(false);
+      setPendingSignupData(null);
+    } finally {
+      setActionLoading(false);
+    }
+  }, [pendingEmailVerification]);
 
   const onPressResendVerification = useCallback(async () => {
     setAuthError(null);
@@ -644,6 +770,14 @@ export default function App() {
     try {
       const verified = await checkEmailVerified();
       if (verified) {
+        if (pendingSignupData) {
+          const profile = await createProfileAfterVerification({
+            displayName: pendingSignupData.name,
+            gender: pendingSignupData.gender,
+          });
+          setUser(profile);
+          setPendingSignupData(null);
+        }
         setPendingEmailVerification(false);
       } else {
         setAuthError("Email not yet verified. Please check your inbox and click the verification link.");
@@ -653,7 +787,7 @@ export default function App() {
     } finally {
       setVerificationChecking(false);
     }
-  }, []);
+  }, [pendingSignupData]);
 
   const onPressForgotPassword = useCallback(async () => {
     setAuthError(null);
@@ -789,12 +923,8 @@ export default function App() {
     }
     setCurrentCongregation(congregation);
     setCurrentCongregationName(congregation.name);
-    const members = await Promise.all(
-      congregation.memberUids.map((uid) => getUserProfile(uid))
-    );
-    setCongregationMembers(
-      members.filter((profile): profile is UserProfile => Boolean(profile))
-    );
+    const members = await listCongregationMembers(user.congregationId);
+    setCongregationMembers(members);
     const pending = await Promise.all(
       congregation.pendingUids.map((uid) => getUserProfile(uid))
     );
@@ -864,11 +994,20 @@ export default function App() {
     }
     setActionLoading(true);
     try {
+      let lat = currentLocation.latitude;
+      let lon = currentLocation.longitude;
+
+      const geo = await geocodeCity(cityValue);
+      if (geo) {
+        lat = geo.latitude;
+        lon = geo.longitude;
+      }
+
       const congregation = await createCongregation({
         name,
         city: cityValue,
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
+        latitude: lat,
+        longitude: lon,
         timezone: currentLocation.timezone,
         creatorUid: user.uid,
       });
@@ -1284,6 +1423,41 @@ export default function App() {
         {lastJoinRequestStatus === "REQUESTED" ? (
           <Text style={s.metaText}>Your latest join action is pending approval.</Text>
         ) : null}
+        <View style={s.searchRow}>
+          <TextInput
+            placeholder="Search by city..."
+            value={congregationCitySearch}
+            onChangeText={onCitySearchChange}
+            style={[s.input, { flex: 1 }]}
+            placeholderTextColor="#777"
+          />
+          {congregationCitySearch.length > 0 ? (
+            <Pressable style={s.clearButton} onPress={onClearCitySearch}>
+              <Text style={s.clearButtonText}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {citySuggestions.length > 0 ? (
+          <View style={s.suggestionsBox}>
+            {citySuggestions.map((suggestion, idx) => (
+              <Pressable
+                key={`${suggestion.latitude}-${suggestion.longitude}-${idx}`}
+                style={s.suggestionItem}
+                onPress={() => {
+                  setCongregationCitySearch(
+                    suggestion.displayName.split(",")[0]?.trim() ??
+                      suggestion.displayName
+                  );
+                  searchCongregationsByCity(suggestion);
+                }}
+              >
+                <Text style={s.metaText} numberOfLines={1}>
+                  {suggestion.displayName}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         {nearbyLoading ? <ActivityIndicator color={COLORS.accent} /> : null}
         {nearbyError ? <Text style={s.errorText}>{nearbyError}</Text> : null}
         {nearbyCongregations.length === 0 && !nearbyLoading ? (
@@ -1299,7 +1473,7 @@ export default function App() {
           >
             <Text style={s.rowText}>{congregation.name}</Text>
             <Text style={s.metaText}>
-              {congregation.city} ({congregation.distanceKm.toFixed(1)} km away)
+              {congregation.city} ({congregation.distanceMiles.toFixed(1)} mi away)
             </Text>
           </Pressable>
         ))}
@@ -1362,11 +1536,40 @@ export default function App() {
                 ))}
               </View>
             ) : null}
+            <View style={s.listSubsection}>
+              <Text style={s.rowText}>
+                Members ({congregationMembers.length})
+              </Text>
+              {congregationMembers.length === 0 ? (
+                <Text style={s.metaText}>No members yet.</Text>
+              ) : null}
+              {congregationMembers.map((member) => (
+                <View key={member.uid} style={s.memberRow}>
+                  <Text style={s.metaText}>
+                    {(member.displayName ?? "Unnamed") +
+                      " • " +
+                      (member.gender ?? "Unspecified")}
+                  </Text>
+                  {member.uid !== user?.uid ? (
+                    <Pressable
+                      style={s.smallDangerPill}
+                      onPress={() => onKickMember(member.uid)}
+                    >
+                      <Text style={s.smallDangerPillText}>Kick</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+            </View>
           </View>
         ) : null}
-        {currentCongregation && congregationMembers.length > 0 ? (
+        {currentCongregation &&
+        currentCongregation.leaderUid !== user?.uid &&
+        congregationMembers.length > 0 ? (
           <View style={s.listSubsection}>
-            <Text style={s.rowText}>Members</Text>
+            <Text style={s.rowText}>
+              Members ({congregationMembers.length})
+            </Text>
             {congregationMembers.map((member) => (
               <View key={member.uid} style={s.memberRow}>
                 <Text style={s.metaText}>
@@ -1374,15 +1577,6 @@ export default function App() {
                     " • " +
                     (member.gender ?? "Unspecified")}
                 </Text>
-                {currentCongregation.leaderUid === user?.uid &&
-                member.uid !== user.uid ? (
-                  <Pressable
-                    style={s.smallDangerPill}
-                    onPress={() => onKickMember(member.uid)}
-                  >
-                    <Text style={s.smallDangerPillText}>Kick</Text>
-                  </Pressable>
-                ) : null}
               </View>
             ))}
           </View>
@@ -1535,15 +1729,25 @@ export default function App() {
                   keyboardType="email-address"
                   editable={!actionLoading}
                 />
-                <TextInput
-                  placeholder="Password"
-                  value={authPassword}
-                  onChangeText={setAuthPassword}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  secureTextEntry
-                  editable={!actionLoading}
-                />
+                <View style={s.passwordRow}>
+                  <TextInput
+                    placeholder="Password"
+                    value={authPassword}
+                    onChangeText={setAuthPassword}
+                    style={s.passwordInput}
+                    placeholderTextColor="#999"
+                    secureTextEntry={!showLoginPassword}
+                    editable={!actionLoading}
+                  />
+                  <Pressable
+                    style={s.passwordToggle}
+                    onPress={() => setShowLoginPassword((v) => !v)}
+                  >
+                    <Text style={s.passwordToggleText}>
+                      {showLoginPassword ? "Hide" : "Show"}
+                    </Text>
+                  </Pressable>
+                </View>
                 <Pressable
                   style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
                   onPress={onPressEmailSignIn}
@@ -1642,45 +1846,164 @@ export default function App() {
                   editable={!actionLoading}
                 />
                 <GenderPicker value={signupGender} onChange={setSignupGender} />
-                <TextInput
-                  placeholder="Email"
-                  value={signupEmail}
-                  onChangeText={setSignupEmail}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  editable={!actionLoading}
-                />
-                <TextInput
-                  placeholder="Password"
-                  value={signupPassword}
-                  onChangeText={setSignupPassword}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  secureTextEntry
-                  editable={!actionLoading}
-                />
-                <TextInput
-                  placeholder="Confirm password"
-                  value={signupConfirmPassword}
-                  onChangeText={setSignupConfirmPassword}
-                  style={s.authInput}
-                  placeholderTextColor="#999"
-                  secureTextEntry
-                  editable={!actionLoading}
-                />
-                <Pressable
-                  style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
-                  onPress={onPressEmailRegister}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={s.primaryButtonText}>Create Account</Text>
-                  )}
-                </Pressable>
+
+                <View style={s.authMethodToggle}>
+                  <Pressable
+                    style={[
+                      s.authMethodTab,
+                      signupMethod === "email" && s.authMethodTabActive,
+                    ]}
+                    onPress={() => { setSignupMethod("email"); setAuthError(null); }}
+                  >
+                    <Text
+                      style={[
+                        s.authMethodTabText,
+                        signupMethod === "email" && s.authMethodTabTextActive,
+                      ]}
+                    >
+                      Email
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      s.authMethodTab,
+                      signupMethod === "phone" && s.authMethodTabActive,
+                    ]}
+                    onPress={() => { setSignupMethod("phone"); setAuthError(null); }}
+                  >
+                    <Text
+                      style={[
+                        s.authMethodTabText,
+                        signupMethod === "phone" && s.authMethodTabTextActive,
+                      ]}
+                    >
+                      Phone
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {signupMethod === "email" && (
+                  <>
+                    <TextInput
+                      placeholder="Email"
+                      value={signupEmail}
+                      onChangeText={setSignupEmail}
+                      style={s.authInput}
+                      placeholderTextColor="#999"
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      editable={!actionLoading}
+                    />
+                    <View style={s.passwordRow}>
+                      <TextInput
+                        placeholder="Password"
+                        value={signupPassword}
+                        onChangeText={setSignupPassword}
+                        style={s.passwordInput}
+                        placeholderTextColor="#999"
+                        secureTextEntry={!showSignupPassword}
+                        editable={!actionLoading}
+                      />
+                      <Pressable
+                        style={s.passwordToggle}
+                        onPress={() => setShowSignupPassword((v) => !v)}
+                      >
+                        <Text style={s.passwordToggleText}>
+                          {showSignupPassword ? "Hide" : "Show"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <View style={s.passwordRow}>
+                      <TextInput
+                        placeholder="Confirm password"
+                        value={signupConfirmPassword}
+                        onChangeText={setSignupConfirmPassword}
+                        style={s.passwordInput}
+                        placeholderTextColor="#999"
+                        secureTextEntry={!showSignupConfirm}
+                        editable={!actionLoading}
+                      />
+                      <Pressable
+                        style={s.passwordToggle}
+                        onPress={() => setShowSignupConfirm((v) => !v)}
+                      >
+                        <Text style={s.passwordToggleText}>
+                          {showSignupConfirm ? "Hide" : "Show"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <Pressable
+                      style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                      onPress={onPressEmailRegister}
+                      disabled={actionLoading}
+                    >
+                      {actionLoading ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={s.primaryButtonText}>Create Account</Text>
+                      )}
+                    </Pressable>
+                  </>
+                )}
+
+                {signupMethod === "phone" && (
+                  <>
+                    <TextInput
+                      placeholder="Phone number (e.g. +15551234567)"
+                      value={signupPhone}
+                      onChangeText={setSignupPhone}
+                      style={s.authInput}
+                      placeholderTextColor="#999"
+                      keyboardType="phone-pad"
+                      editable={!actionLoading}
+                    />
+                    {!signupPhoneConfirmation ? (
+                      <Pressable
+                        style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                        onPress={onPressSignupSendPhoneCode}
+                        disabled={actionLoading}
+                      >
+                        {actionLoading ? (
+                          <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                          <Text style={s.primaryButtonText}>Send Verification Code</Text>
+                        )}
+                      </Pressable>
+                    ) : (
+                      <>
+                        <TextInput
+                          placeholder="Verification code"
+                          value={signupPhoneCode}
+                          onChangeText={setSignupPhoneCode}
+                          style={s.authInput}
+                          placeholderTextColor="#999"
+                          keyboardType="number-pad"
+                          editable={!actionLoading}
+                        />
+                        <Pressable
+                          style={[s.primaryButton, { width: "100%" }, actionLoading && s.disabled]}
+                          onPress={onPressSignupVerifyPhoneCode}
+                          disabled={actionLoading}
+                        >
+                          {actionLoading ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                          ) : (
+                            <Text style={s.primaryButtonText}>Verify and Create Account</Text>
+                          )}
+                        </Pressable>
+                        <Pressable
+                          style={s.authLinkButton}
+                          onPress={() => {
+                            setSignupPhoneConfirmation(null);
+                            setSignupPhoneCode("");
+                          }}
+                        >
+                          <Text style={s.authLinkText}>Change phone number</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </>
+                )}
               </View>
 
               {authError ? <Text style={s.errorText}>{authError}</Text> : null}
@@ -2111,6 +2434,35 @@ const s = StyleSheet.create({
     padding: 10,
     backgroundColor: "#FFFDF8",
   },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  clearButton: {
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  clearButtonText: {
+    color: COLORS.accent,
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  suggestionsBox: {
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    backgroundColor: "#FFFDF8",
+    marginTop: 4,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomColor: COLORS.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   policyWrap: {
     marginTop: 10,
     borderTopWidth: 1,
@@ -2291,6 +2643,57 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontSize: 15,
+  },
+  passwordRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+  },
+  passwordInput: {
+    flex: 1,
+    color: COLORS.text,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+  },
+  passwordToggle: {
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  passwordToggleText: {
+    color: COLORS.accent,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  authMethodToggle: {
+    flexDirection: "row",
+    width: "100%",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  authMethodTab: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  authMethodTabActive: {
+    backgroundColor: COLORS.accent,
+  },
+  authMethodTabText: {
+    color: COLORS.text,
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  authMethodTabTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
   authDivider: {
     flexDirection: "row",
