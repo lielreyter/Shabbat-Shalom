@@ -8,7 +8,6 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
-  LayoutAnimation,
   Linking,
   Modal,
   Platform,
@@ -35,7 +34,6 @@ import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
 import { getCurrentLocation } from "./src/location/locationService";
 import {
-  geocodeCity,
   geocodeCitySuggestions,
   GeocodingResult,
 } from "./src/location/geocodingService";
@@ -145,23 +143,102 @@ type ShabbatUiState = {
   firstRestrictionPromptWeekId: string | null;
 };
 
+type CommonApp = {
+  id: string;
+  name: string;
+  category: string;
+};
+
 /* ─── constants ──────────────────────────────────────────────── */
 
 const RESTRICTIONS_KEY = "restrictions:v1";
 const SHABBAT_UI_STATE_KEY = "shabbatUiState:v1";
 const BLOCK_LEVEL_KEY = "blockLevel:v1";
-const CUSTOM_BLOCKS_KEY = "customBlocks:v1";
+const CUSTOM_APP_BLOCKS_KEY = "customAppBlocks:v1";
+const INTENT_HISTORY_KEY = "intentHistory:v1";
+const TEFILLIN_DATE_KEY = "tefillinConfirmedDate:v1";
+const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
 const GENDER_OPTIONS: GenderOption[] = ["Male", "Female"];
 
-const WAKE_TIMES = [
-  "5:00 AM", "5:30 AM", "6:00 AM", "6:30 AM", "7:00 AM",
-  "7:30 AM", "8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 AM",
+const generateTimes = (startH: number, endH: number): string[] => {
+  const times: string[] = [];
+  for (let h = startH; h <= endH; h++) {
+    for (let m = 0; m < 60; m += 5) {
+      const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+      const ap = h >= 12 && h < 24 ? "PM" : "AM";
+      times.push(`${hr}:${m.toString().padStart(2, "0")} ${ap}`);
+    }
+  }
+  return times;
+};
+
+const WAKE_TIMES = generateTimes(4, 11);
+const BED_TIMES = generateTimes(19, 24);
+
+const COMMON_APPS: CommonApp[] = [
+  { id: "instagram", name: "Instagram", category: "Social" },
+  { id: "tiktok", name: "TikTok", category: "Social" },
+  { id: "snapchat", name: "Snapchat", category: "Social" },
+  { id: "facebook", name: "Facebook", category: "Social" },
+  { id: "twitter", name: "X (Twitter)", category: "Social" },
+  { id: "reddit", name: "Reddit", category: "Social" },
+  { id: "threads", name: "Threads", category: "Social" },
+  { id: "bereal", name: "BeReal", category: "Social" },
+  { id: "youtube", name: "YouTube", category: "Streaming" },
+  { id: "netflix", name: "Netflix", category: "Streaming" },
+  { id: "hulu", name: "Hulu", category: "Streaming" },
+  { id: "spotify", name: "Spotify", category: "Streaming" },
+  { id: "hbomax", name: "Max (HBO)", category: "Streaming" },
+  { id: "disney", name: "Disney+", category: "Streaming" },
+  { id: "twitch", name: "Twitch", category: "Streaming" },
+  { id: "appletv", name: "Apple TV+", category: "Streaming" },
+  { id: "roblox", name: "Roblox", category: "Games" },
+  { id: "minecraft", name: "Minecraft", category: "Games" },
+  { id: "candycrush", name: "Candy Crush", category: "Games" },
+  { id: "clashroyale", name: "Clash Royale", category: "Games" },
+  { id: "clashofclans", name: "Clash of Clans", category: "Games" },
+  { id: "brawlstars", name: "Brawl Stars", category: "Games" },
+  { id: "fortnite", name: "Fortnite", category: "Games" },
+  { id: "whatsapp", name: "WhatsApp", category: "Messaging" },
+  { id: "telegram", name: "Telegram", category: "Messaging" },
+  { id: "discord", name: "Discord", category: "Messaging" },
+  { id: "gmail", name: "Gmail", category: "Productivity" },
+  { id: "slack", name: "Slack", category: "Productivity" },
+  { id: "safari", name: "Safari", category: "Browser" },
+  { id: "chrome", name: "Chrome", category: "Browser" },
+  { id: "amazon", name: "Amazon", category: "Shopping" },
+  { id: "uber", name: "Uber", category: "Other" },
+  { id: "doordash", name: "DoorDash", category: "Other" },
 ];
 
-const BED_TIMES = [
-  "8:00 PM", "8:30 PM", "9:00 PM", "9:30 PM", "10:00 PM",
-  "10:30 PM", "11:00 PM", "11:30 PM", "12:00 AM",
-];
+const DAILY_INFO: Record<string, { title: string; explanation: string }> = {
+  tefillin: {
+    title: "Why Wrap Tefillin?",
+    explanation:
+      "Tefillin are leather boxes containing Torah passages that Jewish men wrap on their arm and head each weekday morning. This mitzvah binds your mind and heart to God and has been practiced since the Torah was given at Sinai. Wrapping tefillin each day strengthens your spiritual connection.",
+  },
+  modehAni: {
+    title: "Why Say Modeh Ani?",
+    explanation:
+      "Modeh Ani is the first prayer said each morning upon waking, even before getting out of bed. It expresses gratitude to God for restoring your soul after sleep. Starting every day with gratitude transforms your entire outlook on life.",
+  },
+  shema: {
+    title: "Why Say Shema Before Bed?",
+    explanation:
+      "The Shema is the most fundamental declaration of Jewish faith — affirming God's oneness. Saying it before bed connects you to God as you entrust your soul to Him during sleep. It has been recited by Jews for thousands of years as a cornerstone of daily practice.",
+  },
+};
+
+const PRAYER_TEXTS = {
+  modehAni: {
+    hebrew: "מוֹדֶה אֲנִי לְפָנֶיךָ מֶלֶךְ חַי וְקַיָּם, שֶׁהֶחֱזַרְתָּ בִּי נִשְׁמָתִי בְּחֶמְלָה, רַבָּה אֱמוּנָתֶךָ.",
+    english: "I gratefully thank You, living and eternal King, for You have returned my soul within me with compassion — abundant is Your faithfulness.",
+  },
+  shema: {
+    hebrew: "שְׁמַע יִשְׂרָאֵל יְהוָה אֱלֹהֵינוּ יְהוָה אֶחָד.\nבָּרוּךְ שֵׁם כְּבוֹד מַלְכוּתוֹ לְעוֹלָם וָעֶד.",
+    english: "Hear, O Israel: The Lord is our God, the Lord is One.\nBlessed is the name of His glorious kingdom forever and ever.",
+  },
+};
 
 const defaultRestrictions: RestrictionSetting[] = [
   { id: "social", label: "Social apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
@@ -175,7 +252,12 @@ const defaultShabbatUiState: ShabbatUiState = {
   firstRestrictionPromptWeekId: null,
 };
 
-const defaultCustomBlocks = { social: true, games: true, streaming: false };
+const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string }> = {
+  full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!" },
+  medium: { title: "Medium", desc: "Block social media & games. Start reclaiming your Shabbat." },
+  custom: { title: "Custom", desc: "Choose exactly which apps to block during Shabbat." },
+  none: { title: "No Block", desc: "No apps blocked. Your streak will not grow." },
+};
 
 /* ─── helpers ────────────────────────────────────────────────── */
 
@@ -225,11 +307,19 @@ const withTimeout = async <T,>(
   return Promise.race([promise, timeoutPromise]);
 };
 
-const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string; emoji: string }> = {
-  full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!", emoji: "🛡️" },
-  medium: { title: "Medium", desc: "Block social media & games. Start reclaiming your Shabbat.", emoji: "⚡" },
-  custom: { title: "Custom", desc: "Choose which apps to block during Shabbat.", emoji: "🎯" },
-  none: { title: "No Block", desc: "No apps blocked. Keep Shabbat in your own way.", emoji: "🕊️" },
+const todayDateStr = (): string => new Date().toISOString().slice(0, 10);
+
+const getPastShabbatDates = (count: number): string[] => {
+  const dates: string[] = [];
+  const now = new Date();
+  let d = new Date(now);
+  d.setDate(d.getDate() - ((d.getDay() + 1) % 7));
+  for (let i = 0; i < count; i++) {
+    dates.push(d.toISOString().slice(0, 10));
+    d = new Date(d);
+    d.setDate(d.getDate() - 7);
+  }
+  return dates;
 };
 
 /* ─── app ─────────────────────────────────────────────────────── */
@@ -280,9 +370,33 @@ export default function App() {
   const [restrictions, setRestrictions] = useState<RestrictionSetting[]>(defaultRestrictions);
   const [shabbatUiState, setShabbatUiState] = useState<ShabbatUiState>(defaultShabbatUiState);
   const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
-  const [customBlocks, setCustomBlocks] = useState(defaultCustomBlocks);
+  const [customAppBlocks, setCustomAppBlocks] = useState<Record<string, boolean>>({});
   const [intentDraft, setIntentDraft] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
+
+  /* ── intent calendar ── */
+  const [intentHistory, setIntentHistory] = useState<Record<string, string>>({});
+  const [showIntentCalendar, setShowIntentCalendar] = useState(false);
+  const [selectedPastDate, setSelectedPastDate] = useState<string | null>(null);
+
+  /* ── holiday opt-in ── */
+  const [holidayOptIn, setHolidayOptIn] = useState(false);
+
+  /* ── tefillin daily ── */
+  const [tefillinConfirmedToday, setTefillinConfirmedToday] = useState(false);
+
+  /* ── daily info ── */
+  const [showDailyInfo, setShowDailyInfo] = useState<string | null>(null);
+
+  /* ── prayer overlay ── */
+  const [showPrayerOverlay, setShowPrayerOverlay] = useState(false);
+  const [prayerOverlayType, setPrayerOverlayType] = useState<"modehAni" | "shema" | null>(null);
+
+  /* ── break shabbat confirmation ── */
+  const [showBreakConfirm, setShowBreakConfirm] = useState(false);
+
+  /* ── congregation settings ── */
+  const [congregationSettingsVisible, setCongregationSettingsVisible] = useState(false);
 
   /* ── congregation ── */
   const [nearbyCongregations, setNearbyCongregations] = useState<NearbyCongregation[]>([]);
@@ -314,6 +428,7 @@ export default function App() {
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
+  const breakResolveRef = useRef<((result: "ABORT" | "PROCEED") => void) | null>(null);
 
   /* ── hooks ── */
   const { shabbatTimes, loading: timesLoading, error: timesError, refresh: refreshTimes } = useShabbatTimes();
@@ -342,6 +457,17 @@ export default function App() {
     return getParashaInfo(shabbatTimes.parsha);
   }, [shabbatTimes?.parsha]);
 
+  const hasCustomAppsBlocked = useMemo(() => {
+    return Object.values(customAppBlocks).some((v) => v);
+  }, [customAppBlocks]);
+
+  const effectiveBlockLevel = useMemo((): BlockLevel => {
+    if (blockLevel === "custom" && !hasCustomAppsBlocked) return "none";
+    return blockLevel;
+  }, [blockLevel, hasCustomAppsBlocked]);
+
+  const isStreakEligible = effectiveBlockLevel !== "none";
+
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
     setShabbatUiState(next);
@@ -358,24 +484,35 @@ export default function App() {
     await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
   }, []);
 
-  const saveCustomBlocks = useCallback(async (next: typeof defaultCustomBlocks) => {
-    setCustomBlocks(next);
-    await AsyncStorage.setItem(CUSTOM_BLOCKS_KEY, JSON.stringify(next));
+  const saveCustomAppBlocks = useCallback(async (next: Record<string, boolean>) => {
+    setCustomAppBlocks(next);
+    await AsyncStorage.setItem(CUSTOM_APP_BLOCKS_KEY, JSON.stringify(next));
+  }, []);
+
+  const saveIntentHistory = useCallback(async (next: Record<string, string>) => {
+    setIntentHistory(next);
+    await AsyncStorage.setItem(INTENT_HISTORY_KEY, JSON.stringify(next));
   }, []);
 
   /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawR, rawU, rawB, rawCb] = await Promise.all([
+      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
         AsyncStorage.getItem(BLOCK_LEVEL_KEY),
-        AsyncStorage.getItem(CUSTOM_BLOCKS_KEY),
+        AsyncStorage.getItem(CUSTOM_APP_BLOCKS_KEY),
+        AsyncStorage.getItem(INTENT_HISTORY_KEY),
+        AsyncStorage.getItem(TEFILLIN_DATE_KEY),
+        AsyncStorage.getItem(HOLIDAY_OPTIN_KEY),
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
       if (rawB && ["full", "medium", "custom", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
-      if (rawCb) { try { setCustomBlocks(JSON.parse(rawCb)); } catch { /* use defaults */ } }
+      if (rawCab) { try { setCustomAppBlocks(JSON.parse(rawCab)); } catch { /* use defaults */ } }
+      if (rawIH) { try { setIntentHistory(JSON.parse(rawIH)); } catch { /* use defaults */ } }
+      if (rawTD === todayDateStr()) setTefillinConfirmedToday(true);
+      if (rawHO === "true") setHolidayOptIn(true);
     };
     loadLocal().catch(() => {});
   }, []);
@@ -422,17 +559,8 @@ export default function App() {
   useEffect(() => {
     setIntentFlowHandler((): Promise<IntentFlowResult> => {
       return new Promise((resolve) => {
-        Alert.alert(
-          "Pause and reflect",
-          user?.shabbatIntentText
-            ? `Your intention:\n\n"${user.shabbatIntentText}"\n\nDo you still want to break Shabbat?`
-            : "Do you still want to break Shabbat?",
-          [
-            { text: "Go back", style: "cancel", onPress: () => resolve("ABORT") },
-            { text: "Break Shabbat", style: "destructive", onPress: () => resolve("PROCEED") },
-          ],
-          { cancelable: false }
-        );
+        breakResolveRef.current = resolve;
+        setShowBreakConfirm(true);
       });
     });
     return () => clearIntentFlowHandler();
@@ -718,31 +846,9 @@ export default function App() {
   }, []);
 
   /* ── shabbat mode callbacks ── */
-  const onToggleMode = useCallback(async () => {
-    if (!user) return;
-    if (!isModeActive && !isShabbatNow) {
-      Alert.alert("Shabbat mode", "Shabbat mode can only be activated during Shabbat.");
-      return;
-    }
-    setActionLoading(true);
-    try {
-      if (isModeActive) {
-        await endMode();
-        const profile = await recordKeptShabbatWeek(user.uid, weekId);
-        setUser(profile);
-        await applyRestrictionWeekOutcome(true);
-      } else {
-        await startMode();
-      }
-    } catch (error) {
-      Alert.alert("Shabbat mode", errorMessage(error, "Unknown error."));
-    } finally {
-      setActionLoading(false);
-    }
-  }, [applyRestrictionWeekOutcome, endMode, isModeActive, isShabbatNow, startMode, user, weekId]);
-
   const onBreakShabbatNow = useCallback(async () => {
     if (!user) return;
+    setShowBreakConfirm(false);
     setActionLoading(true);
     try {
       const result = await breakShabbat();
@@ -757,6 +863,22 @@ export default function App() {
       setActionLoading(false);
     }
   }, [applyRestrictionWeekOutcome, breakShabbat, user, weekId]);
+
+  const onCancelBreak = useCallback(() => {
+    setShowBreakConfirm(false);
+    if (breakResolveRef.current) {
+      breakResolveRef.current("ABORT");
+      breakResolveRef.current = null;
+    }
+  }, []);
+
+  const onConfirmBreak = useCallback(() => {
+    if (breakResolveRef.current) {
+      breakResolveRef.current("PROCEED");
+      breakResolveRef.current = null;
+    }
+    setShowBreakConfirm(false);
+  }, []);
 
   /* ── profile callbacks ── */
   const onSaveProfile = useCallback(async () => {
@@ -874,12 +996,15 @@ export default function App() {
     try {
       const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
       setUser(updated);
+      const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
+      const nextHistory = { ...intentHistory, [dateKey]: text };
+      await saveIntentHistory(nextHistory);
       await saveShabbatUiState({ ...shabbatUiState, lastIntentPromptWeekId: weekId });
       setIntentModalVisible(false);
     } finally {
       setActionLoading(false);
     }
-  }, [intentDraft, saveShabbatUiState, shabbatUiState, user, weekId]);
+  }, [intentDraft, intentHistory, saveIntentHistory, saveShabbatUiState, shabbatTimes, shabbatUiState, user, weekId]);
 
   const onOptOutThisWeek = useCallback(async () => {
     if (!user) return;
@@ -894,6 +1019,44 @@ export default function App() {
       setActionLoading(false);
     }
   }, [applyRestrictionWeekOutcome, saveShabbatUiState, shabbatUiState, user, weekId]);
+
+  /* ── tefillin confirmation ── */
+  const onConfirmTefillin = useCallback(async () => {
+    if (!user) return;
+    setTefillinConfirmedToday(true);
+    await AsyncStorage.setItem(TEFILLIN_DATE_KEY, todayDateStr());
+    try {
+      const today = todayDateStr();
+      if (user.lastTefillinDate !== today) {
+        const nextStreak = user.tefillinCurrentStreak + 1;
+        const updated = await updateUserProfile(user.uid, {
+          tefillinCurrentStreak: nextStreak,
+          tefillinLongestStreak: Math.max(user.tefillinLongestStreak, nextStreak),
+          lastTefillinDate: today,
+        });
+        setUser(updated);
+      }
+    } catch { /* keep going */ }
+  }, [user]);
+
+  /* ── holiday opt-in ── */
+  const onToggleHolidayOptIn = useCallback(async (val: boolean) => {
+    setHolidayOptIn(val);
+    await AsyncStorage.setItem(HOLIDAY_OPTIN_KEY, String(val));
+  }, []);
+
+  /* ── save intention inline ── */
+  const onSaveIntentInline = useCallback(async () => {
+    if (!user) return;
+    const text = intentDraft.trim();
+    if (!text) return;
+    const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
+    setUser(updated);
+    const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
+    const nextHistory = { ...intentHistory, [dateKey]: text };
+    await saveIntentHistory(nextHistory);
+    Alert.alert("Saved", "Your intention has been saved.");
+  }, [intentDraft, intentHistory, saveIntentHistory, shabbatTimes, user]);
 
   /* ── congregation callbacks ── */
   const refreshCongregationData = useCallback(async () => {
@@ -1102,8 +1265,17 @@ export default function App() {
     if (timesLoading) return "Loading...";
     if (timesError) return timesError.message;
     if (!shabbatTimes) return "No times loaded";
-    return `${formatDay(shabbatTimes.shabbatStart)} ${formatTime(shabbatTimes.shabbatStart)} – ${formatDay(shabbatTimes.shabbatEnd)} ${formatTime(shabbatTimes.shabbatEnd)}`;
+    return `Fri ${formatTime(shabbatTimes.shabbatStart)} – Sat ${formatTime(shabbatTimes.shabbatEnd)}`;
   }, [shabbatTimes, timesError, timesLoading]);
+
+  const appCategories = useMemo(() => {
+    const cats: Record<string, CommonApp[]> = {};
+    COMMON_APPS.forEach((app) => {
+      if (!cats[app.category]) cats[app.category] = [];
+      cats[app.category]!.push(app);
+    });
+    return cats;
+  }, []);
 
   /* ═══════════════════════════════════════════════════════════ */
   /*                     RENDER: HOME TAB                       */
@@ -1112,29 +1284,46 @@ export default function App() {
   const renderHomeTab = () => (
     <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
       {/* Greeting */}
-      <Text style={s.greeting}>Shabbat Shalom, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
-      <Text style={s.locationText}>{homeCity}</Text>
+      <Text style={s.greeting}>Welcome, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
+
+      {/* Tefillin daily prompt */}
+      {user?.wantsMorningReminders && !tefillinConfirmedToday && user?.gender === "Male" && (
+        <Pressable style={s.tefillinPromptBar} onPress={onConfirmTefillin}>
+          <Text style={s.tefillinPromptText}>Have you wrapped tefillin today?</Text>
+          <View style={s.tefillinPromptBtn}><Text style={s.tefillinPromptBtnText}>Yes</Text></View>
+        </Pressable>
+      )}
 
       {/* Streaks */}
       <View style={s.streakRow}>
         <View style={[s.streakCard, { backgroundColor: C.streakBg }]}>
-          <Text style={s.streakEmoji}>🔥</Text>
           <Text style={s.streakNumber}>{user?.currentStreak ?? 0}</Text>
           <Text style={s.streakLabel}>Shabbat Streak</Text>
         </View>
         <View style={[s.streakCard, { backgroundColor: C.primaryLight }]}>
-          <Text style={s.streakEmoji}>✡️</Text>
           <Text style={[s.streakNumber, { color: C.primary }]}>{user?.tefillinCurrentStreak ?? 0}</Text>
           <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin Streak</Text>
         </View>
       </View>
 
+      {!isStreakEligible && blockLevel !== "none" && (
+        <View style={[s.highlightBox, { marginBottom: 12, backgroundColor: C.dangerLight }]}>
+          <Text style={{ fontSize: 12, color: C.danger, lineHeight: 16 }}>
+            Custom mode requires at least 1 app blocked to keep your streak.
+          </Text>
+        </View>
+      )}
+
       {/* Shabbat Times */}
       <View style={s.sectionCard}>
-        <Text style={s.sectionIcon}>🕯️</Text>
         <Text style={s.sectionTitle}>This Shabbat</Text>
         <Text style={s.sectionValue}>{timesDisplay}</Text>
         {isShabbatNow && <View style={s.liveBadge}><Text style={s.liveBadgeText}>SHABBAT NOW</Text></View>}
+        {!isStreakEligible && (
+          <Text style={{ fontSize: 11, color: C.textLight, marginTop: 6 }}>
+            Select a block mode below to keep your streak alive each Shabbat.
+          </Text>
+        )}
       </View>
 
       {/* Shabbat Block Level */}
@@ -1151,7 +1340,6 @@ export default function App() {
                 style={[s.blockOption, active && s.blockOptionActive]}
                 onPress={() => saveBlockLevel(level)}
               >
-                <Text style={s.blockEmoji}>{info.emoji}</Text>
                 <Text style={[s.blockTitle, active && s.blockTitleActive]}>{info.title}</Text>
                 <Text style={[s.blockDesc, active && s.blockDescActive]} numberOfLines={2}>{info.desc}</Text>
               </Pressable>
@@ -1161,42 +1349,28 @@ export default function App() {
 
         {blockLevel === "custom" && (
           <View style={s.customBlockSection}>
-            <Text style={s.customBlockTitle}>Customize Blocking</Text>
-            {[
-              { key: "social" as const, label: "Social Media" },
-              { key: "games" as const, label: "Games" },
-              { key: "streaming" as const, label: "Streaming" },
-            ].map((item) => (
-              <View key={item.key} style={s.toggleRow}>
-                <Text style={s.toggleLabel}>{item.label}</Text>
-                <Switch
-                  value={customBlocks[item.key]}
-                  onValueChange={(val) => saveCustomBlocks({ ...customBlocks, [item.key]: val })}
-                  trackColor={{ false: C.border, true: C.primaryLight }}
-                  thumbColor={customBlocks[item.key] ? C.primary : "#f4f4f5"}
-                />
+            <Text style={s.customBlockTitle}>Select Apps to Block</Text>
+            {Object.entries(appCategories).map(([category, apps]) => (
+              <View key={category}>
+                <Text style={s.appCategoryHeader}>{category}</Text>
+                {apps.map((app) => (
+                  <View key={app.id} style={s.appToggleRow}>
+                    <Text style={s.appToggleName}>{app.name}</Text>
+                    <Switch
+                      value={Boolean(customAppBlocks[app.id])}
+                      onValueChange={(val) => saveCustomAppBlocks({ ...customAppBlocks, [app.id]: val })}
+                      trackColor={{ false: C.border, true: C.primaryLight }}
+                      thumbColor={customAppBlocks[app.id] ? C.primary : "#f4f4f5"}
+                    />
+                  </View>
+                ))}
               </View>
             ))}
           </View>
         )}
 
-        {/* Mode Toggle */}
-        <View style={[s.toggleRow, { marginTop: 16 }]}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.toggleLabel}>{isModeActive ? "Shabbat Mode Active" : "Activate Shabbat Mode"}</Text>
-            {!isShabbatNow && !isModeActive && <Text style={s.toggleHint}>Available when Shabbat begins</Text>}
-          </View>
-          <Switch
-            value={isModeActive}
-            onValueChange={onToggleMode}
-            disabled={!isShabbatNow && !isModeActive}
-            trackColor={{ false: C.border, true: C.successLight }}
-            thumbColor={isModeActive ? C.success : "#f4f4f5"}
-          />
-        </View>
-
         {isModeActive && (
-          <Pressable style={s.dangerBtn} onPress={onBreakShabbatNow} disabled={actionLoading}>
+          <Pressable style={s.dangerBtn} onPress={() => setShowBreakConfirm(true)} disabled={actionLoading}>
             <Text style={s.dangerBtnText}>Break Shabbat</Text>
           </Pressable>
         )}
@@ -1204,7 +1378,12 @@ export default function App() {
 
       {/* Intention */}
       <View style={s.sectionCard}>
-        <Text style={s.sectionTitle}>Your Shabbat Intention</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={s.sectionTitle}>Your Shabbat Intention</Text>
+          <Pressable onPress={() => setShowIntentCalendar(true)} style={s.calendarIconBtn}>
+            <Text style={{ fontSize: 20 }}>📅</Text>
+          </Pressable>
+        </View>
         <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. This will remind you if you try to break it.</Text>
         <TextInput
           multiline
@@ -1218,12 +1397,7 @@ export default function App() {
           placeholderTextColor={C.textLight}
         />
         {intentDraft.trim() !== (user?.shabbatIntentText ?? "") && intentDraft.trim() && (
-          <Pressable style={s.primaryBtn} onPress={async () => {
-            if (!user) return;
-            const updated = await updateUserProfile(user.uid, { shabbatIntentText: intentDraft.trim() });
-            setUser(updated);
-            Alert.alert("Saved", "Your intention has been saved.");
-          }}>
+          <Pressable style={s.primaryBtn} onPress={onSaveIntentInline}>
             <Text style={s.primaryBtnText}>Save Intention</Text>
           </Pressable>
         )}
@@ -1233,10 +1407,16 @@ export default function App() {
       <View style={s.sectionCard}>
         <Text style={s.sectionTitle}>Daily Practice</Text>
 
+        {/* Tefillin */}
         <View style={s.toggleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.toggleLabel}>🕐 Tefillin Reminder</Text>
-            <Text style={s.toggleHint}>Morning notification to wrap tefillin</Text>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.toggleLabel}>Tefillin Reminder</Text>
+              <Text style={s.toggleHint}>Morning notification to wrap tefillin</Text>
+            </View>
+            <Pressable onPress={() => setShowDailyInfo("tefillin")} hitSlop={12}>
+              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+            </Pressable>
           </View>
           <Switch
             value={Boolean(user?.wantsMorningReminders)}
@@ -1245,36 +1425,8 @@ export default function App() {
             thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
           />
         </View>
-
-        <View style={s.toggleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.toggleLabel}>🌅 Modeh Ani</Text>
-            <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
-          </View>
-          <Switch
-            value={Boolean(user?.wantsModehAniReminder)}
-            onValueChange={onToggleModehAni}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
-          />
-        </View>
-
-        <View style={s.toggleRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.toggleLabel}>🌙 Shema Before Bed</Text>
-            <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
-          </View>
-          <Switch
-            value={Boolean(user?.wantsShemaReminder)}
-            onValueChange={onToggleShema}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
-          />
-        </View>
-
-        {/* Wake / Bed Times */}
-        {(user?.wantsMorningReminders || user?.wantsModehAniReminder) && (
-          <View style={s.timeSection}>
+        {user?.wantsMorningReminders && (
+          <View style={s.inlineTimeSection}>
             <Text style={s.timeSectionTitle}>Wake Up Time</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
               {WAKE_TIMES.map((t) => (
@@ -1286,8 +1438,57 @@ export default function App() {
           </View>
         )}
 
+        {/* Modeh Ani */}
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.toggleLabel}>Modeh Ani</Text>
+              <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
+            </View>
+            <Pressable onPress={() => setShowDailyInfo("modehAni")} hitSlop={12}>
+              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+            </Pressable>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsModehAniReminder)}
+            onValueChange={onToggleModehAni}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
+        {user?.wantsModehAniReminder && (
+          <View style={s.inlineTimeSection}>
+            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {WAKE_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
+                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Shema */}
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.toggleLabel}>Shema Before Bed</Text>
+              <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
+            </View>
+            <Pressable onPress={() => setShowDailyInfo("shema")} hitSlop={12}>
+              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+            </Pressable>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsShemaReminder)}
+            onValueChange={onToggleShema}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
         {user?.wantsShemaReminder && (
-          <View style={s.timeSection}>
+          <View style={s.inlineTimeSection}>
             <Text style={s.timeSectionTitle}>Bed Time</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
               {BED_TIMES.map((t) => (
@@ -1300,6 +1501,37 @@ export default function App() {
         )}
       </View>
 
+      {/* Upcoming Holidays */}
+      {shabbatTimes?.holidays && shabbatTimes.holidays.length > 0 && (
+        <View style={s.sectionCard}>
+          <Text style={s.sectionTitle}>Upcoming Holidays</Text>
+          <Text style={s.sectionDesc}>These holidays also have restrictions on phone use, similar to Shabbat. Participation is optional and does not affect your Shabbat streak.</Text>
+          {shabbatTimes.holidays.map((holiday, idx) => (
+            <View key={idx} style={s.holidayItem}>
+              <Text style={s.holidayName}>{holiday.name}</Text>
+              {holiday.candleLighting && (
+                <Text style={s.holidayTime}>
+                  {formatDay(holiday.candleLighting)} {formatTime(holiday.candleLighting)}
+                  {holiday.havdalah ? ` – ${formatDay(holiday.havdalah)} ${formatTime(holiday.havdalah)}` : ""}
+                </Text>
+              )}
+            </View>
+          ))}
+          <View style={[s.toggleRow, { borderBottomWidth: 0 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.toggleLabel}>Participate in holiday blocking</Text>
+              <Text style={s.toggleHint}>Uses your current Shabbat mode settings</Text>
+            </View>
+            <Switch
+              value={holidayOptIn}
+              onValueChange={onToggleHolidayOptIn}
+              trackColor={{ false: C.border, true: C.primaryLight }}
+              thumbColor={holidayOptIn ? C.primary : "#f4f4f5"}
+            />
+          </View>
+        </View>
+      )}
+
       <View style={{ height: 24 }} />
     </ScrollView>
   );
@@ -1310,13 +1542,20 @@ export default function App() {
 
   const renderSocialTab = () => (
     <View style={{ flex: 1 }}>
-      {/* Congregation Banner */}
+      {/* Congregation Banner — Clash Royale style */}
       <View style={s.congBanner}>
         {user?.congregationId && currentCongregation ? (
-          <>
-            <Text style={s.congBannerName}>{currentCongregation.name}</Text>
-            <Text style={s.congBannerDetail}>{currentCongregation.city} · {congregationMembers.length} members</Text>
-          </>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.congBannerName}>{currentCongregation.name}</Text>
+              <Text style={s.congBannerDetail}>{currentCongregation.city} · {congregationMembers.length} members</Text>
+            </View>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Pressable style={s.congIconBtn} onPress={() => setCongregationSettingsVisible(true)}>
+                <Text style={{ fontSize: 18 }}>⚙️</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <>
             <Text style={s.congBannerName}>No Congregation</Text>
@@ -1327,10 +1566,10 @@ export default function App() {
           {user?.congregationId ? (
             <>
               <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("chat")}>
-                <Text style={s.congBannerBtnText}>💬 Chat</Text>
+                <Text style={s.congBannerBtnText}>Chat</Text>
               </Pressable>
               <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("friends")}>
-                <Text style={s.congBannerBtnText}>👥 Members</Text>
+                <Text style={s.congBannerBtnText}>Members</Text>
               </Pressable>
             </>
           ) : (
@@ -1346,7 +1585,7 @@ export default function App() {
         {([
           { key: "friends" as SocialSubTab, label: "Leaderboard" },
           { key: "chat" as SocialSubTab, label: "Chat" },
-          { key: "buddies" as SocialSubTab, label: "Buddies" },
+          { key: "buddies" as SocialSubTab, label: "Tefillin Buddies" },
         ]).map((tab) => (
           <Pressable
             key={tab.key}
@@ -1358,7 +1597,7 @@ export default function App() {
         ))}
       </View>
 
-      {/* Sub-tab Content */}
+      {/* Leaderboard Sub-tab */}
       {socialSubTab === "friends" && (
         <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
           {/* Pending friend requests */}
@@ -1378,56 +1617,41 @@ export default function App() {
             </View>
           )}
 
+          {/* Leaderboard header */}
+          <View style={s.leaderboardHeader}>
+            <Text style={s.leaderboardHeaderText}>Leaderboard</Text>
+          </View>
+
           {/* Friends Leaderboard */}
-          <View style={s.sectionCard}>
-            <Text style={s.sectionTitle}>Friends</Text>
+          <View style={s.leaderboardCard}>
             {friends.length === 0 ? (
-              <Text style={s.emptyText}>Add friends to see them here!</Text>
+              <Text style={s.emptyText}>Add friends to see the leaderboard!</Text>
             ) : (
               friends.map((friend, idx) => (
-                <LeaderboardRow key={friend.uid} profile={friend} rank={idx + 1} />
+                <LeaderboardRow
+                  key={friend.uid}
+                  profile={friend}
+                  rank={idx + 1}
+                  congregationName={friend.congregationId ? currentCongregationName : null}
+                />
               ))
             )}
           </View>
 
           {/* Congregation Members */}
           {congregationMembers.length > 0 && (
-            <View style={s.sectionCard}>
-              <Text style={s.sectionTitle}>{currentCongregation?.name ?? "Congregation"}</Text>
-              {congregationMembers
-                .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
-                .map((member, idx) => (
-                  <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} />
-                ))}
-            </View>
-          )}
-
-          {/* Leader Controls */}
-          {currentCongregation?.leaderUid === user?.uid && (
-            <View style={s.sectionCard}>
-              <Text style={s.sectionTitle}>Leader Controls</Text>
-              <Text style={s.sectionDesc}>Join policy: {currentCongregation?.joinPolicy}</Text>
-              <View style={s.policyRow}>
-                {(["OPEN", "REQUEST", "CLOSED"] as const).map((p) => (
-                  <Pressable key={p} style={[s.policyPill, currentCongregation?.joinPolicy === p && s.policyPillActive]} onPress={() => onChangeJoinPolicy(p)}>
-                    <Text style={[s.policyPillText, currentCongregation?.joinPolicy === p && s.policyPillTextActive]}>{p}</Text>
-                  </Pressable>
-                ))}
+            <>
+              <View style={s.leaderboardHeader}>
+                <Text style={s.leaderboardHeaderText}>{currentCongregation?.name ?? "Congregation"}</Text>
               </View>
-              {pendingMembers.length > 0 && (
-                <>
-                  <Text style={[s.sectionTitle, { marginTop: 12 }]}>Pending Requests</Text>
-                  {pendingMembers.map((m) => (
-                    <View key={m.uid} style={s.friendRow}>
-                      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
-                      <Text style={[s.friendName, { flex: 1 }]}>{m.displayName ?? "Unknown"}</Text>
-                      <Pressable style={s.acceptBtn} onPress={() => onApproveRequest(m.uid)}><Text style={s.acceptBtnText}>Approve</Text></Pressable>
-                      <Pressable style={s.rejectBtn} onPress={() => onRejectMemberRequest(m.uid)}><Text style={s.rejectBtnText}>Reject</Text></Pressable>
-                    </View>
+              <View style={s.leaderboardCard}>
+                {congregationMembers
+                  .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
+                  .map((member, idx) => (
+                    <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} congregationName={currentCongregation?.name ?? null} />
                   ))}
-                </>
-              )}
-            </View>
+              </View>
+            </>
           )}
 
           {/* Add Friend + Congregation Actions */}
@@ -1435,11 +1659,6 @@ export default function App() {
             <Pressable style={s.primaryBtn} onPress={() => { setFriendSearchQuery(""); setFriendSearchResults([]); setAddFriendVisible(true); }}>
               <Text style={s.primaryBtnText}>+ Add Friends</Text>
             </Pressable>
-            {user?.congregationId && (
-              <Pressable style={s.outlineBtn} onPress={() => Alert.alert("Leave Congregation", "Are you sure?", [{ text: "Cancel", style: "cancel" }, { text: "Leave", style: "destructive", onPress: onLeaveCongregation }])}>
-                <Text style={s.outlineBtnText}>Leave Congregation</Text>
-              </Pressable>
-            )}
             {!user?.congregationId && (
               <Pressable style={s.outlineBtn} onPress={() => setJoinCongregationVisible(true)}>
                 <Text style={s.outlineBtnText}>Join / Create Congregation</Text>
@@ -1450,6 +1669,7 @@ export default function App() {
         </ScrollView>
       )}
 
+      {/* Chat Sub-tab */}
       {socialSubTab === "chat" && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
           {!user?.congregationId ? (
@@ -1491,21 +1711,61 @@ export default function App() {
         </KeyboardAvoidingView>
       )}
 
+      {/* Tefillin Buddies Sub-tab */}
       {socialSubTab === "buddies" && (
         <ScrollView contentContainerStyle={s.tabContent}>
-          <View style={s.sectionCard}>
-            <Text style={s.sectionIcon}>🤝</Text>
-            <Text style={s.sectionTitle}>Tefillin Buddies</Text>
-            <Text style={s.sectionDesc}>
-              Pair up with a friend and send each other a photo of you wrapping tefillin daily. Keep the streak going together — like Snapchat streaks but for your neshama!
+          <View style={s.buddiesHero}>
+            <Text style={s.buddiesHeroTitle}>Tefillin Buddies</Text>
+            <Text style={s.buddiesHeroDesc}>
+              Pair up with a friend and hold each other accountable to wrap tefillin every day. Keep the streak alive together!
             </Text>
-            <View style={[s.highlightBox, { marginTop: 16 }]}>
-              <Text style={s.highlightText}>📸 Photo sharing coming soon! For now, use the congregation chat to share your tefillin moments with your community.</Text>
-            </View>
-            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setSocialSubTab("chat")}>
-              <Text style={s.primaryBtnText}>Go to Chat</Text>
-            </Pressable>
           </View>
+
+          <View style={s.sectionCard}>
+            <Text style={s.sectionTitle}>How It Works</Text>
+            <View style={s.buddyStep}>
+              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>1</Text></View>
+              <Text style={s.buddyStepText}>Add a friend as your Tefillin Buddy from your friends list.</Text>
+            </View>
+            <View style={s.buddyStep}>
+              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>2</Text></View>
+              <Text style={s.buddyStepText}>Send each other a photo of you wrapping tefillin every day to keep the streak.</Text>
+            </View>
+            <View style={s.buddyStep}>
+              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>3</Text></View>
+              <Text style={s.buddyStepText}>If either of you misses a day, you'll see an hourglass warning. Miss two and the streak resets!</Text>
+            </View>
+          </View>
+
+          {friends.length > 0 && (
+            <View style={s.sectionCard}>
+              <Text style={s.sectionTitle}>Your Friends</Text>
+              <Text style={s.sectionDesc}>Tap a friend to add them as a Tefillin Buddy.</Text>
+              {friends.filter(f => f.gender === "Male").map((friend) => (
+                <View key={friend.uid} style={s.friendRow}>
+                  <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.friendName}>{friend.displayName ?? "Unknown"}</Text>
+                    <Text style={s.friendCong}>Tefillin streak: {friend.tefillinCurrentStreak ?? 0}</Text>
+                  </View>
+                  <Pressable style={s.acceptBtn} onPress={() => Alert.alert("Coming Soon", "Photo-based Tefillin Buddies will be available in the next update. For now, use the congregation chat to stay accountable!")}>
+                    <Text style={s.acceptBtnText}>Add Buddy</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View style={[s.highlightBox, { marginTop: 8 }]}>
+            <Text style={s.highlightText}>
+              Photo sharing for Tefillin Buddies is coming soon! In the meantime, use the congregation chat to share your tefillin moments with friends.
+            </Text>
+          </View>
+
+          <Pressable style={[s.primaryBtn, { marginTop: 12 }]} onPress={() => setSocialSubTab("chat")}>
+            <Text style={s.primaryBtnText}>Go to Chat</Text>
+          </Pressable>
+          <View style={{ height: 24 }} />
         </ScrollView>
       )}
     </View>
@@ -1519,27 +1779,39 @@ export default function App() {
     <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
       <Text style={s.parashaHeader}>This Week's Torah Portion</Text>
       <View style={s.parashaCard}>
-        <Text style={s.parashaIcon}>📖</Text>
-        <Text style={s.parashaName}>{shabbatTimes?.parsha ?? "Loading..."}</Text>
-        {parashaInfo && (
+        {timesLoading ? (
           <>
-            <View style={s.parashaBookBadge}>
-              <Text style={s.parashaBookText}>{parashaInfo.book}</Text>
-            </View>
-            <Text style={s.parashaSummary}>{parashaInfo.summary}</Text>
+            <ActivityIndicator color={C.primary} size="large" />
+            <Text style={[s.sectionDesc, { marginTop: 12 }]}>Loading this week's portion...</Text>
           </>
-        )}
-        {!parashaInfo && shabbatTimes?.parsha && (
-          <Text style={s.parashaSummary}>Explore this week's Torah portion to discover timeless wisdom and inspiration for your week ahead.</Text>
+        ) : shabbatTimes?.parsha ? (
+          <>
+            <Text style={s.parashaName}>{shabbatTimes.parsha}</Text>
+            {parashaInfo && (
+              <>
+                <View style={s.parashaBookBadge}>
+                  <Text style={s.parashaBookText}>{parashaInfo.book}</Text>
+                </View>
+                <Text style={s.parashaSummary}>{parashaInfo.summary}</Text>
+              </>
+            )}
+            {!parashaInfo && (
+              <Text style={s.parashaSummary}>Explore this week's Torah portion to discover timeless wisdom and inspiration for your week ahead.</Text>
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={s.parashaName}>Torah Portion</Text>
+            <Text style={s.parashaSummary}>Could not load this week's portion. Pull down to refresh or check back later.</Text>
+          </>
         )}
       </View>
 
       <Pressable style={s.primaryBtn} onPress={() => Linking.openURL(getChabadParashaUrl())}>
-        <Text style={s.primaryBtnText}>📚 Learn More on Chabad.org</Text>
+        <Text style={s.primaryBtnText}>Learn More on Chabad.org</Text>
       </Pressable>
 
       <View style={[s.sectionCard, { marginTop: 16 }]}>
-        <Text style={s.sectionIcon}>🎬</Text>
         <Text style={s.sectionTitle}>Weekly Video</Text>
         <Text style={s.sectionDesc}>Ask your rabbi to record a short weekly video about the parasha. It could be linked here for your community!</Text>
         <View style={s.highlightBox}>
@@ -1755,11 +2027,11 @@ export default function App() {
         {activeTab === "parasha" && renderParashaTab()}
       </Animated.View>
 
-      {/* Tab Bar */}
+      {/* Tab Bar — Torah / Home / Social */}
       <View style={s.tabBar}>
-        <TabItem icon="🏠" label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
-        <TabItem icon="👥" label="Social" active={activeTab === "social"} onPress={() => setActiveTab("social")} />
-        <TabItem icon="📖" label="Torah" active={activeTab === "parasha"} onPress={() => setActiveTab("parasha")} />
+        <TabItem label="Torah" active={activeTab === "parasha"} onPress={() => setActiveTab("parasha")} />
+        <TabItem label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
+        <TabItem label="Social" active={activeTab === "social"} onPress={() => setActiveTab("social")} />
       </View>
 
       {/* ── Modals ── */}
@@ -1768,11 +2040,117 @@ export default function App() {
       <Modal visible={intentModalVisible} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>Shabbat is starting ✨</Text>
+            <Text style={s.modalTitle}>Shabbat is starting</Text>
             <Text style={s.sectionDesc}>Write your intention for keeping Shabbat this week. This will remind you if you try to break it.</Text>
             <TextInput multiline value={intentDraft} onChangeText={setIntentDraft} style={s.intentInput} placeholder="I am keeping Shabbat because..." placeholderTextColor={C.textLight} />
             <Pressable style={s.primaryBtn} onPress={onSubmitIntent}><Text style={s.primaryBtnText}>Save intention</Text></Pressable>
             <Pressable style={s.dangerBtn} onPress={onOptOutThisWeek}><Text style={s.dangerBtnText}>Not keeping this week</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Break Shabbat Confirmation Modal */}
+      <Modal visible={showBreakConfirm} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Are you sure?</Text>
+            {user?.shabbatIntentText ? (
+              <View style={[s.highlightBox, { marginTop: 12 }]}>
+                <Text style={{ fontSize: 13, fontWeight: "600", color: C.primaryDark, marginBottom: 6 }}>Your Shabbat Intention:</Text>
+                <Text style={{ fontSize: 14, color: C.primaryDark, fontStyle: "italic", lineHeight: 20 }}>"{user.shabbatIntentText}"</Text>
+              </View>
+            ) : null}
+            <Text style={[s.sectionDesc, { marginTop: 12 }]}>Opening this app will break Shabbat. Your streak will reset to 0. Are you sure you want to do this?</Text>
+            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={onCancelBreak}>
+              <Text style={s.primaryBtnText}>Go Back to Shabbat</Text>
+            </Pressable>
+            <Pressable style={s.dangerBtn} onPress={onConfirmBreak}>
+              <Text style={s.dangerBtnText}>Break Shabbat</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Intent Calendar Modal */}
+      <Modal visible={showIntentCalendar} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "80%" }]}>
+            <Text style={s.modalTitle}>Shabbat Intentions</Text>
+            <Text style={s.sectionDesc}>Look back at your past Shabbat intentions.</Text>
+            <ScrollView style={{ maxHeight: 400, marginTop: 12 }}>
+              {getPastShabbatDates(26).map((date) => {
+                const intent = intentHistory[date];
+                const d = new Date(date + "T12:00:00");
+                const label = d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+                return (
+                  <Pressable
+                    key={date}
+                    style={[s.calendarDateItem, selectedPastDate === date && s.calendarDateItemActive]}
+                    onPress={() => setSelectedPastDate(selectedPastDate === date ? null : date)}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                      <Text style={[s.calendarDateText, selectedPastDate === date && { color: C.primaryDark }]}>{label}</Text>
+                      {intent ? (
+                        <View style={s.calendarDot} />
+                      ) : (
+                        <Text style={{ fontSize: 11, color: C.textLight }}>No entry</Text>
+                      )}
+                    </View>
+                    {selectedPastDate === date && intent && (
+                      <Text style={s.calendarIntentText}>"{intent}"</Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => { setShowIntentCalendar(false); setSelectedPastDate(null); }}>
+              <Text style={s.ghostBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Daily Info Modal */}
+      <Modal visible={showDailyInfo !== null} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            {showDailyInfo && DAILY_INFO[showDailyInfo] && (
+              <>
+                <Text style={s.modalTitle}>{DAILY_INFO[showDailyInfo]!.title}</Text>
+                <Text style={[s.sectionDesc, { marginTop: 12, fontSize: 14, lineHeight: 22 }]}>{DAILY_INFO[showDailyInfo]!.explanation}</Text>
+              </>
+            )}
+            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setShowDailyInfo(null)}>
+              <Text style={s.primaryBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Prayer Overlay Modal */}
+      <Modal visible={showPrayerOverlay} transparent animationType="fade">
+        <View style={[s.modalOverlay, { backgroundColor: "rgba(0,0,0,0.7)" }]}>
+          <View style={[s.modalCard, { alignItems: "center" }]}>
+            {prayerOverlayType === "modehAni" && (
+              <>
+                <Text style={s.modalTitle}>Modeh Ani</Text>
+                <Text style={s.prayerHebrew}>{PRAYER_TEXTS.modehAni.hebrew}</Text>
+                <Text style={s.prayerEnglish}>{PRAYER_TEXTS.modehAni.english}</Text>
+              </>
+            )}
+            {prayerOverlayType === "shema" && (
+              <>
+                <Text style={s.modalTitle}>Shema</Text>
+                <Text style={s.prayerHebrew}>{PRAYER_TEXTS.shema.hebrew}</Text>
+                <Text style={s.prayerEnglish}>{PRAYER_TEXTS.shema.english}</Text>
+              </>
+            )}
+            <Pressable style={[s.primaryBtn, { marginTop: 20, width: "100%" }]} onPress={() => { setShowPrayerOverlay(false); setPrayerOverlayType(null); }}>
+              <Text style={s.primaryBtnText}>OK</Text>
+            </Pressable>
+            <Pressable style={s.ghostBtn} onPress={() => { setShowPrayerOverlay(false); setPrayerOverlayType(null); }}>
+              <Text style={s.ghostBtnText}>Dismiss</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -1794,6 +2172,14 @@ export default function App() {
                 <Text style={s.outlineBtnText}>Save Profile</Text>
               </Pressable>
 
+              <Text style={[s.sectionTitle, { marginTop: 20 }]}>Location</Text>
+              <Text style={s.sectionDesc}>{homeCity}</Text>
+              {currentLocation && (
+                <Text style={{ fontSize: 11, color: C.textLight, marginTop: 2 }}>
+                  {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                </Text>
+              )}
+
               <Text style={[s.sectionTitle, { marginTop: 20 }]}>Shabbat Reminder</Text>
               <View style={s.toggleRow}>
                 <Text style={s.toggleLabel}>15 min before Shabbat</Text>
@@ -1812,6 +2198,66 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Congregation Settings Modal */}
+      <Modal visible={congregationSettingsVisible} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "80%" }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={s.modalTitle}>{currentCongregation?.name ?? "Congregation"} Settings</Text>
+
+              <Text style={[s.sectionTitle, { marginTop: 16 }]}>Join Policy</Text>
+              <Text style={s.sectionDesc}>Current: {currentCongregation?.joinPolicy ?? "N/A"}</Text>
+              {currentCongregation?.leaderUid === user?.uid ? (
+                <View style={s.policyRow}>
+                  {(["OPEN", "REQUEST", "CLOSED"] as const).map((p) => (
+                    <Pressable key={p} style={[s.policyPill, currentCongregation?.joinPolicy === p && s.policyPillActive]} onPress={() => onChangeJoinPolicy(p)}>
+                      <Text style={[s.policyPillText, currentCongregation?.joinPolicy === p && s.policyPillTextActive]}>{p}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <Text style={{ fontSize: 12, color: C.textLight, marginTop: 4 }}>Only the leader can change these settings.</Text>
+              )}
+
+              {currentCongregation?.leaderUid === user?.uid && pendingMembers.length > 0 && (
+                <>
+                  <Text style={[s.sectionTitle, { marginTop: 16 }]}>Pending Requests</Text>
+                  {pendingMembers.map((m) => (
+                    <View key={m.uid} style={s.friendRow}>
+                      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                      <Text style={[s.friendName, { flex: 1 }]}>{m.displayName ?? "Unknown"}</Text>
+                      <Pressable style={s.acceptBtn} onPress={() => onApproveRequest(m.uid)}><Text style={s.acceptBtnText}>Approve</Text></Pressable>
+                      <Pressable style={s.rejectBtn} onPress={() => onRejectMemberRequest(m.uid)}><Text style={s.rejectBtnText}>Reject</Text></Pressable>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              <Text style={[s.sectionTitle, { marginTop: 16 }]}>Members ({congregationMembers.length})</Text>
+              {congregationMembers.map((m) => (
+                <View key={m.uid} style={s.friendRow}>
+                  <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                  <Text style={[s.friendName, { flex: 1 }]}>{m.displayName ?? "Unknown"}</Text>
+                  {currentCongregation?.leaderUid === user?.uid && m.uid !== user?.uid && (
+                    <Pressable style={s.rejectBtn} onPress={() => Alert.alert("Remove Member", `Remove ${m.displayName}?`, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => onKickMember(m.uid) }])}>
+                      <Text style={s.rejectBtnText}>Remove</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+
+              <Pressable style={[s.dangerBtn, { marginTop: 20 }]} onPress={() => { setCongregationSettingsVisible(false); Alert.alert("Leave Congregation", "Are you sure?", [{ text: "Cancel", style: "cancel" }, { text: "Leave", style: "destructive", onPress: onLeaveCongregation }]); }}>
+                <Text style={s.dangerBtnText}>Leave Congregation</Text>
+              </Pressable>
+            </ScrollView>
+
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setCongregationSettingsVisible(false)}>
+              <Text style={s.ghostBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Add Friend Modal */}
       <Modal visible={addFriendVisible} transparent animationType="slide">
         <View style={s.modalOverlay}>
@@ -1820,7 +2266,7 @@ export default function App() {
 
             <View style={[s.highlightBox, { marginBottom: 12 }]}>
               <Text style={s.highlightText}>Your Friend Code: {user.uid.slice(0, 8).toUpperCase()}</Text>
-              <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can find you. QR code coming soon!</Text>
+              <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can find you.</Text>
             </View>
 
             <TextInput
@@ -1845,7 +2291,7 @@ export default function App() {
                       <Text style={s.friendName}>{result.displayName ?? "Unknown"}</Text>
                     </View>
                     {alreadyFriend ? (
-                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Friends ✓</Text>
+                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Friends</Text>
                     ) : alreadyPending ? (
                       <Text style={[s.sectionDesc, { marginTop: 0 }]}>Sent</Text>
                     ) : (
@@ -1869,7 +2315,6 @@ export default function App() {
           <View style={[s.modalCard, { maxHeight: "85%" }]}>
             <Text style={s.modalTitle}>Congregation</Text>
 
-            {/* Search */}
             <TextInput placeholder="Search by city..." value={congregationCitySearch} onChangeText={onCitySearchChange} style={s.authInput} placeholderTextColor={C.textLight} />
 
             {citySuggestions.length > 0 && (
@@ -1897,7 +2342,6 @@ export default function App() {
               )}
             </ScrollView>
 
-            {/* Create */}
             <View style={s.createCongSection}>
               <Text style={s.sectionTitle}>Create New</Text>
               <TextInput placeholder="Congregation name" value={newCongregationName} onChangeText={setNewCongregationName} style={s.authInput} placeholderTextColor={C.textLight} />
@@ -1919,10 +2363,9 @@ export default function App() {
 
 /* ─── sub-components ────────────────────────────────────────── */
 
-function TabItem({ icon, label, active, onPress }: { icon: string; label: string; active: boolean; onPress: () => void }) {
+function TabItem({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
     <Pressable style={[s.tabItem, active && s.tabItemActive]} onPress={onPress}>
-      <Text style={s.tabIcon}>{icon}</Text>
       <Text style={[s.tabLabel, active && s.tabLabelActive]}>{label}</Text>
     </Pressable>
   );
@@ -1945,18 +2388,17 @@ function GenderPicker({ value, onChange }: { value: GenderOption | ""; onChange:
   );
 }
 
-function LeaderboardRow({ profile, rank, isCurrentUser }: { profile: UserProfile; rank: number; isCurrentUser?: boolean }) {
+function LeaderboardRow({ profile, rank, isCurrentUser, congregationName }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null }) {
   return (
     <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
       <Text style={s.leaderRank}>{rank}</Text>
       <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(profile.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
       <View style={{ flex: 1 }}>
         <Text style={s.friendName}>{profile.displayName ?? "Unknown"}{isCurrentUser ? " (You)" : ""}</Text>
-        <Text style={s.friendCong}>{profile.congregationId ? "In a congregation" : "No congregation"}</Text>
+        <Text style={s.friendCong}>{congregationName ?? (profile.congregationId ? "In a congregation" : "")}</Text>
       </View>
       <View style={s.streakBadges}>
-        <View style={s.streakBadge}><Text style={s.streakBadgeText}>🔥 {profile.currentStreak ?? 0}</Text></View>
-        <View style={[s.streakBadge, { backgroundColor: C.primaryLight }]}><Text style={[s.streakBadgeText, { color: C.primary }]}>✡️ {profile.tefillinCurrentStreak ?? 0}</Text></View>
+        <View style={s.streakBadge}><Text style={s.streakBadgeText}>{profile.currentStreak ?? 0}</Text></View>
       </View>
     </View>
   );
@@ -1978,26 +2420,29 @@ const s = StyleSheet.create({
   settingsBtnText: { fontSize: 22 },
 
   /* tab bar */
-  tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingBottom: 4, paddingTop: 8 },
-  tabItem: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: 16 },
+  tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingBottom: 4, paddingTop: 10 },
+  tabItem: { flex: 1, alignItems: "center", paddingVertical: 8, borderRadius: 16 },
   tabItemActive: {},
-  tabIcon: { fontSize: 22 },
-  tabLabel: { fontSize: 11, fontWeight: "600", color: C.textLight, marginTop: 2 },
+  tabLabel: { fontSize: 14, fontWeight: "600", color: C.textLight },
   tabLabelActive: { color: C.primary, fontWeight: "800" },
 
   /* tab content */
   tabContent: { paddingHorizontal: 16, paddingBottom: 16 },
 
   /* home greeting */
-  greeting: { fontSize: 24, fontWeight: "800", color: C.text, marginTop: 8 },
-  locationText: { fontSize: 14, color: C.textSecondary, marginTop: 2, marginBottom: 16 },
+  greeting: { fontSize: 24, fontWeight: "800", color: C.text, marginTop: 8, marginBottom: 16 },
+
+  /* tefillin prompt */
+  tefillinPromptBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: C.primaryLight, borderRadius: 16, padding: 14, marginBottom: 12 },
+  tefillinPromptText: { fontSize: 14, fontWeight: "600", color: C.primaryDark, flex: 1 },
+  tefillinPromptBtn: { backgroundColor: C.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 8 },
+  tefillinPromptBtnText: { color: "#FFF", fontWeight: "700", fontSize: 14 },
 
   /* streaks */
   streakRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
   streakCard: { flex: 1, borderRadius: 20, padding: 16, alignItems: "center" },
-  streakEmoji: { fontSize: 28 },
-  streakNumber: { fontSize: 32, fontWeight: "900", color: C.streak, marginTop: 4 },
-  streakLabel: { fontSize: 12, fontWeight: "700", color: "#92400E", marginTop: 2 },
+  streakNumber: { fontSize: 32, fontWeight: "900", color: C.streak },
+  streakLabel: { fontSize: 12, fontWeight: "700", color: "#92400E", marginTop: 4 },
 
   /* section cards */
   sectionCard: {
@@ -2024,28 +2469,56 @@ const s = StyleSheet.create({
   blockGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
   blockOption: { width: "47%", borderRadius: 16, borderWidth: 2, borderColor: C.border, padding: 12, alignItems: "center" },
   blockOptionActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
-  blockEmoji: { fontSize: 24 },
-  blockTitle: { fontSize: 13, fontWeight: "800", color: C.text, marginTop: 4 },
+  blockTitle: { fontSize: 13, fontWeight: "800", color: C.text, textAlign: "center" },
   blockTitleActive: { color: C.primaryDark },
-  blockDesc: { fontSize: 10, color: C.textSecondary, textAlign: "center", marginTop: 2 },
+  blockDesc: { fontSize: 10, color: C.textSecondary, textAlign: "center", marginTop: 4 },
   blockDescActive: { color: C.primaryDark },
 
-  customBlockSection: { marginTop: 12, backgroundColor: C.surface, borderRadius: 14, padding: 12 },
-  customBlockTitle: { fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 4 },
+  customBlockSection: { marginTop: 12, backgroundColor: C.surface, borderRadius: 14, padding: 12, maxHeight: 300 },
+  customBlockTitle: { fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 8 },
+  appCategoryHeader: { fontSize: 12, fontWeight: "800", color: C.textSecondary, marginTop: 10, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 },
+  appToggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
+  appToggleName: { fontSize: 14, fontWeight: "600", color: C.text },
 
   /* toggle rows */
   toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   toggleLabel: { fontSize: 15, fontWeight: "600", color: C.text },
   toggleHint: { fontSize: 11, color: C.textLight, marginTop: 1 },
 
+  /* info icon */
+  infoIcon: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
+  infoIconText: { fontSize: 13, fontWeight: "800", color: C.primary },
+
+  /* inline time section */
+  inlineTimeSection: { paddingLeft: 8, paddingTop: 6, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+
   /* time pickers */
   timeSection: { marginTop: 12 },
   timeSectionTitle: { fontSize: 13, fontWeight: "700", color: C.textSecondary, marginBottom: 8 },
-  timePills: { gap: 8 },
-  timePill: { borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: C.bg },
+  timePills: { gap: 6 },
+  timePill: { borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: C.bg },
   timePillActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
-  timePillText: { fontSize: 13, fontWeight: "600", color: C.textSecondary },
+  timePillText: { fontSize: 12, fontWeight: "600", color: C.textSecondary },
   timePillTextActive: { color: C.primaryDark, fontWeight: "700" },
+
+  /* calendar icon */
+  calendarIconBtn: { padding: 4 },
+
+  /* intent calendar */
+  calendarDateItem: { paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border, borderRadius: 8 },
+  calendarDateItemActive: { backgroundColor: C.primaryLight },
+  calendarDateText: { fontSize: 15, fontWeight: "600", color: C.text },
+  calendarDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary },
+  calendarIntentText: { fontSize: 13, color: C.primaryDark, marginTop: 8, fontStyle: "italic", lineHeight: 18 },
+
+  /* holiday */
+  holidayItem: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  holidayName: { fontSize: 15, fontWeight: "700", color: C.text },
+  holidayTime: { fontSize: 13, color: C.textSecondary, marginTop: 2 },
+
+  /* prayer overlay */
+  prayerHebrew: { fontSize: 20, fontWeight: "600", color: C.text, textAlign: "center", marginTop: 20, lineHeight: 32 },
+  prayerEnglish: { fontSize: 14, color: C.textSecondary, textAlign: "center", marginTop: 16, lineHeight: 22, fontStyle: "italic" },
 
   /* buttons */
   primaryBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginTop: 12 },
@@ -2071,6 +2544,21 @@ const s = StyleSheet.create({
   congBannerActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   congBannerBtn: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 8 },
   congBannerBtnText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  congIconBtn: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, padding: 8, justifyContent: "center", alignItems: "center" },
+
+  /* leaderboard */
+  leaderboardHeader: { backgroundColor: C.surface, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, marginTop: 12 },
+  leaderboardHeaderText: { fontSize: 14, fontWeight: "800", color: C.textSecondary, textAlign: "center", textTransform: "uppercase", letterSpacing: 1 },
+  leaderboardCard: { backgroundColor: C.card, borderRadius: 20, padding: 12, marginTop: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
+
+  /* buddies */
+  buddiesHero: { backgroundColor: C.primary, borderRadius: 20, padding: 20, marginTop: 4, marginBottom: 12, alignItems: "center" },
+  buddiesHeroTitle: { fontSize: 24, fontWeight: "900", color: "#FFF" },
+  buddiesHeroDesc: { fontSize: 14, color: "rgba(255,255,255,0.9)", textAlign: "center", marginTop: 8, lineHeight: 20 },
+  buddyStep: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12 },
+  buddyStepNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
+  buddyStepNumText: { fontSize: 14, fontWeight: "800", color: C.primary },
+  buddyStepText: { flex: 1, fontSize: 14, color: C.text, lineHeight: 20 },
 
   /* sub-tabs */
   subTabRow: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 },
@@ -2087,16 +2575,16 @@ const s = StyleSheet.create({
   friendCong: { fontSize: 11, color: C.textLight, marginTop: 1 },
 
   leaderRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
-  leaderRowHighlight: { backgroundColor: C.primaryLight, marginHorizontal: -16, paddingHorizontal: 16, borderRadius: 12 },
+  leaderRowHighlight: { backgroundColor: C.primaryLight, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: 12 },
   leaderRank: { fontSize: 16, fontWeight: "800", color: C.textLight, width: 24, textAlign: "center" },
 
   streakBadges: { flexDirection: "row", gap: 6 },
-  streakBadge: { backgroundColor: C.streakBg, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
-  streakBadgeText: { fontSize: 12, fontWeight: "700", color: "#92400E" },
+  streakBadge: { backgroundColor: C.streakBg, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  streakBadgeText: { fontSize: 13, fontWeight: "700", color: "#92400E" },
 
   acceptBtn: { backgroundColor: C.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
   acceptBtnText: { color: C.primary, fontWeight: "700", fontSize: 12 },
-  rejectBtn: { backgroundColor: C.dangerLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6 },
+  rejectBtn: { backgroundColor: C.dangerLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6, marginLeft: 6 },
   rejectBtnText: { color: C.danger, fontWeight: "700", fontSize: 12 },
 
   socialActions: { marginTop: 8, gap: 8 },
@@ -2118,7 +2606,6 @@ const s = StyleSheet.create({
   /* parasha */
   parashaHeader: { fontSize: 16, fontWeight: "700", color: C.textSecondary, marginTop: 8, marginBottom: 8 },
   parashaCard: { backgroundColor: C.card, borderRadius: 24, padding: 24, alignItems: "center", marginBottom: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
-  parashaIcon: { fontSize: 48, marginBottom: 8 },
   parashaName: { fontSize: 22, fontWeight: "900", color: C.text, textAlign: "center" },
   parashaBookBadge: { backgroundColor: C.primaryLight, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, marginTop: 8 },
   parashaBookText: { fontSize: 12, fontWeight: "700", color: C.primary },

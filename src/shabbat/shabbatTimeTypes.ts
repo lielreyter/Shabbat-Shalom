@@ -1,3 +1,9 @@
+export type HolidayEvent = {
+  name: string;
+  candleLighting: Date | null;
+  havdalah: Date | null;
+};
+
 export type ShabbatTimes = {
   shabbatStart: Date;
   shabbatEnd: Date;
@@ -8,6 +14,7 @@ export type ShabbatTimes = {
   source: "api";
   fetchedAt: Date;
   parsha?: string | null;
+  holidays?: HolidayEvent[];
 };
 
 export enum ShabbatTimeErrorCode {
