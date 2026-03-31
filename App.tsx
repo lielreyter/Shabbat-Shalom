@@ -124,10 +124,8 @@ const C = {
 /* ─── types ──────────────────────────────────────────────────── */
 
 type TabKey = "home" | "social" | "parasha";
-type SocialSubTab = "friends" | "chat" | "buddies";
+type SocialSubTab = "friends" | "chat";
 type BlockLevel = "full" | "medium" | "custom" | "none";
-type GenderOption = "Male" | "Female";
-
 type RestrictionSetting = {
   id: string;
   label: string;
@@ -158,7 +156,7 @@ const CUSTOM_APP_BLOCKS_KEY = "customAppBlocks:v1";
 const INTENT_HISTORY_KEY = "intentHistory:v1";
 const TEFILLIN_DATE_KEY = "tefillinConfirmedDate:v1";
 const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
-const GENDER_OPTIONS: GenderOption[] = ["Male", "Female"];
+const TEFILLIN_BUDDIES_KEY = "tefillinBuddies:v1";
 
 const generateTimes = (startH: number, endH: number): string[] => {
   const times: string[] = [];
@@ -215,17 +213,17 @@ const DAILY_INFO: Record<string, { title: string; explanation: string }> = {
   tefillin: {
     title: "Why Wrap Tefillin?",
     explanation:
-      "Tefillin are leather boxes containing Torah passages that Jewish men wrap on their arm and head each weekday morning. This mitzvah binds your mind and heart to God and has been practiced since the Torah was given at Sinai. Wrapping tefillin each day strengthens your spiritual connection.",
+      "We wrap tefillin to connect our mind and heart to God, symbolizing that our thoughts and emotions should be guided by Him. The act also serves as a daily reminder to live with intention, purpose, and meaning.",
   },
   modehAni: {
     title: "Why Say Modeh Ani?",
     explanation:
-      "Modeh Ani is the first prayer said each morning upon waking, even before getting out of bed. It expresses gratitude to God for restoring your soul after sleep. Starting every day with gratitude transforms your entire outlook on life.",
+      "We say Modeh Ani each morning to thank God for returning our soul to us after sleep. It helps us begin the day with gratitude and awareness of the gift of being alive.",
   },
   shema: {
     title: "Why Say Shema Before Bed?",
     explanation:
-      "The Shema is the most fundamental declaration of Jewish faith — affirming God's oneness. Saying it before bed connects you to God as you entrust your soul to Him during sleep. It has been recited by Jews for thousands of years as a cornerstone of daily practice.",
+      "We say the Shema to declare that we believe in one God and accept unity. It also expresses our commitment to love God with all our heart, soul, and strength.",
   },
 };
 
@@ -338,7 +336,6 @@ export default function App() {
   const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(null);
   const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
   const [signupName, setSignupName] = useState("");
-  const [signupGender, setSignupGender] = useState<GenderOption | "">("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
@@ -346,7 +343,7 @@ export default function App() {
   const [signupPhoneCode, setSignupPhoneCode] = useState("");
   const [signupPhoneConfirmation, setSignupPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(null);
   const [pendingEmailVerification, setPendingEmailVerification] = useState(false);
-  const [pendingSignupData, setPendingSignupData] = useState<{ name: string; gender: string } | null>(null);
+  const [pendingSignupData, setPendingSignupData] = useState<{ name: string } | null>(null);
   const [verificationChecking, setVerificationChecking] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [forgotPasswordVisible, setForgotPasswordVisible] = useState(false);
@@ -363,7 +360,6 @@ export default function App() {
 
   /* ── profile / settings ── */
   const [profileName, setProfileName] = useState("");
-  const [profileGender, setProfileGender] = useState<GenderOption | "">("");
   const [settingsVisible, setSettingsVisible] = useState(false);
 
   /* ── shabbat / restrictions ── */
@@ -425,6 +421,10 @@ export default function App() {
   /* ── chat ── */
   const [chatMessages, setChatMessages] = useState<CongregationMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
+
+  /* ── tefillin buddies ── */
+  const [tefillinBuddyUids, setTefillinBuddyUids] = useState<string[]>([]);
+  const [showBuddyInfo, setShowBuddyInfo] = useState(false);
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
@@ -497,7 +497,7 @@ export default function App() {
   /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO] = await Promise.all([
+      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO, rawTB] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
         AsyncStorage.getItem(BLOCK_LEVEL_KEY),
@@ -505,6 +505,7 @@ export default function App() {
         AsyncStorage.getItem(INTENT_HISTORY_KEY),
         AsyncStorage.getItem(TEFILLIN_DATE_KEY),
         AsyncStorage.getItem(HOLIDAY_OPTIN_KEY),
+        AsyncStorage.getItem(TEFILLIN_BUDDIES_KEY),
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
@@ -513,6 +514,7 @@ export default function App() {
       if (rawIH) { try { setIntentHistory(JSON.parse(rawIH)); } catch { /* use defaults */ } }
       if (rawTD === todayDateStr()) setTefillinConfirmedToday(true);
       if (rawHO === "true") setHolidayOptIn(true);
+      if (rawTB) { try { setTefillinBuddyUids(JSON.parse(rawTB)); } catch { /* use defaults */ } }
     };
     loadLocal().catch(() => {});
   }, []);
@@ -523,8 +525,6 @@ export default function App() {
       setAuthLoading(false);
       if (profile) {
         setProfileName(profile.displayName ?? "");
-        if (profile.gender === "Male" || profile.gender === "Female") setProfileGender(profile.gender);
-        else setProfileGender("");
         if (isEmailProvider() && !isCurrentUserEmailVerified()) setPendingEmailVerification(true);
         else setPendingEmailVerification(false);
       } else {
@@ -700,10 +700,8 @@ export default function App() {
 
   const onPressEmailRegister = useCallback(async () => {
     const name = signupName.trim();
-    const gender = signupGender;
     const email = signupEmail.trim();
     if (!name) { setAuthError("Please enter your name."); return; }
-    if (!gender) { setAuthError("Please select your gender."); return; }
     if (!email) { setAuthError("Please enter your email."); return; }
     if (!signupPassword) { setAuthError("Please enter a password."); return; }
     if (signupPassword.length < 6) { setAuthError("Password must be at least 6 characters."); return; }
@@ -712,8 +710,8 @@ export default function App() {
     setActionLoading(true);
     try {
       const profile = await registerWithEmailPassword({ email, password: signupPassword });
-      setUser({ ...profile, displayName: name, gender });
-      setPendingSignupData({ name, gender });
+      setUser({ ...profile, displayName: name });
+      setPendingSignupData({ name });
       await sendVerification();
       setResendCooldown(60);
       setPendingEmailVerification(true);
@@ -722,7 +720,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [signupConfirmPassword, signupEmail, signupGender, signupName, signupPassword]);
+  }, [signupConfirmPassword, signupEmail, signupName, signupPassword]);
 
   const onPressSendPhoneCode = useCallback(async () => {
     setAuthError(null);
@@ -746,7 +744,6 @@ export default function App() {
   const onPressSignupSendPhoneCode = useCallback(async () => {
     const name = signupName.trim();
     if (!name) { setAuthError("Please enter your name."); return; }
-    if (!signupGender) { setAuthError("Please select your gender."); return; }
     if (!signupPhone.trim()) { setAuthError("Please enter your phone number."); return; }
     setAuthError(null);
     setActionLoading(true);
@@ -759,7 +756,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [signupGender, signupName, signupPhone]);
+  }, [signupName, signupPhone]);
 
   const onPressSignupVerifyPhoneCode = useCallback(async () => {
     if (!signupPhoneConfirmation) { setAuthError("Please request a verification code first."); return; }
@@ -767,7 +764,7 @@ export default function App() {
     setActionLoading(true);
     try {
       await confirmPhoneSignUp({ confirmation: signupPhoneConfirmation, code: signupPhoneCode });
-      const profile = await createProfileAfterVerification({ displayName: signupName.trim(), gender: signupGender });
+      const profile = await createProfileAfterVerification({ displayName: signupName.trim(), gender: "" });
       setUser(profile);
       setSignupPhoneConfirmation(null);
       setSignupPhoneCode("");
@@ -776,7 +773,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [signupGender, signupName, signupPhoneCode, signupPhoneConfirmation]);
+  }, [signupName, signupPhoneCode, signupPhoneConfirmation]);
 
   const onPressSignOut = useCallback(async () => {
     setActionLoading(true);
@@ -812,7 +809,7 @@ export default function App() {
       const verified = await checkEmailVerified();
       if (verified) {
         if (pendingSignupData) {
-          const profile = await createProfileAfterVerification({ displayName: pendingSignupData.name, gender: pendingSignupData.gender });
+          const profile = await createProfileAfterVerification({ displayName: pendingSignupData.name, gender: "" });
           setUser(profile);
           setPendingSignupData(null);
         }
@@ -884,24 +881,23 @@ export default function App() {
   const onSaveProfile = useCallback(async () => {
     if (!user) return;
     const nextName = profileName.trim();
-    const nextGender = profileGender;
-    if (!nextName || !nextGender) { Alert.alert("Profile", "Name and gender are required."); return; }
+    if (!nextName) { Alert.alert("Profile", "Name is required."); return; }
     setActionLoading(true);
     try {
       if (user.uid.startsWith("dev-local-")) {
-        setUser((prev) => prev ? { ...prev, displayName: nextName, gender: nextGender } : prev);
+        setUser((prev) => prev ? { ...prev, displayName: nextName } : prev);
         return;
       }
       try {
-        const updated = await withTimeout(updateUserProfile(user.uid, { displayName: nextName, gender: nextGender }), 6000, "Profile save timed out.");
+        const updated = await withTimeout(updateUserProfile(user.uid, { displayName: nextName }), 6000, "Profile save timed out.");
         setUser(updated);
       } catch {
-        setUser((prev) => prev ? { ...prev, displayName: nextName, gender: nextGender } : prev);
+        setUser((prev) => prev ? { ...prev, displayName: nextName } : prev);
       }
     } finally {
       setActionLoading(false);
     }
-  }, [profileGender, profileName, user]);
+  }, [profileName, user]);
 
   /* ── reminder callbacks ── */
   const onToggleMorningReminder = useCallback(async () => {
@@ -1247,6 +1243,14 @@ export default function App() {
     } finally { setActionLoading(false); }
   }, [user]);
 
+  const onToggleTefillinBuddy = useCallback(async (friendUid: string) => {
+    setTefillinBuddyUids((prev) => {
+      const next = prev.includes(friendUid) ? prev.filter((u) => u !== friendUid) : [...prev, friendUid];
+      AsyncStorage.setItem(TEFILLIN_BUDDIES_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
   /* ── chat callbacks ── */
   const onSendChat = useCallback(async () => {
     if (!user?.congregationId || !chatInput.trim()) return;
@@ -1287,7 +1291,7 @@ export default function App() {
       <Text style={s.greeting}>Welcome, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
 
       {/* Tefillin daily prompt */}
-      {user?.wantsMorningReminders && !tefillinConfirmedToday && user?.gender === "Male" && (
+      {user?.wantsMorningReminders && !tefillinConfirmedToday && (
         <Pressable style={s.tefillinPromptBar} onPress={onConfirmTefillin}>
           <Text style={s.tefillinPromptText}>Have you wrapped tefillin today?</Text>
           <View style={s.tefillinPromptBtn}><Text style={s.tefillinPromptBtnText}>Yes</Text></View>
@@ -1376,6 +1380,104 @@ export default function App() {
         )}
       </View>
 
+      {/* Daily Practice Reminders */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>Daily Practice</Text>
+
+        {/* Tefillin */}
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={s.toggleLabel}>Tefillin Reminder</Text>
+              <Pressable onPress={() => setShowDailyInfo("tefillin")} hitSlop={12}>
+                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+              </Pressable>
+            </View>
+            <Text style={s.toggleHint}>Morning notification to wrap tefillin</Text>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsMorningReminders)}
+            onValueChange={onToggleMorningReminder}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
+          />
+        </View>
+        {user?.wantsMorningReminders && (
+          <View style={s.inlineTimeSection}>
+            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {WAKE_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
+                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Modeh Ani */}
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={s.toggleLabel}>Modeh Ani</Text>
+              <Pressable onPress={() => setShowDailyInfo("modehAni")} hitSlop={12}>
+                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+              </Pressable>
+            </View>
+            <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsModehAniReminder)}
+            onValueChange={onToggleModehAni}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
+        {user?.wantsModehAniReminder && (
+          <View style={s.inlineTimeSection}>
+            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {WAKE_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
+                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Shema */}
+        <View style={s.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={s.toggleLabel}>Shema Before Bed</Text>
+              <Pressable onPress={() => setShowDailyInfo("shema")} hitSlop={12}>
+                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+              </Pressable>
+            </View>
+            <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
+          </View>
+          <Switch
+            value={Boolean(user?.wantsShemaReminder)}
+            onValueChange={onToggleShema}
+            trackColor={{ false: C.border, true: C.primaryLight }}
+            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
+          />
+        </View>
+        {user?.wantsShemaReminder && (
+          <View style={s.inlineTimeSection}>
+            <Text style={s.timeSectionTitle}>Bed Time</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
+              {BED_TIMES.map((t) => (
+                <Pressable key={t} style={[s.timePill, user?.bedTime === t && s.timePillActive]} onPress={() => onSetBedTime(t)}>
+                  <Text style={[s.timePillText, user?.bedTime === t && s.timePillTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+
       {/* Intention */}
       <View style={s.sectionCard}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -1400,104 +1502,6 @@ export default function App() {
           <Pressable style={s.primaryBtn} onPress={onSaveIntentInline}>
             <Text style={s.primaryBtnText}>Save Intention</Text>
           </Pressable>
-        )}
-      </View>
-
-      {/* Daily Practice Reminders */}
-      <View style={s.sectionCard}>
-        <Text style={s.sectionTitle}>Daily Practice</Text>
-
-        {/* Tefillin */}
-        <View style={s.toggleRow}>
-          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.toggleLabel}>Tefillin Reminder</Text>
-              <Text style={s.toggleHint}>Morning notification to wrap tefillin</Text>
-            </View>
-            <Pressable onPress={() => setShowDailyInfo("tefillin")} hitSlop={12}>
-              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
-            </Pressable>
-          </View>
-          <Switch
-            value={Boolean(user?.wantsMorningReminders)}
-            onValueChange={onToggleMorningReminder}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
-          />
-        </View>
-        {user?.wantsMorningReminders && (
-          <View style={s.inlineTimeSection}>
-            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {WAKE_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
-                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Modeh Ani */}
-        <View style={s.toggleRow}>
-          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.toggleLabel}>Modeh Ani</Text>
-              <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
-            </View>
-            <Pressable onPress={() => setShowDailyInfo("modehAni")} hitSlop={12}>
-              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
-            </Pressable>
-          </View>
-          <Switch
-            value={Boolean(user?.wantsModehAniReminder)}
-            onValueChange={onToggleModehAni}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
-          />
-        </View>
-        {user?.wantsModehAniReminder && (
-          <View style={s.inlineTimeSection}>
-            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {WAKE_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
-                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Shema */}
-        <View style={s.toggleRow}>
-          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.toggleLabel}>Shema Before Bed</Text>
-              <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
-            </View>
-            <Pressable onPress={() => setShowDailyInfo("shema")} hitSlop={12}>
-              <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
-            </Pressable>
-          </View>
-          <Switch
-            value={Boolean(user?.wantsShemaReminder)}
-            onValueChange={onToggleShema}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
-          />
-        </View>
-        {user?.wantsShemaReminder && (
-          <View style={s.inlineTimeSection}>
-            <Text style={s.timeSectionTitle}>Bed Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {BED_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.bedTime === t && s.timePillActive]} onPress={() => onSetBedTime(t)}>
-                  <Text style={[s.timePillText, user?.bedTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
         )}
       </View>
 
@@ -1580,24 +1584,14 @@ export default function App() {
         </View>
       </View>
 
-      {/* Social Sub-tabs */}
-      <View style={s.subTabRow}>
-        {([
-          { key: "friends" as SocialSubTab, label: "Leaderboard" },
-          { key: "chat" as SocialSubTab, label: "Chat" },
-          { key: "buddies" as SocialSubTab, label: "Tefillin Buddies" },
-        ]).map((tab) => (
-          <Pressable
-            key={tab.key}
-            style={[s.subTab, socialSubTab === tab.key && s.subTabActive]}
-            onPress={() => setSocialSubTab(tab.key)}
-          >
-            <Text style={[s.subTabText, socialSubTab === tab.key && s.subTabTextActive]}>{tab.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {/* Back to friends from chat view */}
+      {socialSubTab === "chat" && (
+        <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
+          <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
+        </Pressable>
+      )}
 
-      {/* Leaderboard Sub-tab */}
+      {/* Main Social View */}
       {socialSubTab === "friends" && (
         <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
           {/* Pending friend requests */}
@@ -1654,7 +1648,7 @@ export default function App() {
             </>
           )}
 
-          {/* Add Friend + Congregation Actions */}
+          {/* Add Friend */}
           <View style={s.socialActions}>
             <Pressable style={s.primaryBtn} onPress={() => { setFriendSearchQuery(""); setFriendSearchResults([]); setAddFriendVisible(true); }}>
               <Text style={s.primaryBtnText}>+ Add Friends</Text>
@@ -1665,11 +1659,89 @@ export default function App() {
               </Pressable>
             )}
           </View>
+
+          {/* ── Tefillin Buddies Section ── */}
+          <View style={s.buddiesSection}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={s.buddiesSectionTitle}>Tefillin Buddies</Text>
+                <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
+                  <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Active Buddies (Snapchat-style streak list) */}
+            {tefillinBuddyUids.length > 0 ? (
+              <View style={s.buddyStreakList}>
+                {tefillinBuddyUids.map((uid) => {
+                  const buddy = friends.find((f) => f.uid === uid);
+                  if (!buddy) return null;
+                  const streak = buddy.tefillinCurrentStreak ?? 0;
+                  const lastDate = buddy.lastTefillinDate;
+                  const isToday = lastDate === todayDateStr();
+                  const showHourglass = !isToday;
+                  return (
+                    <View key={uid} style={s.buddyStreakRow}>
+                      <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
+                        <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                        {isToday && <View style={s.buddyAvatarDot} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={s.buddyStreakText}>{streak} day streak</Text>
+                          {showHourglass && <Text style={{ fontSize: 14 }}>⏳</Text>}
+                        </View>
+                      </View>
+                      <Pressable
+                        style={s.buddySnapBtn}
+                        onPress={() => Alert.alert("Tefillin Buddies", isToday ? `${buddy.displayName} has wrapped today!` : `${buddy.displayName} hasn't wrapped yet today. Send them a reminder!`)}
+                      >
+                        <Text style={s.buddySnapBtnText}>{isToday ? "Wrapped" : "Tap"}</Text>
+                      </Pressable>
+                      <Pressable style={s.buddyRemoveBtn} onPress={() => onToggleTefillinBuddy(uid)}>
+                        <Text style={s.buddyRemoveBtnText}>✕</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={s.buddyEmptyState}>
+                <Text style={{ fontSize: 36, marginBottom: 8 }}>🤝</Text>
+                <Text style={s.buddyEmptyTitle}>No buddies yet</Text>
+                <Text style={s.buddyEmptyDesc}>Add a friend as a Tefillin Buddy below to start your streak together.</Text>
+              </View>
+            )}
+
+            {/* Add Buddy from Friends */}
+            {friends.length > 0 && (
+              <View style={{ marginTop: 12 }}>
+                <Text style={s.buddyAddHeader}>Add a Tefillin Buddy</Text>
+                {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).map((friend) => (
+                  <View key={friend.uid} style={s.buddyAddRow}>
+                    <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.friendName}>{friend.displayName ?? "Unknown"}</Text>
+                    </View>
+                    <Pressable style={s.acceptBtn} onPress={() => onToggleTefillinBuddy(friend.uid)}>
+                      <Text style={s.acceptBtnText}>+ Add</Text>
+                    </Pressable>
+                  </View>
+                ))}
+                {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).length === 0 && (
+                  <Text style={[s.emptyText, { paddingVertical: 8 }]}>All your friends are already buddies!</Text>
+                )}
+              </View>
+            )}
+          </View>
+
           <View style={{ height: 24 }} />
         </ScrollView>
       )}
 
-      {/* Chat Sub-tab */}
+      {/* Chat View (accessed from congregation banner) */}
       {socialSubTab === "chat" && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
           {!user?.congregationId ? (
@@ -1710,64 +1782,6 @@ export default function App() {
           )}
         </KeyboardAvoidingView>
       )}
-
-      {/* Tefillin Buddies Sub-tab */}
-      {socialSubTab === "buddies" && (
-        <ScrollView contentContainerStyle={s.tabContent}>
-          <View style={s.buddiesHero}>
-            <Text style={s.buddiesHeroTitle}>Tefillin Buddies</Text>
-            <Text style={s.buddiesHeroDesc}>
-              Pair up with a friend and hold each other accountable to wrap tefillin every day. Keep the streak alive together!
-            </Text>
-          </View>
-
-          <View style={s.sectionCard}>
-            <Text style={s.sectionTitle}>How It Works</Text>
-            <View style={s.buddyStep}>
-              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>1</Text></View>
-              <Text style={s.buddyStepText}>Add a friend as your Tefillin Buddy from your friends list.</Text>
-            </View>
-            <View style={s.buddyStep}>
-              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>2</Text></View>
-              <Text style={s.buddyStepText}>Send each other a photo of you wrapping tefillin every day to keep the streak.</Text>
-            </View>
-            <View style={s.buddyStep}>
-              <View style={s.buddyStepNum}><Text style={s.buddyStepNumText}>3</Text></View>
-              <Text style={s.buddyStepText}>If either of you misses a day, you'll see an hourglass warning. Miss two and the streak resets!</Text>
-            </View>
-          </View>
-
-          {friends.length > 0 && (
-            <View style={s.sectionCard}>
-              <Text style={s.sectionTitle}>Your Friends</Text>
-              <Text style={s.sectionDesc}>Tap a friend to add them as a Tefillin Buddy.</Text>
-              {friends.filter(f => f.gender === "Male").map((friend) => (
-                <View key={friend.uid} style={s.friendRow}>
-                  <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.friendName}>{friend.displayName ?? "Unknown"}</Text>
-                    <Text style={s.friendCong}>Tefillin streak: {friend.tefillinCurrentStreak ?? 0}</Text>
-                  </View>
-                  <Pressable style={s.acceptBtn} onPress={() => Alert.alert("Coming Soon", "Photo-based Tefillin Buddies will be available in the next update. For now, use the congregation chat to stay accountable!")}>
-                    <Text style={s.acceptBtnText}>Add Buddy</Text>
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          )}
-
-          <View style={[s.highlightBox, { marginTop: 8 }]}>
-            <Text style={s.highlightText}>
-              Photo sharing for Tefillin Buddies is coming soon! In the meantime, use the congregation chat to share your tefillin moments with friends.
-            </Text>
-          </View>
-
-          <Pressable style={[s.primaryBtn, { marginTop: 12 }]} onPress={() => setSocialSubTab("chat")}>
-            <Text style={s.primaryBtnText}>Go to Chat</Text>
-          </Pressable>
-          <View style={{ height: 24 }} />
-        </ScrollView>
-      )}
     </View>
   );
 
@@ -1779,10 +1793,13 @@ export default function App() {
     <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
       <Text style={s.parashaHeader}>This Week's Torah Portion</Text>
       <View style={s.parashaCard}>
-        {timesLoading ? (
+        {timesLoading && !shabbatTimes ? (
           <>
             <ActivityIndicator color={C.primary} size="large" />
             <Text style={[s.sectionDesc, { marginTop: 12 }]}>Loading this week's portion...</Text>
+            <Pressable style={[s.outlineBtn, { marginTop: 12 }]} onPress={refreshTimes}>
+              <Text style={s.outlineBtnText}>Retry</Text>
+            </Pressable>
           </>
         ) : shabbatTimes?.parsha ? (
           <>
@@ -1802,7 +1819,12 @@ export default function App() {
         ) : (
           <>
             <Text style={s.parashaName}>Torah Portion</Text>
-            <Text style={s.parashaSummary}>Could not load this week's portion. Pull down to refresh or check back later.</Text>
+            <Text style={s.parashaSummary}>
+              {timesError ? "Could not load — check your internet connection and location permissions." : "Could not load this week's portion."}
+            </Text>
+            <Pressable style={[s.primaryBtn, { marginTop: 8 }]} onPress={refreshTimes}>
+              <Text style={s.primaryBtnText}>Try Again</Text>
+            </Pressable>
           </>
         )}
       </View>
@@ -1903,7 +1925,6 @@ export default function App() {
               <View style={s.authLogoArea}><Text style={s.authTitle}>Create account</Text><Text style={s.authSubtitle}>Join the community</Text></View>
               <View style={s.authForm}>
                 <TextInput placeholder="Full name" value={signupName} onChangeText={setSignupName} style={s.authInput} placeholderTextColor={C.textLight} editable={!actionLoading} />
-                <GenderPicker value={signupGender} onChange={setSignupGender} />
                 <View style={s.authMethodToggle}>
                   <Pressable style={[s.authMethodTab, signupMethod === "email" && s.authMethodTabActive]} onPress={() => { setSignupMethod("email"); setAuthError(null); }}><Text style={[s.authMethodTabText, signupMethod === "email" && s.authMethodTabTextActive]}>Email</Text></Pressable>
                   <Pressable style={[s.authMethodTab, signupMethod === "phone" && s.authMethodTabActive]} onPress={() => { setSignupMethod("phone"); setAuthError(null); }}><Text style={[s.authMethodTabText, signupMethod === "phone" && s.authMethodTabTextActive]}>Phone</Text></Pressable>
@@ -1984,7 +2005,7 @@ export default function App() {
     );
   }
 
-  const needsProfileSetup = !user.displayName?.trim() || !user.gender?.trim();
+  const needsProfileSetup = !user.displayName?.trim();
   if (needsProfileSetup) {
     return (
       <SafeAreaView style={s.safe}>
@@ -1993,7 +2014,6 @@ export default function App() {
           <Text style={s.authTitle}>Welcome!</Text>
           <Text style={s.sectionDesc}>Set up your profile to get started.</Text>
           <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={[s.authInput, s.fullWidth]} placeholderTextColor={C.textLight} />
-          <GenderPicker value={profileGender} onChange={setProfileGender} />
           <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onSaveProfile} disabled={actionLoading}>
             <Text style={s.primaryBtnText}>Save and continue</Text>
           </Pressable>
@@ -2127,6 +2147,21 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Tefillin Buddies Info Modal */}
+      <Modal visible={showBuddyInfo} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Tefillin Buddies</Text>
+            <Text style={[s.sectionDesc, { marginTop: 12, fontSize: 14, lineHeight: 22 }]}>
+              Tefillin buddies is a way to better hold yourself accountable to wrapping tefillin by sharing this commitment with your friends. Everyday you will need to send a photo to your friends of you wrapping tefillin to keep your streak alive, and they must do the same to you.
+            </Text>
+            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setShowBuddyInfo(false)}>
+              <Text style={s.primaryBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Prayer Overlay Modal */}
       <Modal visible={showPrayerOverlay} transparent animationType="fade">
         <View style={[s.modalOverlay, { backgroundColor: "rgba(0,0,0,0.7)" }]}>
@@ -2164,7 +2199,6 @@ export default function App() {
 
               <Text style={[s.sectionTitle, { marginTop: 16 }]}>Profile</Text>
               <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={s.authInput} placeholderTextColor={C.textLight} />
-              <GenderPicker value={profileGender} onChange={setProfileGender} />
               <Pressable style={s.outlineBtn} onPress={async () => {
                 await onSaveProfile();
                 Alert.alert("Saved", "Profile updated.");
@@ -2371,23 +2405,6 @@ function TabItem({ label, active, onPress }: { label: string; active: boolean; o
   );
 }
 
-function GenderPicker({ value, onChange }: { value: GenderOption | ""; onChange: (next: GenderOption) => void }) {
-  return (
-    <View style={s.genderWrap}>
-      <View style={s.genderRow}>
-        {GENDER_OPTIONS.map((opt) => {
-          const active = value === opt;
-          return (
-            <Pressable key={opt} style={[s.genderChip, active && s.genderChipActive]} onPress={() => onChange(opt)}>
-              <Text style={[s.genderChipText, active && s.genderChipTextActive]}>{opt}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 function LeaderboardRow({ profile, rank, isCurrentUser, congregationName }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null }) {
   return (
     <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
@@ -2399,6 +2416,7 @@ function LeaderboardRow({ profile, rank, isCurrentUser, congregationName }: { pr
       </View>
       <View style={s.streakBadges}>
         <View style={s.streakBadge}><Text style={s.streakBadgeText}>{profile.currentStreak ?? 0}</Text></View>
+        <View style={s.tefillinStreakBadge}><Text style={s.tefillinStreakBadgeText}>{profile.tefillinCurrentStreak ?? 0}</Text></View>
       </View>
     </View>
   );
@@ -2551,21 +2569,7 @@ const s = StyleSheet.create({
   leaderboardHeaderText: { fontSize: 14, fontWeight: "800", color: C.textSecondary, textAlign: "center", textTransform: "uppercase", letterSpacing: 1 },
   leaderboardCard: { backgroundColor: C.card, borderRadius: 20, padding: 12, marginTop: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
 
-  /* buddies */
-  buddiesHero: { backgroundColor: C.primary, borderRadius: 20, padding: 20, marginTop: 4, marginBottom: 12, alignItems: "center" },
-  buddiesHeroTitle: { fontSize: 24, fontWeight: "900", color: "#FFF" },
-  buddiesHeroDesc: { fontSize: 14, color: "rgba(255,255,255,0.9)", textAlign: "center", marginTop: 8, lineHeight: 20 },
-  buddyStep: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12 },
-  buddyStepNum: { width: 28, height: 28, borderRadius: 14, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
-  buddyStepNumText: { fontSize: 14, fontWeight: "800", color: C.primary },
-  buddyStepText: { flex: 1, fontSize: 14, color: C.text, lineHeight: 20 },
-
-  /* sub-tabs */
-  subTabRow: { flexDirection: "row", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 },
-  subTab: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: C.surface },
-  subTabActive: { backgroundColor: C.primary },
-  subTabText: { fontSize: 13, fontWeight: "700", color: C.textSecondary },
-  subTabTextActive: { color: "#FFF" },
+  
 
   /* friend / leaderboard rows */
   friendRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
@@ -2665,11 +2669,83 @@ const s = StyleSheet.create({
   /* error */
   errorText: { marginTop: 8, color: C.danger, textAlign: "center", fontSize: 13 },
 
-  /* gender picker */
-  genderWrap: { width: "100%", marginTop: 4 },
-  genderRow: { flexDirection: "row", gap: 10 },
-  genderChip: { flex: 1, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, paddingVertical: 12, alignItems: "center" },
-  genderChipActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
-  genderChipText: { color: C.text, fontWeight: "600", fontSize: 14 },
-  genderChipTextActive: { color: C.primaryDark, fontWeight: "700" },
+  /* tefillin streak badge (leaderboard) */
+  tefillinStreakBadge: { backgroundColor: C.primaryLight, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  tefillinStreakBadgeText: { fontSize: 13, fontWeight: "700", color: C.primary },
+
+  /* tefillin buddies section */
+  buddiesSection: {
+    backgroundColor: C.card,
+    borderRadius: 20,
+    padding: 16,
+    marginTop: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  buddiesSectionTitle: { fontSize: 20, fontWeight: "900", color: C.text },
+  buddyStreakList: { marginTop: 12 },
+  buddyStreakRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  buddyAvatarLarge: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: C.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  buddyAvatarLargeText: { fontSize: 20, fontWeight: "800", color: C.primary },
+  buddyAvatarDot: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: C.success,
+    borderWidth: 2,
+    borderColor: C.card,
+  },
+  buddyNameLarge: { fontSize: 16, fontWeight: "700", color: C.text },
+  buddyStreakText: { fontSize: 13, fontWeight: "600", color: C.primary },
+  buddySnapBtn: {
+    backgroundColor: C.primaryLight,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  buddySnapBtnText: { color: C.primary, fontWeight: "700", fontSize: 13 },
+  buddyRemoveBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.surface,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  buddyRemoveBtnText: { color: C.textLight, fontWeight: "700", fontSize: 12 },
+  buddyEmptyState: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  buddyEmptyTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  buddyEmptyDesc: { fontSize: 13, color: C.textSecondary, textAlign: "center", marginTop: 4, lineHeight: 18, paddingHorizontal: 16 },
+  buddyAddHeader: { fontSize: 14, fontWeight: "700", color: C.textSecondary, marginBottom: 8 },
+  buddyAddRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
 });
