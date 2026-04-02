@@ -38,6 +38,10 @@ export interface UserProfile {
 
   intentVisibility: "public" | "friends" | "private";
 
+  friendCode: string;
   friendUids: string[];
   pendingFriendUids: string[];
+
+  tefillinBuddyUids: string[];
+  buddyChatIds: string[];
 }

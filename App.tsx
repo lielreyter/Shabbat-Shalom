@@ -24,6 +24,7 @@ import {
 } from "react-native";
 import {
   getUserProfile,
+  checkAndBreakStaleStreaks,
   completeCongregationOnboarding,
   recordBrokenShabbatWeek,
   recordKeptShabbatWeek,
@@ -87,18 +88,29 @@ import {
   NearbyCongregation,
 } from "./src/congregation/congregationTypes";
 import {
-  searchUsersByName,
+  searchByFriendCode,
   sendFriendRequest,
   acceptFriendRequest,
   rejectFriendRequest,
+  removeFriend,
   getFriendProfiles,
 } from "./src/friends/friendsService";
+import {
+  addTefillinBuddy,
+  removeTefillinBuddy,
+  getTefillinBuddyProfiles,
+} from "./src/friends/buddyService";
 import { getParashaInfo, getChabadParashaUrl } from "./src/parasha/parashaData";
 import {
   sendCongregationMessage,
   subscribeToCongregationMessages,
   type CongregationMessage,
 } from "./src/congregation/congregationMessages";
+import {
+  sendDirectMessage,
+  subscribeToDirectMessages,
+  type DirectMessage,
+} from "./src/friends/directMessages";
 
 /* ─── theme ──────────────────────────────────────────────────── */
 
@@ -124,7 +136,7 @@ const C = {
 /* ─── types ──────────────────────────────────────────────────── */
 
 type TabKey = "home" | "social" | "parasha";
-type SocialSubTab = "friends" | "chat";
+type SocialSubTab = "friends" | "chat" | "dm";
 type BlockLevel = "full" | "medium" | "custom" | "none";
 type RestrictionSetting = {
   id: string;
@@ -156,7 +168,7 @@ const CUSTOM_APP_BLOCKS_KEY = "customAppBlocks:v1";
 const INTENT_HISTORY_KEY = "intentHistory:v1";
 const TEFILLIN_DATE_KEY = "tefillinConfirmedDate:v1";
 const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
-const TEFILLIN_BUDDIES_KEY = "tefillinBuddies:v1";
+
 
 const generateTimes = (startH: number, endH: number): string[] => {
   const times: string[] = [];
@@ -266,6 +278,14 @@ const formatTime24 = (date: Date): string => {
   const h = date.getHours().toString().padStart(2, "0");
   const m = date.getMinutes().toString().padStart(2, "0");
   return `${h}:${m}`;
+};
+
+const addMinutesToTimeStr = (time: string, mins: number): string => {
+  const [hStr, mStr] = (time ?? "07:00").split(":");
+  const total = Number(hStr) * 60 + Number(mStr) + mins;
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 };
 
 const formatDay = (date: Date): string => {
@@ -413,18 +433,26 @@ export default function App() {
   const [friends, setFriends] = useState<UserProfile[]>([]);
   const [pendingRequests, setPendingRequests] = useState<UserProfile[]>([]);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
-  const [friendSearchQuery, setFriendSearchQuery] = useState("");
-  const [friendSearchResults, setFriendSearchResults] = useState<UserProfile[]>([]);
+  const [friendCodeQuery, setFriendCodeQuery] = useState("");
+  const [friendCodeResult, setFriendCodeResult] = useState<UserProfile | null>(null);
   const [friendSearching, setFriendSearching] = useState(false);
-  const friendSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [friendCodeError, setFriendCodeError] = useState("");
 
   /* ── chat ── */
   const [chatMessages, setChatMessages] = useState<CongregationMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
 
+  /* ── direct messages ── */
+  const [chattingWith, setChattingWith] = useState<UserProfile | null>(null);
+  const [dmMessages, setDmMessages] = useState<DirectMessage[]>([]);
+  const [dmInput, setDmInput] = useState("");
+
   /* ── tefillin buddies ── */
-  const [tefillinBuddyUids, setTefillinBuddyUids] = useState<string[]>([]);
   const [showBuddyInfo, setShowBuddyInfo] = useState(false);
+  const [buddyActionLoading, setBuddyActionLoading] = useState(false);
+
+  /* ── friend profile modal ── */
+  const [viewingFriend, setViewingFriend] = useState<UserProfile | null>(null);
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
@@ -467,6 +495,19 @@ export default function App() {
   }, [blockLevel, hasCustomAppsBlocked]);
 
   const isStreakEligible = effectiveBlockLevel !== "none";
+  const tefillinBuddyUids = useMemo(() => user?.tefillinBuddyUids ?? [], [user?.tefillinBuddyUids]);
+
+  const displayTefillinStreak = useMemo(() => {
+    if (tefillinBuddyUids.length > 0 && friends.length > 0) {
+      const buddyStreaks = friends
+        .filter((f) => tefillinBuddyUids.includes(f.uid))
+        .map((f) => f.tefillinCurrentStreak ?? 0);
+      if (buddyStreaks.length > 0) {
+        return Math.max(user?.tefillinCurrentStreak ?? 0, ...buddyStreaks);
+      }
+    }
+    return user?.tefillinCurrentStreak ?? 0;
+  }, [tefillinBuddyUids, friends, user?.tefillinCurrentStreak]);
 
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
@@ -497,7 +538,7 @@ export default function App() {
   /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO, rawTB] = await Promise.all([
+      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
         AsyncStorage.getItem(BLOCK_LEVEL_KEY),
@@ -505,7 +546,6 @@ export default function App() {
         AsyncStorage.getItem(INTENT_HISTORY_KEY),
         AsyncStorage.getItem(TEFILLIN_DATE_KEY),
         AsyncStorage.getItem(HOLIDAY_OPTIN_KEY),
-        AsyncStorage.getItem(TEFILLIN_BUDDIES_KEY),
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
@@ -514,7 +554,7 @@ export default function App() {
       if (rawIH) { try { setIntentHistory(JSON.parse(rawIH)); } catch { /* use defaults */ } }
       if (rawTD === todayDateStr()) setTefillinConfirmedToday(true);
       if (rawHO === "true") setHolidayOptIn(true);
-      if (rawTB) { try { setTefillinBuddyUids(JSON.parse(rawTB)); } catch { /* use defaults */ } }
+      AsyncStorage.removeItem("tefillinBuddies:v1").catch(() => {});
     };
     loadLocal().catch(() => {});
   }, []);
@@ -527,6 +567,9 @@ export default function App() {
         setProfileName(profile.displayName ?? "");
         if (isEmailProvider() && !isCurrentUserEmailVerified()) setPendingEmailVerification(true);
         else setPendingEmailVerification(false);
+        checkAndBreakStaleStreaks(profile.uid).then((updated) => {
+          if (updated) setUser(updated);
+        }).catch(() => {});
       } else {
         setPendingEmailVerification(false);
       }
@@ -652,6 +695,14 @@ export default function App() {
     const unsubscribe = subscribeToCongregationMessages(user.congregationId, setChatMessages);
     return () => unsubscribe();
   }, [user?.congregationId, socialSubTab]);
+
+  /* ── direct message subscription ── */
+  useEffect(() => {
+    if (!user || !chattingWith || socialSubTab !== "dm") return;
+    setDmMessages([]);
+    const unsubscribe = subscribeToDirectMessages(user.uid, chattingWith.uid, setDmMessages);
+    return () => unsubscribe();
+  }, [user, chattingWith, socialSubTab]);
 
   /* ── restriction week outcomes ── */
   const applyRestrictionWeekOutcome = useCallback(
@@ -906,7 +957,8 @@ export default function App() {
     setActionLoading(true);
     try {
       if (next) {
-        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: user.wakeUpTime ?? "07:00", title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
+        const tefillinTime = addMinutesToTimeStr(user.wakeUpTime ?? "07:00", 15);
+        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
       } else {
         await cancelReminder(ReminderType.TEFILLIN);
       }
@@ -940,10 +992,15 @@ export default function App() {
   }, [shabbatTimes, user]);
 
   const onToggleModehAni = useCallback(async () => {
-    if (!user) return;
+    if (!user || !shabbatTimes) return;
     const next = !user.wantsModehAniReminder;
     setActionLoading(true);
     try {
+      if (next) {
+        await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: user.wakeUpTime ?? "07:00", title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
+      } else {
+        await cancelReminder(ReminderType.MODEH_ANI);
+      }
       const updated = await updateUserProfile(user.uid, { wantsModehAniReminder: next });
       setUser(updated);
     } catch (error) {
@@ -951,7 +1008,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [user]);
+  }, [shabbatTimes, user]);
 
   const onToggleShema = useCallback(async () => {
     if (!user) return;
@@ -972,8 +1029,17 @@ export default function App() {
     try {
       const updated = await updateUserProfile(user.uid, { wakeUpTime: time });
       setUser(updated);
+      if (shabbatTimes) {
+        if (updated.wantsModehAniReminder) {
+          await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time, title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
+        }
+        if (updated.wantsMorningReminders) {
+          const tefillinTime = addMinutesToTimeStr(time, 15);
+          await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
+        }
+      }
     } catch { /* keep going */ }
-  }, [user]);
+  }, [shabbatTimes, user]);
 
   const onSetBedTime = useCallback(async (time: string) => {
     if (!user) return;
@@ -1023,15 +1089,15 @@ export default function App() {
     await AsyncStorage.setItem(TEFILLIN_DATE_KEY, todayDateStr());
     try {
       const today = todayDateStr();
-      if (user.lastTefillinDate !== today) {
-        const nextStreak = user.tefillinCurrentStreak + 1;
-        const updated = await updateUserProfile(user.uid, {
-          tefillinCurrentStreak: nextStreak,
-          tefillinLongestStreak: Math.max(user.tefillinLongestStreak, nextStreak),
-          lastTefillinDate: today,
-        });
-        setUser(updated);
-      }
+      const fresh = await getUserProfile(user.uid);
+      if (!fresh || fresh.lastTefillinDate === today) return;
+      const nextStreak = fresh.tefillinCurrentStreak + 1;
+      const updated = await updateUserProfile(user.uid, {
+        tefillinCurrentStreak: nextStreak,
+        tefillinLongestStreak: Math.max(fresh.tefillinLongestStreak, nextStreak),
+        lastTefillinDate: today,
+      });
+      setUser(updated);
     } catch { /* keep going */ }
   }, [user]);
 
@@ -1196,28 +1262,50 @@ export default function App() {
   }, [currentLocation?.timezone]);
 
   /* ── friend callbacks ── */
-  const onFriendSearchChange = useCallback((text: string) => {
-    setFriendSearchQuery(text);
-    if (friendSearchTimer.current) clearTimeout(friendSearchTimer.current);
-    if (text.trim().length < 2) { setFriendSearchResults([]); return; }
-    friendSearchTimer.current = setTimeout(async () => {
-      if (!user) return;
-      setFriendSearching(true);
-      try {
-        const results = await searchUsersByName(text, user.uid);
-        setFriendSearchResults(results);
-      } finally {
+  const friendCodeSearchRef = useRef(0);
+  const onFriendCodeChange = useCallback((text: string) => {
+    const upper = text.toUpperCase();
+    setFriendCodeQuery(upper);
+    if (upper.trim().length < 8) {
+      setFriendCodeError("");
+      setFriendCodeResult(null);
+      return;
+    }
+  }, []);
+
+  const onFriendCodeSubmit = useCallback(async () => {
+    const code = friendCodeQuery.trim().toUpperCase();
+    if (code.length < 8 || !user) return;
+    const searchId = ++friendCodeSearchRef.current;
+    setFriendSearching(true);
+    setFriendCodeError("");
+    setFriendCodeResult(null);
+    try {
+      const results = await searchByFriendCode(code, user.uid);
+      if (searchId !== friendCodeSearchRef.current) return;
+      if (results.length > 0) {
+        setFriendCodeResult(results[0]);
+      } else {
+        setFriendCodeError("No user found with that code.");
+      }
+    } catch (err) {
+      if (searchId !== friendCodeSearchRef.current) return;
+      console.error("Friend code search error:", err);
+      setFriendCodeError("Something went wrong. Please try again.");
+    } finally {
+      if (searchId === friendCodeSearchRef.current) {
         setFriendSearching(false);
       }
-    }, 500);
-  }, [user]);
+    }
+  }, [friendCodeQuery, user]);
 
   const onSendFriendRequest = useCallback(async (toUid: string) => {
     if (!user) return;
     try {
       await sendFriendRequest(user.uid, toUid);
       Alert.alert("Request sent!", "They'll see your friend request.");
-      setFriendSearchResults((prev) => prev.filter((p) => p.uid !== toUid));
+      setFriendCodeResult(null);
+      setFriendCodeQuery("");
     } catch (error) {
       Alert.alert("Friend request", errorMessage(error, "Could not send request."));
     }
@@ -1243,13 +1331,50 @@ export default function App() {
     } finally { setActionLoading(false); }
   }, [user]);
 
-  const onToggleTefillinBuddy = useCallback(async (friendUid: string) => {
-    setTefillinBuddyUids((prev) => {
-      const next = prev.includes(friendUid) ? prev.filter((u) => u !== friendUid) : [...prev, friendUid];
-      AsyncStorage.setItem(TEFILLIN_BUDDIES_KEY, JSON.stringify(next)).catch(() => {});
-      return next;
-    });
-  }, []);
+  const onAddTefillinBuddy = useCallback(async (buddyUid: string) => {
+    if (!user) return;
+    setBuddyActionLoading(true);
+    try {
+      await addTefillinBuddy(user.uid, buddyUid);
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+    } catch (error) {
+      Alert.alert("Tefillin Buddy", errorMessage(error, "Failed to add buddy."));
+    } finally { setBuddyActionLoading(false); }
+  }, [user]);
+
+  const onRemoveTefillinBuddy = useCallback(async (buddyUid: string) => {
+    if (!user) return;
+    setBuddyActionLoading(true);
+    try {
+      await removeTefillinBuddy(user.uid, buddyUid);
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+    } catch (error) {
+      Alert.alert("Tefillin Buddy", errorMessage(error, "Failed to remove buddy."));
+    } finally { setBuddyActionLoading(false); }
+  }, [user]);
+
+  const onUnfriend = useCallback(async (friendUid: string) => {
+    if (!user) return;
+    Alert.alert("Remove Friend", "Are you sure you want to remove this friend?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => {
+        setActionLoading(true);
+        try {
+          if (user.tefillinBuddyUids.includes(friendUid)) {
+            await removeTefillinBuddy(user.uid, friendUid);
+          }
+          await removeFriend(user.uid, friendUid);
+          const updated = await getUserProfile(user.uid);
+          if (updated) setUser(updated);
+          setViewingFriend(null);
+        } catch (error) {
+          Alert.alert("Remove Friend", errorMessage(error, "Failed to remove friend."));
+        } finally { setActionLoading(false); }
+      }},
+    ]);
+  }, [user]);
 
   /* ── chat callbacks ── */
   const onSendChat = useCallback(async () => {
@@ -1263,6 +1388,24 @@ export default function App() {
       Alert.alert("Chat", errorMessage(error, "Failed to send message."));
     }
   }, [chatInput, user]);
+
+  const openDmWith = useCallback((friend: UserProfile) => {
+    setChattingWith(friend);
+    setDmInput("");
+    setSocialSubTab("dm");
+  }, []);
+
+  const onSendDm = useCallback(async () => {
+    if (!user || !chattingWith || !dmInput.trim()) return;
+    const text = dmInput.trim();
+    setDmInput("");
+    Keyboard.dismiss();
+    try {
+      await sendDirectMessage(user.uid, chattingWith.uid, user.displayName ?? "Anonymous", text);
+    } catch (error) {
+      Alert.alert("Message", errorMessage(error, "Failed to send message."));
+    }
+  }, [dmInput, user, chattingWith]);
 
   /* ── time display ── */
   const timesDisplay = useMemo(() => {
@@ -1290,12 +1433,17 @@ export default function App() {
       {/* Greeting */}
       <Text style={s.greeting}>Welcome, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
 
-      {/* Tefillin daily prompt */}
-      {user?.wantsMorningReminders && !tefillinConfirmedToday && (
+      {/* Tefillin daily prompt (hidden when user has tefillin buddies) */}
+      {user?.wantsMorningReminders && !tefillinConfirmedToday && (user?.tefillinBuddyUids?.length ?? 0) === 0 && (
         <Pressable style={s.tefillinPromptBar} onPress={onConfirmTefillin}>
           <Text style={s.tefillinPromptText}>Have you wrapped tefillin today?</Text>
           <View style={s.tefillinPromptBtn}><Text style={s.tefillinPromptBtnText}>Yes</Text></View>
         </Pressable>
+      )}
+      {(user?.tefillinBuddyUids?.length ?? 0) > 0 && !tefillinConfirmedToday && (
+        <View style={[s.tefillinPromptBar, { backgroundColor: C.primaryLight }]}>
+          <Text style={[s.tefillinPromptText, { color: C.primary }]}>Your tefillin streak is tracked through your buddy chats</Text>
+        </View>
       )}
 
       {/* Streaks */}
@@ -1305,7 +1453,7 @@ export default function App() {
           <Text style={s.streakLabel}>Shabbat Streak</Text>
         </View>
         <View style={[s.streakCard, { backgroundColor: C.primaryLight }]}>
-          <Text style={[s.streakNumber, { color: C.primary }]}>{user?.tefillinCurrentStreak ?? 0}</Text>
+          <Text style={[s.streakNumber, { color: C.primary }]}>{displayTefillinStreak}</Text>
           <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin Streak</Text>
         </View>
       </View>
@@ -1402,19 +1550,6 @@ export default function App() {
             thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
           />
         </View>
-        {user?.wantsMorningReminders && (
-          <View style={s.inlineTimeSection}>
-            <Text style={s.timeSectionTitle}>Wake Up Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {WAKE_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
-                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
         {/* Modeh Ani */}
         <View style={s.toggleRow}>
           <View style={{ flex: 1 }}>
@@ -1433,9 +1568,18 @@ export default function App() {
             thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
           />
         </View>
-        {user?.wantsModehAniReminder && (
+
+        {/* Shared Wake Up Time (shown when either tefillin or modeh ani is on) */}
+        {(user?.wantsMorningReminders || user?.wantsModehAniReminder) && (
           <View style={s.inlineTimeSection}>
             <Text style={s.timeSectionTitle}>Wake Up Time</Text>
+            <Text style={s.toggleHint}>
+              {user?.wantsModehAniReminder && user?.wantsMorningReminders
+                ? "Modeh Ani at this time, tefillin 15 min later"
+                : user?.wantsModehAniReminder
+                  ? "Modeh Ani reminder at this time"
+                  : "Tefillin reminder 15 min after this time"}
+            </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
               {WAKE_TIMES.map((t) => (
                 <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
@@ -1483,7 +1627,9 @@ export default function App() {
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
           <Text style={s.sectionTitle}>Your Shabbat Intention</Text>
           <Pressable onPress={() => setShowIntentCalendar(true)} style={s.calendarIconBtn}>
-            <Text style={{ fontSize: 20 }}>📅</Text>
+            <View style={s.calendarIconCircle}>
+              <Text style={{ fontSize: 20 }}>📅</Text>
+            </View>
           </Pressable>
         </View>
         <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. This will remind you if you try to break it.</Text>
@@ -1584,11 +1730,24 @@ export default function App() {
         </View>
       </View>
 
-      {/* Back to friends from chat view */}
+      {/* Back to friends from chat / DM view */}
       {socialSubTab === "chat" && (
         <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
           <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
         </Pressable>
+      )}
+      {socialSubTab === "dm" && chattingWith && (
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 10 }}>
+          <Pressable onPress={() => { setSocialSubTab("friends"); setChattingWith(null); }}>
+            <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back</Text>
+          </Pressable>
+          <Pressable onPress={() => setViewingFriend(chattingWith)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+            <View style={[s.friendAvatar, { width: 32, height: 32, borderRadius: 16 }]}>
+              <Text style={[s.friendAvatarText, { fontSize: 13 }]}>{(chattingWith.displayName ?? "?")[0]?.toUpperCase()}</Text>
+            </View>
+            <Text style={{ fontSize: 16, fontWeight: "700", color: C.text }}>{chattingWith.displayName ?? "Unknown"}</Text>
+          </Pressable>
+        </View>
       )}
 
       {/* Main Social View */}
@@ -1622,12 +1781,14 @@ export default function App() {
               <Text style={s.emptyText}>Add friends to see the leaderboard!</Text>
             ) : (
               friends.map((friend, idx) => (
-                <LeaderboardRow
-                  key={friend.uid}
-                  profile={friend}
-                  rank={idx + 1}
-                  congregationName={friend.congregationId ? currentCongregationName : null}
-                />
+                <Pressable key={friend.uid} onPress={() => openDmWith(friend)}>
+                  <LeaderboardRow
+                    profile={friend}
+                    rank={idx + 1}
+                    congregationName={friend.congregationId ? currentCongregationName : null}
+                    onAvatarPress={() => setViewingFriend(friend)}
+                  />
+                </Pressable>
               ))
             )}
           </View>
@@ -1650,7 +1811,7 @@ export default function App() {
 
           {/* Add Friend */}
           <View style={s.socialActions}>
-            <Pressable style={s.primaryBtn} onPress={() => { setFriendSearchQuery(""); setFriendSearchResults([]); setAddFriendVisible(true); }}>
+            <Pressable style={s.primaryBtn} onPress={() => { setFriendCodeQuery(""); setFriendCodeResult(null); setFriendCodeError(""); setAddFriendVisible(true); }}>
               <Text style={s.primaryBtnText}>+ Add Friends</Text>
             </Pressable>
             {!user?.congregationId && (
@@ -1682,11 +1843,13 @@ export default function App() {
                   const isToday = lastDate === todayDateStr();
                   const showHourglass = !isToday;
                   return (
-                    <View key={uid} style={s.buddyStreakRow}>
-                      <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
-                        <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
-                        {isToday && <View style={s.buddyAvatarDot} />}
-                      </View>
+                    <Pressable key={uid} style={s.buddyStreakRow} onPress={() => openDmWith(buddy)}>
+                      <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
+                        <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
+                          <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                          {isToday && <View style={s.buddyAvatarDot} />}
+                        </View>
+                      </Pressable>
                       <View style={{ flex: 1 }}>
                         <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -1700,10 +1863,7 @@ export default function App() {
                       >
                         <Text style={s.buddySnapBtnText}>{isToday ? "Wrapped" : "Tap"}</Text>
                       </Pressable>
-                      <Pressable style={s.buddyRemoveBtn} onPress={() => onToggleTefillinBuddy(uid)}>
-                        <Text style={s.buddyRemoveBtnText}>✕</Text>
-                      </Pressable>
-                    </View>
+                    </Pressable>
                   );
                 })}
               </View>
@@ -1721,11 +1881,13 @@ export default function App() {
                 <Text style={s.buddyAddHeader}>Add a Tefillin Buddy</Text>
                 {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).map((friend) => (
                   <View key={friend.uid} style={s.buddyAddRow}>
-                    <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
-                    <View style={{ flex: 1 }}>
+                    <Pressable onPress={() => setViewingFriend(friend)} hitSlop={4}>
+                      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                    </Pressable>
+                    <Pressable style={{ flex: 1 }} onPress={() => openDmWith(friend)}>
                       <Text style={s.friendName}>{friend.displayName ?? "Unknown"}</Text>
-                    </View>
-                    <Pressable style={s.acceptBtn} onPress={() => onToggleTefillinBuddy(friend.uid)}>
+                    </Pressable>
+                    <Pressable style={s.acceptBtn} onPress={() => onAddTefillinBuddy(friend.uid)} disabled={buddyActionLoading}>
                       <Text style={s.acceptBtnText}>+ Add</Text>
                     </Pressable>
                   </View>
@@ -1780,6 +1942,42 @@ export default function App() {
               </View>
             </>
           )}
+        </KeyboardAvoidingView>
+      )}
+
+      {/* Direct Message View */}
+      {socialSubTab === "dm" && chattingWith && (
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+          <FlatList
+            data={dmMessages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={s.chatList}
+            renderItem={({ item }) => (
+              <View style={[s.chatBubble, item.senderUid === user?.uid && s.chatBubbleMine]}>
+                <Text style={[s.chatText, item.senderUid === user?.uid && s.chatTextMine]}>{item.text}</Text>
+              </View>
+            )}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", paddingVertical: 40 }}>
+                <Text style={{ fontSize: 32, marginBottom: 8 }}>💬</Text>
+                <Text style={s.emptyText}>No messages yet. Say hi!</Text>
+              </View>
+            }
+          />
+          <View style={s.chatInputRow}>
+            <TextInput
+              style={s.chatTextInput}
+              value={dmInput}
+              onChangeText={setDmInput}
+              placeholder={`Message ${chattingWith.displayName ?? ""}...`}
+              placeholderTextColor={C.textLight}
+              returnKeyType="send"
+              onSubmitEditing={onSendDm}
+            />
+            <Pressable style={s.chatSendBtn} onPress={onSendDm}>
+              <Text style={s.chatSendBtnText}>Send</Text>
+            </Pressable>
+          </View>
         </KeyboardAvoidingView>
       )}
     </View>
@@ -2162,6 +2360,72 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Friend Profile Modal */}
+      <Modal visible={viewingFriend !== null} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "70%" }]}>
+            {viewingFriend && (
+              <>
+                <View style={{ alignItems: "center", marginBottom: 16 }}>
+                  <View style={[s.buddyAvatarLarge, { width: 64, height: 64, borderRadius: 32 }]}>
+                    <Text style={[s.buddyAvatarLargeText, { fontSize: 26 }]}>{(viewingFriend.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                  </View>
+                  <Text style={[s.modalTitle, { marginTop: 12, textAlign: "center" }]}>{viewingFriend.displayName ?? "Unknown"}</Text>
+                </View>
+
+                <View style={s.streakRow}>
+                  <View style={[s.streakCard, { backgroundColor: C.streakBg, flex: 1 }]}>
+                    <Text style={s.streakNumber}>{viewingFriend.currentStreak ?? 0}</Text>
+                    <Text style={s.streakLabel}>Shabbat</Text>
+                  </View>
+                  <View style={[s.streakCard, { backgroundColor: C.primaryLight, flex: 1 }]}>
+                    <Text style={[s.streakNumber, { color: C.primary }]}>{viewingFriend.tefillinCurrentStreak ?? 0}</Text>
+                    <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin</Text>
+                  </View>
+                </View>
+
+                <View style={{ gap: 10, marginTop: 20 }}>
+                  <Pressable
+                    style={s.primaryBtn}
+                    onPress={() => { const f = viewingFriend; setViewingFriend(null); openDmWith(f); }}
+                  >
+                    <Text style={s.primaryBtnText}>Message</Text>
+                  </Pressable>
+                  {tefillinBuddyUids.includes(viewingFriend.uid) ? (
+                    <Pressable
+                      style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                      onPress={() => { onRemoveTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                      disabled={buddyActionLoading}
+                    >
+                      <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Tefillin Buddy</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={s.primaryBtn}
+                      onPress={() => { onAddTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                      disabled={buddyActionLoading}
+                    >
+                      <Text style={s.primaryBtnText}>Add Tefillin Buddy</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                    onPress={() => onUnfriend(viewingFriend.uid)}
+                    disabled={actionLoading}
+                  >
+                    <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Friend</Text>
+                  </Pressable>
+                </View>
+
+                <Pressable style={[s.outlineBtn, { marginTop: 12 }]} onPress={() => setViewingFriend(null)}>
+                  <Text style={s.outlineBtnText}>Close</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* Prayer Overlay Modal */}
       <Modal visible={showPrayerOverlay} transparent animationType="fade">
         <View style={[s.modalOverlay, { backgroundColor: "rgba(0,0,0,0.7)" }]}>
@@ -2296,47 +2560,77 @@ export default function App() {
       <Modal visible={addFriendVisible} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={[s.modalCard, { maxHeight: "80%" }]}>
-            <Text style={s.modalTitle}>Add Friends</Text>
+            <Text style={s.modalTitle}>Add Friend</Text>
 
-            <View style={[s.highlightBox, { marginBottom: 12 }]}>
-              <Text style={s.highlightText}>Your Friend Code: {user.uid.slice(0, 8).toUpperCase()}</Text>
-              <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can find you.</Text>
+            <View style={[s.highlightBox, { marginBottom: 16 }]}>
+              <Text style={[s.highlightText, { fontWeight: "800", fontSize: 14 }]}>Your Friend Code</Text>
+              <Text style={{ fontSize: 22, fontWeight: "900", color: C.primary, letterSpacing: 2, marginTop: 4 }}>{user.friendCode ?? user.uid.slice(0, 8).toUpperCase()}</Text>
+              <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can add you.</Text>
             </View>
 
-            <TextInput
-              placeholder="Search by name..."
-              value={friendSearchQuery}
-              onChangeText={onFriendSearchChange}
-              style={s.authInput}
-              placeholderTextColor={C.textLight}
-              autoCapitalize="none"
-            />
+            <Text style={{ fontSize: 13, fontWeight: "600", color: C.text, marginBottom: 6 }}>Enter a friend's code</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TextInput
+                placeholder="e.g. A1B2C3D4"
+                value={friendCodeQuery}
+                onChangeText={onFriendCodeChange}
+                style={[s.authInput, { flex: 1 }]}
+                placeholderTextColor={C.textLight}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                maxLength={8}
+                returnKeyType="search"
+                onSubmitEditing={onFriendCodeSubmit}
+              />
+              <Pressable
+                style={[s.primaryBtn, { paddingHorizontal: 16, opacity: friendCodeQuery.trim().length < 8 ? 0.5 : 1 }]}
+                onPress={onFriendCodeSubmit}
+                disabled={friendCodeQuery.trim().length < 8 || friendSearching}
+              >
+                {friendSearching ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={s.primaryBtnText}>Search</Text>
+                )}
+              </Pressable>
+            </View>
 
-            {friendSearching && <ActivityIndicator color={C.primary} style={{ marginTop: 8 }} />}
+            {friendCodeError.length > 0 && (
+              <Text style={{ color: C.danger, fontSize: 13, textAlign: "center", marginTop: 12 }}>{friendCodeError}</Text>
+            )}
 
-            <ScrollView style={{ maxHeight: 300, marginTop: 8 }}>
-              {friendSearchResults.map((result) => {
-                const alreadyFriend = user.friendUids.includes(result.uid);
-                const alreadyPending = result.pendingFriendUids?.includes(user.uid);
-                return (
-                  <View key={result.uid} style={s.friendRow}>
-                    <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(result.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.friendName}>{result.displayName ?? "Unknown"}</Text>
-                    </View>
+            {friendCodeResult && (() => {
+              const alreadyFriend = user.friendUids.includes(friendCodeResult.uid);
+              const alreadyPending = friendCodeResult.pendingFriendUids?.includes(user.uid);
+              return (
+                <View style={{ alignItems: "center", marginTop: 16, padding: 16, backgroundColor: C.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border }}>
+                  <View style={[s.friendAvatar, { width: 56, height: 56, borderRadius: 28 }]}>
+                    <Text style={[s.friendAvatarText, { fontSize: 22 }]}>{(friendCodeResult.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                  </View>
+                  <Text style={[s.friendName, { fontSize: 17, marginTop: 8 }]}>{friendCodeResult.displayName ?? "Unknown"}</Text>
+                  {friendCodeResult.congregationId && (
+                    <Text style={{ fontSize: 12, color: C.textLight, marginTop: 2 }}>Member of a congregation</Text>
+                  )}
+                  <View style={{ marginTop: 12 }}>
                     {alreadyFriend ? (
-                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Friends</Text>
+                      <View style={[s.acceptBtn, { paddingHorizontal: 20, paddingVertical: 8 }]}>
+                        <Text style={[s.acceptBtnText, { fontSize: 14 }]}>Already Friends</Text>
+                      </View>
                     ) : alreadyPending ? (
-                      <Text style={[s.sectionDesc, { marginTop: 0 }]}>Sent</Text>
+                      <View style={[s.acceptBtn, { paddingHorizontal: 20, paddingVertical: 8 }]}>
+                        <Text style={[s.acceptBtnText, { fontSize: 14 }]}>Request Sent</Text>
+                      </View>
                     ) : (
-                      <Pressable style={s.acceptBtn} onPress={() => onSendFriendRequest(result.uid)}><Text style={s.acceptBtnText}>Add</Text></Pressable>
+                      <Pressable style={[s.primaryBtn, { paddingHorizontal: 24 }]} onPress={() => onSendFriendRequest(friendCodeResult.uid)}>
+                        <Text style={s.primaryBtnText}>Send Friend Request</Text>
+                      </Pressable>
                     )}
                   </View>
-                );
-              })}
-            </ScrollView>
+                </View>
+              );
+            })()}
 
-            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setAddFriendVisible(false)}>
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 16 }]} onPress={() => setAddFriendVisible(false)}>
               <Text style={s.ghostBtnText}>Close</Text>
             </Pressable>
           </View>
@@ -2405,11 +2699,13 @@ function TabItem({ label, active, onPress }: { label: string; active: boolean; o
   );
 }
 
-function LeaderboardRow({ profile, rank, isCurrentUser, congregationName }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null }) {
+function LeaderboardRow({ profile, rank, isCurrentUser, congregationName, onAvatarPress }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null; onAvatarPress?: () => void }) {
   return (
     <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
       <Text style={s.leaderRank}>{rank}</Text>
-      <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(profile.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+      <Pressable onPress={onAvatarPress} hitSlop={4}>
+        <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(profile.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+      </Pressable>
       <View style={{ flex: 1 }}>
         <Text style={s.friendName}>{profile.displayName ?? "Unknown"}{isCurrentUser ? " (You)" : ""}</Text>
         <Text style={s.friendCong}>{congregationName ?? (profile.congregationId ? "In a congregation" : "")}</Text>
@@ -2521,6 +2817,14 @@ const s = StyleSheet.create({
 
   /* calendar icon */
   calendarIconBtn: { padding: 4 },
+  calendarIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
   /* intent calendar */
   calendarDateItem: { paddingVertical: 12, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border, borderRadius: 8 },

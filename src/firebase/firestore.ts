@@ -38,7 +38,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     displayName: data.displayName ?? null,
     email: data.email ?? null,
     shabbatIntentText: data.shabbatIntentText ?? null,
-    wantsMorningReminders: data.wantsMorningReminders ?? true,
+    wantsMorningReminders: data.wantsMorningReminders ?? false,
     wantsShabbatReminders: data.wantsShabbatReminders ?? true,
     timeZone: data.timeZone ?? getTimeZone(),
     platform: "ios",
@@ -58,8 +58,11 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     wantsModehAniReminder: data.wantsModehAniReminder ?? false,
     wantsShemaReminder: data.wantsShemaReminder ?? false,
     intentVisibility: data.intentVisibility ?? "private",
+    friendCode: data.friendCode ?? uid.slice(0, 8).toUpperCase(),
     friendUids: Array.isArray(data.friendUids) ? data.friendUids : [],
     pendingFriendUids: Array.isArray(data.pendingFriendUids) ? data.pendingFriendUids : [],
+    tefillinBuddyUids: Array.isArray(data.tefillinBuddyUids) ? data.tefillinBuddyUids : [],
+    buddyChatIds: Array.isArray(data.buddyChatIds) ? data.buddyChatIds : [],
   };
 };
 
@@ -82,14 +85,17 @@ export const createUserProfile = async ({
   displayName: string | null;
   email: string | null;
 }): Promise<UserProfile> => {
-  const payload: UserProfileWrite = {
+  const friendCode = uid.slice(0, 8).toUpperCase();
+  const payload: UserProfileWrite & { displayNameLower: string | null } = {
     uid,
     createdAt: serverTimestamp(),
     lastLoginAt: serverTimestamp(),
     displayName,
+    displayNameLower: displayName?.toLowerCase() ?? null,
+    friendCode,
     email,
     shabbatIntentText: null,
-    wantsMorningReminders: true,
+    wantsMorningReminders: false,
     wantsShabbatReminders: true,
     timeZone: getTimeZone(),
     platform: "ios",
@@ -111,6 +117,8 @@ export const createUserProfile = async ({
     intentVisibility: "private",
     friendUids: [],
     pendingFriendUids: [],
+    tefillinBuddyUids: [],
+    buddyChatIds: [],
   };
 
   await setDoc(userDocRef(uid), payload);
@@ -122,7 +130,11 @@ export const updateUserProfile = async (
   uid: string,
   updates: Partial<UserProfile>
 ): Promise<UserProfile> => {
-  await updateDoc(userDocRef(uid), updates as Record<string, unknown>);
+  const payload: Record<string, unknown> = { ...updates };
+  if (updates.displayName !== undefined) {
+    payload.displayNameLower = updates.displayName?.toLowerCase() ?? null;
+  }
+  await updateDoc(userDocRef(uid), payload);
   const snapshot = await getDoc(userDocRef(uid));
   return hydrateUserProfile(uid, snapshot.data() as UserProfile);
 };
@@ -143,10 +155,15 @@ export const getOrCreateUserProfileOnLogin = async ({
 
   const updates: Record<string, unknown> = {
     lastLoginAt: serverTimestamp(),
+    friendCode: uid.slice(0, 8).toUpperCase(),
   };
 
   if (!existing.displayName && displayName) {
     updates.displayName = displayName;
+    updates.displayNameLower = displayName.toLowerCase();
+  }
+  if (existing.displayName) {
+    updates.displayNameLower = existing.displayName.toLowerCase();
   }
   if (!existing.email && email) {
     updates.email = email;
@@ -181,6 +198,42 @@ export const completeCongregationOnboarding = async (
   uid: string
 ): Promise<UserProfile> => {
   return updateUserProfile(uid, { congregationOnboardingCompleted: true });
+};
+
+export const checkAndBreakStaleStreaks = async (
+  uid: string
+): Promise<UserProfile | null> => {
+  const profile = await getUserProfile(uid);
+  if (!profile) return null;
+
+  const updates: Partial<UserProfile> = {};
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  if (
+    profile.tefillinCurrentStreak > 0 &&
+    profile.lastTefillinDate !== todayStr &&
+    profile.lastTefillinDate !== yesterdayStr
+  ) {
+    updates.tefillinCurrentStreak = 0;
+  }
+
+  if (profile.currentStreak > 0 && profile.lastStreakWeekId) {
+    const lastWeekDate = new Date(profile.lastStreakWeekId.replace("week-", ""));
+    const daysSinceLastWeek = Math.floor(
+      (now.getTime() - lastWeekDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    if (daysSinceLastWeek > 14) {
+      updates.currentStreak = 0;
+    }
+  }
+
+  if (Object.keys(updates).length === 0) return profile;
+  return updateUserProfile(uid, updates);
 };
 
 export const recordKeptShabbatWeek = async (

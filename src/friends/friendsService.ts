@@ -25,17 +25,66 @@ export const searchUsersByName = async (
     return [];
   }
 
-  const q = query(
-    usersCollection(),
-    where("displayName", ">=", trimmed),
-    where("displayName", "<=", trimmed + "\uf8ff"),
-    firestoreLimit(15)
-  );
+  const lower = trimmed.toLowerCase();
 
-  const snapshot = await getDocs(q);
-  return snapshot.docs
-    .map((d) => hydrateUserProfile(d.id, d.data() as Partial<UserProfile>))
-    .filter((u) => u.uid !== currentUid);
+  const [lowerSnap, originalSnap] = await Promise.all([
+    getDocs(query(
+      usersCollection(),
+      where("displayNameLower", ">=", lower),
+      where("displayNameLower", "<=", lower + "\uf8ff"),
+      firestoreLimit(15)
+    )),
+    getDocs(query(
+      usersCollection(),
+      where("displayName", ">=", trimmed),
+      where("displayName", "<=", trimmed + "\uf8ff"),
+      firestoreLimit(15)
+    )),
+  ]);
+
+  const seen = new Set<string>();
+  const results: UserProfile[] = [];
+  for (const snap of [lowerSnap, originalSnap]) {
+    for (const d of snap.docs) {
+      if (d.id === currentUid || seen.has(d.id)) continue;
+      seen.add(d.id);
+      results.push(hydrateUserProfile(d.id, d.data() as Partial<UserProfile>));
+    }
+  }
+  return results;
+};
+
+export const searchByFriendCode = async (
+  code: string,
+  currentUid: string
+): Promise<UserProfile[]> => {
+  const trimmed = code.trim();
+  if (trimmed.length < 4) return [];
+
+  const upper = trimmed.toUpperCase();
+  const lower = trimmed.toLowerCase();
+
+  const queries = [
+    getDocs(query(usersCollection(), where("friendCode", "==", upper), firestoreLimit(5))),
+  ];
+  if (lower !== upper) {
+    queries.push(
+      getDocs(query(usersCollection(), where("friendCode", "==", lower), firestoreLimit(5))),
+      getDocs(query(usersCollection(), where("friendCode", "==", trimmed), firestoreLimit(5))),
+    );
+  }
+
+  const snapshots = await Promise.all(queries);
+  const seen = new Set<string>();
+  const results: UserProfile[] = [];
+  for (const snap of snapshots) {
+    for (const d of snap.docs) {
+      if (d.id === currentUid || seen.has(d.id)) continue;
+      seen.add(d.id);
+      results.push(hydrateUserProfile(d.id, d.data() as Partial<UserProfile>));
+    }
+  }
+  return results;
 };
 
 export const sendFriendRequest = async (
