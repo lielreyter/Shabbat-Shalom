@@ -8,6 +8,7 @@ import {
 import { firestore } from "../firebase/firebaseConfig";
 import { hydrateUserProfile } from "../firebase/firestore";
 import { UserProfile } from "../types/UserProfile";
+import { createBuddyChat, findPairChat, deleteBuddyChat } from "./buddyChatService";
 
 const userRef = (uid: string) => doc(firestore, "users", uid);
 
@@ -39,6 +40,11 @@ export const addTefillinBuddy = async (
   await updateDoc(userRef(buddyUid), {
     tefillinBuddyUids: arrayUnion(myUid),
   });
+
+  const existingChat = await findPairChat(myUid, buddyUid);
+  if (!existingChat) {
+    await createBuddyChat([myUid, buddyUid], "pair");
+  }
 };
 
 export const removeTefillinBuddy = async (
@@ -51,6 +57,11 @@ export const removeTefillinBuddy = async (
   await updateDoc(userRef(buddyUid), {
     tefillinBuddyUids: arrayRemove(myUid),
   });
+
+  const chat = await findPairChat(myUid, buddyUid);
+  if (chat) {
+    await deleteBuddyChat(chat.id);
+  }
 };
 
 export const getTefillinBuddyProfiles = async (

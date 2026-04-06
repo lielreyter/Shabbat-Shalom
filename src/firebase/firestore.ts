@@ -61,6 +61,8 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     friendCode: data.friendCode ?? uid.slice(0, 8).toUpperCase(),
     friendUids: Array.isArray(data.friendUids) ? data.friendUids : [],
     pendingFriendUids: Array.isArray(data.pendingFriendUids) ? data.pendingFriendUids : [],
+    latitude: typeof data.latitude === "number" ? data.latitude : null,
+    longitude: typeof data.longitude === "number" ? data.longitude : null,
     tefillinBuddyUids: Array.isArray(data.tefillinBuddyUids) ? data.tefillinBuddyUids : [],
     buddyChatIds: Array.isArray(data.buddyChatIds) ? data.buddyChatIds : [],
   };
@@ -117,6 +119,8 @@ export const createUserProfile = async ({
     intentVisibility: "private",
     friendUids: [],
     pendingFriendUids: [],
+    latitude: null,
+    longitude: null,
     tefillinBuddyUids: [],
     buddyChatIds: [],
   };

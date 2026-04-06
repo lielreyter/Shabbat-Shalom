@@ -6,6 +6,7 @@ import {
   Animated,
   Easing,
   FlatList,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -111,6 +112,16 @@ import {
   subscribeToDirectMessages,
   type DirectMessage,
 } from "./src/friends/directMessages";
+import {
+  getUserBuddyChats,
+  sendBuddyMessage,
+  subscribeToBuddyMessages,
+  uploadBuddyImage,
+  markMessageOpened,
+} from "./src/friends/buddyChatService";
+import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
+import { getSunWindowMessage } from "./src/friends/zmanimService";
+import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 
 /* ─── theme ──────────────────────────────────────────────────── */
 
@@ -136,7 +147,7 @@ const C = {
 /* ─── types ──────────────────────────────────────────────────── */
 
 type TabKey = "home" | "social" | "parasha";
-type SocialSubTab = "friends" | "chat" | "dm";
+type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat";
 type BlockLevel = "full" | "medium" | "custom" | "none";
 type RestrictionSetting = {
   id: string;
@@ -249,6 +260,27 @@ const PRAYER_TEXTS = {
     english: "Hear, O Israel: The Lord is our God, the Lord is One.\nBlessed is the name of His glorious kingdom forever and ever.",
   },
 };
+
+const RABBI_QUOTES: string[] = [
+  "The world stands on three things: Torah, prayer, and acts of kindness. — Pirkei Avot 1:2",
+  "Who is rich? One who is happy with what they have. — Pirkei Avot 4:1",
+  "In a place where there are no men, strive to be a man. — Pirkei Avot 2:5",
+  "If I am not for myself, who will be for me? But if I am only for myself, what am I? — Hillel",
+  "The day is short, the work is great. — Pirkei Avot 2:15",
+  "Do not judge your fellow until you have reached their place. — Pirkei Avot 2:4",
+  "It is not upon you to finish the work, but neither are you free to desist from it. — Pirkei Avot 2:16",
+  "Every person has their hour. — Pirkei Avot 4:3",
+  "Who is wise? One who learns from every person. — Pirkei Avot 4:1",
+  "Pray as if everything depends on God. Act as if everything depends on you. — attributed to the Rebbe",
+  "A little bit of light dispels a lot of darkness. — Rebbe Menachem Mendel Schneerson",
+  "The Baal Shem Tov taught: your fellow is your mirror. What you see in them reflects what is in you.",
+  "Where there is love, there is no question. Where there is a question, there is no love. — Rebbe Menachem Mendel of Kotzk",
+  "The purpose of creation is to bring heaven down to earth. — Rebbe Menachem Mendel Schneerson",
+  "We are not expected to be perfect. We are expected to try. — Rabbi Jonathan Sacks",
+  "Tefillin: binding the mind and heart to God. Keep wrapping, keep connecting.",
+  "Deed, not creed, is what matters most. — Rabbi Abraham Joshua Heschel",
+  "When you put on tefillin, you are crowning God as King over your thoughts, emotions, and actions.",
+];
 
 const defaultRestrictions: RestrictionSetting[] = [
   { id: "social", label: "Social apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
@@ -451,6 +483,15 @@ export default function App() {
   const [showBuddyInfo, setShowBuddyInfo] = useState(false);
   const [buddyActionLoading, setBuddyActionLoading] = useState(false);
 
+  /* ── buddy chat ── */
+  const [buddyChats, setBuddyChats] = useState<BuddyChat[]>([]);
+  const [activeBuddyChat, setActiveBuddyChat] = useState<BuddyChat | null>(null);
+  const [buddyChatMessages, setBuddyChatMessages] = useState<BuddyMessage[]>([]);
+  const [buddyChatInput, setBuddyChatInput] = useState("");
+  const [buddyChatImageLoading, setBuddyChatImageLoading] = useState(false);
+  const [sunBlockedMessage, setSunBlockedMessage] = useState<string | null>(null);
+  const [showBuddyQuotes, setShowBuddyQuotes] = useState(false);
+
   /* ── friend profile modal ── */
   const [viewingFriend, setViewingFriend] = useState<UserProfile | null>(null);
 
@@ -498,16 +539,14 @@ export default function App() {
   const tefillinBuddyUids = useMemo(() => user?.tefillinBuddyUids ?? [], [user?.tefillinBuddyUids]);
 
   const displayTefillinStreak = useMemo(() => {
-    if (tefillinBuddyUids.length > 0 && friends.length > 0) {
-      const buddyStreaks = friends
-        .filter((f) => tefillinBuddyUids.includes(f.uid))
-        .map((f) => f.tefillinCurrentStreak ?? 0);
-      if (buddyStreaks.length > 0) {
-        return Math.max(user?.tefillinCurrentStreak ?? 0, ...buddyStreaks);
+    if (buddyChats.length > 0) {
+      const chatStreaks = buddyChats.map((c) => c.streakCount);
+      if (chatStreaks.length > 0) {
+        return Math.max(user?.tefillinCurrentStreak ?? 0, ...chatStreaks);
       }
     }
     return user?.tefillinCurrentStreak ?? 0;
-  }, [tefillinBuddyUids, friends, user?.tefillinCurrentStreak]);
+  }, [buddyChats, user?.tefillinCurrentStreak]);
 
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
@@ -618,6 +657,14 @@ export default function App() {
       const location = await getCurrentLocation();
       setCurrentLocation(location);
       if (location.city) setCity(location.city);
+
+      if (user.latitude == null || user.longitude == null) {
+        updateUserProfile(user.uid, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        }).then((updated) => setUser(updated)).catch(() => {});
+      }
+
       const nearby = await listNearbyCongregations(location, 8, 50);
       setNearbyCongregations(nearby);
     } catch (error) {
@@ -703,6 +750,33 @@ export default function App() {
     const unsubscribe = subscribeToDirectMessages(user.uid, chattingWith.uid, setDmMessages);
     return () => unsubscribe();
   }, [user, chattingWith, socialSubTab]);
+
+  /* ── load buddy chats ── */
+  useEffect(() => {
+    if (!user) return;
+    getUserBuddyChats(user.uid)
+      .then(setBuddyChats)
+      .catch(() => setBuddyChats([]));
+  }, [user?.buddyChatIds, user]);
+
+  /* ── buddy chat message subscription ── */
+  useEffect(() => {
+    if (!activeBuddyChat || socialSubTab !== "buddyChat") return;
+    setBuddyChatMessages([]);
+    const unsubscribe = subscribeToBuddyMessages(activeBuddyChat.id, setBuddyChatMessages);
+    return () => unsubscribe();
+  }, [activeBuddyChat, socialSubTab]);
+
+  /* ── check sun window when entering buddy chat ── */
+  useEffect(() => {
+    if (socialSubTab !== "buddyChat" || !activeBuddyChat || !currentLocation) {
+      setSunBlockedMessage(null);
+      return;
+    }
+    getSunWindowMessage(currentLocation.latitude, currentLocation.longitude, currentLocation.timezone)
+      .then(setSunBlockedMessage)
+      .catch(() => setSunBlockedMessage(null));
+  }, [socialSubTab, activeBuddyChat, currentLocation]);
 
   /* ── restriction week outcomes ── */
   const applyRestrictionWeekOutcome = useCallback(
@@ -1338,6 +1412,8 @@ export default function App() {
       await addTefillinBuddy(user.uid, buddyUid);
       const updated = await getUserProfile(user.uid);
       if (updated) setUser(updated);
+      const chats = await getUserBuddyChats(user.uid);
+      setBuddyChats(chats);
     } catch (error) {
       Alert.alert("Tefillin Buddy", errorMessage(error, "Failed to add buddy."));
     } finally { setBuddyActionLoading(false); }
@@ -1350,6 +1426,8 @@ export default function App() {
       await removeTefillinBuddy(user.uid, buddyUid);
       const updated = await getUserProfile(user.uid);
       if (updated) setUser(updated);
+      const chats = await getUserBuddyChats(user.uid);
+      setBuddyChats(chats);
     } catch (error) {
       Alert.alert("Tefillin Buddy", errorMessage(error, "Failed to remove buddy."));
     } finally { setBuddyActionLoading(false); }
@@ -1368,6 +1446,8 @@ export default function App() {
           await removeFriend(user.uid, friendUid);
           const updated = await getUserProfile(user.uid);
           if (updated) setUser(updated);
+          const chats = await getUserBuddyChats(user.uid);
+          setBuddyChats(chats);
           setViewingFriend(null);
         } catch (error) {
           Alert.alert("Remove Friend", errorMessage(error, "Failed to remove friend."));
@@ -1406,6 +1486,123 @@ export default function App() {
       Alert.alert("Message", errorMessage(error, "Failed to send message."));
     }
   }, [dmInput, user, chattingWith]);
+
+  /* ── buddy chat callbacks ── */
+  const openBuddyChat = useCallback((buddy: UserProfile) => {
+    const chat = buddyChats.find(
+      (c) => c.type === "pair" && c.memberUids.includes(buddy.uid)
+    );
+    if (chat) {
+      setActiveBuddyChat(chat);
+      setChattingWith(buddy);
+      setBuddyChatInput("");
+      setSocialSubTab("buddyChat");
+    } else {
+      openDmWith(buddy);
+    }
+  }, [buddyChats, openDmWith]);
+
+  const onSendBuddyChatText = useCallback(async () => {
+    if (!user || !activeBuddyChat || !buddyChatInput.trim()) return;
+    const text = buddyChatInput.trim();
+    setBuddyChatInput("");
+    Keyboard.dismiss();
+    try {
+      await sendBuddyMessage(
+        activeBuddyChat.id,
+        user.uid,
+        user.displayName ?? "Anonymous",
+        "text",
+        text
+      );
+    } catch (error) {
+      Alert.alert("Buddy Chat", errorMessage(error, "Failed to send message."));
+    }
+  }, [buddyChatInput, user, activeBuddyChat]);
+
+  const onBuddyChatCamera = useCallback(async () => {
+    if (!user || !activeBuddyChat) return;
+    if (sunBlockedMessage) {
+      Alert.alert("Tefillin Photo", sunBlockedMessage);
+      return;
+    }
+    try {
+      const result = await launchCamera({
+        mediaType: "photo" as const,
+        quality: 0.7,
+      });
+      if (result.errorCode) {
+        Alert.alert("Camera", result.errorMessage ?? "Camera is not available on this device.");
+        return;
+      }
+      if (result.didCancel || !result.assets?.[0]?.uri) return;
+      await handleBuddyImageSend(result.assets[0].uri, true);
+    } catch {
+      Alert.alert("Camera", "Camera is not available on this device.");
+    }
+  }, [user, activeBuddyChat, sunBlockedMessage]);
+
+  const onBuddyChatGallery = useCallback(async () => {
+    if (!user || !activeBuddyChat) return;
+    try {
+      const result = await launchImageLibrary({
+        mediaType: "photo" as const,
+        quality: 0.7,
+      });
+      if (result.didCancel || !result.assets?.[0]?.uri) return;
+      await handleBuddyImageSend(result.assets[0].uri, false);
+    } catch {
+      Alert.alert("Gallery", "Could not open photo library.");
+    }
+  }, [user, activeBuddyChat]);
+
+  const onSendBuddyQuote = useCallback(async (quote: string) => {
+    if (!user || !activeBuddyChat) return;
+    setShowBuddyQuotes(false);
+    try {
+      await sendBuddyMessage(
+        activeBuddyChat.id,
+        user.uid,
+        user.displayName ?? "Anonymous",
+        "text",
+        quote
+      );
+    } catch (error) {
+      Alert.alert("Quote", errorMessage(error, "Failed to send quote."));
+    }
+  }, [user, activeBuddyChat]);
+
+  const handleBuddyImageSend = useCallback(async (imageUri: string, fromCamera: boolean) => {
+    if (!user || !activeBuddyChat) return;
+    setBuddyChatImageLoading(true);
+    try {
+      const downloadUrl = await uploadBuddyImage(activeBuddyChat.id, user.uid, imageUri);
+      await sendBuddyMessage(
+        activeBuddyChat.id,
+        user.uid,
+        user.displayName ?? "Anonymous",
+        "image",
+        downloadUrl,
+        user.latitude ?? currentLocation?.latitude,
+        user.longitude ?? currentLocation?.longitude,
+        user.timeZone,
+        fromCamera
+      );
+    } catch (error) {
+      Alert.alert("Tefillin Photo", errorMessage(error, "Failed to send image."));
+    } finally {
+      setBuddyChatImageLoading(false);
+    }
+  }, [user, activeBuddyChat, currentLocation]);
+
+  const onMarkBuddyMessageOpened = useCallback(async (msg: BuddyMessage) => {
+    if (!activeBuddyChat || msg.opened || msg.senderUid === user?.uid) return;
+    try {
+      await markMessageOpened(activeBuddyChat.id, msg.id);
+    } catch {
+      // non-critical
+    }
+  }, [activeBuddyChat, user?.uid]);
 
   /* ── time display ── */
   const timesDisplay = useMemo(() => {
@@ -1749,6 +1946,22 @@ export default function App() {
           </Pressable>
         </View>
       )}
+      {socialSubTab === "buddyChat" && activeBuddyChat && chattingWith && (
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 10 }}>
+          <Pressable onPress={() => { setSocialSubTab("friends"); setActiveBuddyChat(null); setChattingWith(null); }}>
+            <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back</Text>
+          </Pressable>
+          <Pressable onPress={() => setViewingFriend(chattingWith)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+            <View style={[s.friendAvatar, { width: 32, height: 32, borderRadius: 16 }]}>
+              <Text style={[s.friendAvatarText, { fontSize: 13 }]}>{(chattingWith.displayName ?? "?")[0]?.toUpperCase()}</Text>
+            </View>
+            <View>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: C.text }}>{chattingWith.displayName ?? "Unknown"}</Text>
+              <Text style={{ fontSize: 12, color: C.textLight }}>{activeBuddyChat.streakCount} day streak</Text>
+            </View>
+          </Pressable>
+        </View>
+      )}
 
       {/* Main Social View */}
       {socialSubTab === "friends" && (
@@ -1843,7 +2056,7 @@ export default function App() {
                   const isToday = lastDate === todayDateStr();
                   const showHourglass = !isToday;
                   return (
-                    <Pressable key={uid} style={s.buddyStreakRow} onPress={() => openDmWith(buddy)}>
+                    <Pressable key={uid} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
                       <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
                         <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
                           <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
@@ -1853,15 +2066,25 @@ export default function App() {
                       <View style={{ flex: 1 }}>
                         <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <Text style={s.buddyStreakText}>{streak} day streak</Text>
-                          {showHourglass && <Text style={{ fontSize: 14 }}>⏳</Text>}
+                          {(() => {
+                            const chatForBuddy = buddyChats.find(
+                              (c) => c.type === "pair" && c.memberUids.includes(uid)
+                            );
+                            const chatStreak = chatForBuddy?.streakCount ?? streak;
+                            return (
+                              <>
+                                <Text style={s.buddyStreakText}>{chatStreak} day streak</Text>
+                                {showHourglass && <Text style={{ fontSize: 14 }}>⏳</Text>}
+                              </>
+                            );
+                          })()}
                         </View>
                       </View>
                       <Pressable
                         style={s.buddySnapBtn}
-                        onPress={() => Alert.alert("Tefillin Buddies", isToday ? `${buddy.displayName} has wrapped today!` : `${buddy.displayName} hasn't wrapped yet today. Send them a reminder!`)}
+                        onPress={() => openBuddyChat(buddy)}
                       >
-                        <Text style={s.buddySnapBtnText}>{isToday ? "Wrapped" : "Tap"}</Text>
+                        <Text style={s.buddySnapBtnText}>{isToday ? "Wrapped" : "Chat"}</Text>
                       </Pressable>
                     </Pressable>
                   );
@@ -1976,6 +2199,87 @@ export default function App() {
             />
             <Pressable style={s.chatSendBtn} onPress={onSendDm}>
               <Text style={s.chatSendBtnText}>Send</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
+      {/* Buddy Chat View */}
+      {socialSubTab === "buddyChat" && activeBuddyChat && chattingWith && (
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+          {sunBlockedMessage && (
+            <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ fontSize: 16 }}>🌙</Text>
+              <Text style={{ color: "#92400E", fontSize: 13, flex: 1 }}>{sunBlockedMessage}</Text>
+            </View>
+          )}
+          <FlatList
+            data={buddyChatMessages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={s.chatList}
+            renderItem={({ item }) => {
+              const isMine = item.senderUid === user?.uid;
+              if (!isMine && !item.opened) {
+                onMarkBuddyMessageOpened(item);
+              }
+              return (
+                <View style={[s.chatBubble, isMine && s.chatBubbleMine]}>
+                  {!isMine && <Text style={s.chatSender}>{item.senderName}</Text>}
+                  {item.type === "image" && item.imageUrl ? (
+                    <Pressable onPress={() => onMarkBuddyMessageOpened(item)}>
+                      <Image
+                        source={{ uri: item.imageUrl }}
+                        style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
+                        resizeMode="cover"
+                      />
+                    </Pressable>
+                  ) : (
+                    <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
+                  )}
+                  {!isMine && item.type === "image" && (
+                    <Text style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>
+                      {item.opened ? "Opened" : "Tap to open"}
+                    </Text>
+                  )}
+                </View>
+              );
+            }}
+            ListEmptyComponent={
+              <View style={{ alignItems: "center", paddingVertical: 40 }}>
+                <Text style={{ fontSize: 36, marginBottom: 8 }}>📸</Text>
+                <Text style={s.emptyText}>Send a tefillin photo to start your streak!</Text>
+              </View>
+            }
+          />
+          <View style={s.chatInputRow}>
+            <Pressable
+              style={[s.buddyChatIconBtn, { backgroundColor: sunBlockedMessage ? C.border : C.primary }]}
+              onPress={onBuddyChatCamera}
+              disabled={buddyChatImageLoading}
+            >
+              <Text style={{ fontSize: 18 }}>{buddyChatImageLoading ? "..." : "📷"}</Text>
+            </Pressable>
+            <TextInput
+              style={[s.chatTextInput, { flex: 1 }]}
+              value={buddyChatInput}
+              onChangeText={setBuddyChatInput}
+              placeholder={`Message ${chattingWith.displayName ?? ""}...`}
+              placeholderTextColor={C.textLight}
+              returnKeyType="send"
+              onSubmitEditing={onSendBuddyChatText}
+            />
+            <Pressable
+              style={[s.buddyChatIconBtn, { backgroundColor: C.surface }]}
+              onPress={onBuddyChatGallery}
+              disabled={buddyChatImageLoading}
+            >
+              <Text style={{ fontSize: 18 }}>🖼</Text>
+            </Pressable>
+            <Pressable
+              style={[s.buddyChatIconBtn, { backgroundColor: C.surface }]}
+              onPress={() => setShowBuddyQuotes(true)}
+            >
+              <Text style={{ fontSize: 18 }}>❝</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -2360,6 +2664,29 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Rabbi Quotes Modal */}
+      <Modal visible={showBuddyQuotes} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "70%" }]}>
+            <Text style={s.modalTitle}>Send a Quote</Text>
+            <ScrollView style={{ marginTop: 12 }} showsVerticalScrollIndicator={false}>
+              {RABBI_QUOTES.map((quote, idx) => (
+                <Pressable
+                  key={idx}
+                  style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.border }}
+                  onPress={() => onSendBuddyQuote(quote)}
+                >
+                  <Text style={{ fontSize: 14, lineHeight: 20, color: C.text }}>{quote}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable style={[s.outlineBtn, { marginTop: 12 }]} onPress={() => setShowBuddyQuotes(false)}>
+              <Text style={s.outlineBtnText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Friend Profile Modal */}
       <Modal visible={viewingFriend !== null} transparent animationType="slide">
         <View style={s.modalOverlay}>
@@ -2387,7 +2714,15 @@ export default function App() {
                 <View style={{ gap: 10, marginTop: 20 }}>
                   <Pressable
                     style={s.primaryBtn}
-                    onPress={() => { const f = viewingFriend; setViewingFriend(null); openDmWith(f); }}
+                    onPress={() => {
+                      const f = viewingFriend;
+                      setViewingFriend(null);
+                      if (tefillinBuddyUids.includes(f.uid)) {
+                        openBuddyChat(f);
+                      } else {
+                        openDmWith(f);
+                      }
+                    }}
                   >
                     <Text style={s.primaryBtnText}>Message</Text>
                   </Pressable>
@@ -2909,6 +3244,7 @@ const s = StyleSheet.create({
   chatInputRow: { flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.border, gap: 8, backgroundColor: C.bg },
   chatTextInput: { flex: 1, backgroundColor: C.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, color: C.text },
   chatSendBtn: { backgroundColor: C.primary, borderRadius: 20, paddingHorizontal: 20, justifyContent: "center" },
+  buddyChatIconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center" as const, justifyContent: "center" as const },
   chatSendBtnText: { color: "#FFF", fontWeight: "700", fontSize: 14 },
 
   /* parasha */

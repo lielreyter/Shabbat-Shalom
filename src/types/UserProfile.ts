@@ -42,6 +42,9 @@ export interface UserProfile {
   friendUids: string[];
   pendingFriendUids: string[];
 
+  latitude: number | null;
+  longitude: number | null;
+
   tefillinBuddyUids: string[];
   buddyChatIds: string[];
 }
