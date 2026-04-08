@@ -2,6 +2,7 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -180,6 +181,18 @@ export const listNearbyCongregations = async (
   return deduplicateCongregations(withDistance).slice(0, limit);
 };
 
+export const searchCongregationsByCity = async (
+  cityName: string
+): Promise<Congregation[]> => {
+  const normalizedCity = normalizeMatchText(cityName);
+  if (!normalizedCity) return [];
+  const congregations = await listCongregations();
+  return congregations.filter((c) => {
+    const cCity = normalizeMatchText(c.city);
+    return cCity === normalizedCity || cCity.startsWith(normalizedCity) || normalizedCity.startsWith(cCity);
+  });
+};
+
 export const createCongregation = async ({
   name,
   city,
@@ -292,11 +305,31 @@ export const leaveCongregationAsUser = async (
   congregationId: string,
   uid: string
 ): Promise<void> => {
+  const congregation = await getCongregationById(congregationId);
+  if (!congregation) {
+    await setUserCongregation(uid, null);
+    return;
+  }
+
   await updateDoc(congregationDoc(congregationId), {
     memberUids: arrayRemove(uid),
     pendingUids: arrayRemove(uid),
   });
   await setUserCongregation(uid, null);
+
+  if (congregation.leaderUid === uid) {
+    const remainingUids = congregation.memberUids.filter((m) => m !== uid);
+    if (remainingUids.length === 0) {
+      await deleteDoc(congregationDoc(congregationId));
+    } else {
+      const memberProfiles = await listCongregationMembers(congregationId);
+      const sorted = memberProfiles
+        .filter((m) => m.uid !== uid)
+        .sort((a, b) => (b.tefillinCurrentStreak ?? 0) - (a.tefillinCurrentStreak ?? 0));
+      const newLeaderUid = sorted.length > 0 ? sorted[0].uid : remainingUids[0];
+      await updateDoc(congregationDoc(congregationId), { leaderUid: newLeaderUid });
+    }
+  }
 };
 
 export const setCongregationJoinPolicy = async ({
@@ -388,6 +421,22 @@ export const kickMember = async ({
     pendingUids: arrayRemove(targetUid),
   });
   await setUserCongregation(targetUid, null);
+};
+
+export const transferLeadership = async (
+  congregationId: string,
+  currentLeaderUid: string,
+  newLeaderUid: string
+): Promise<void> => {
+  const congregation = await getCongregationById(congregationId);
+  if (!congregation) throw new Error("Congregation not found.");
+  if (congregation.leaderUid !== currentLeaderUid) {
+    throw new Error("Only the congregation leader can transfer leadership.");
+  }
+  if (!congregation.memberUids.includes(newLeaderUid)) {
+    throw new Error("New leader must be a member of the congregation.");
+  }
+  await updateDoc(congregationDoc(congregationId), { leaderUid: newLeaderUid });
 };
 
 export const listCongregationMembers = async (

@@ -16,11 +16,11 @@ cases before moving on.
 | 5A | Bug Fixes & Quick Wins                  | Complete    |
 | 5B | Tefillin Buddy System (Firestore)       | Complete    |
 | 5C | Buddy Chat & Image Messaging            | Complete    |
-| 5D | Streak Engine (Time Window + Eval)      | Not started |
-| 5E | Group Buddy Chats                       | Not started |
-| 5F | Badge System SCRAPPED                   | Not started |
-| 5G | Congregation Fixes                      | Not started |
-| 5H | Phone Auth Fix                          | Not started |
+| 5D | Streak Engine (Time Window + Eval)      | Complete    |
+| 5E | Group Buddy Chats                       | Complete    |
+| 5F | Badge System SCRAPPED - CURSOR DO NOT IMPLEMENT
+| 5G | Congregation Fixes                      | Complete    |
+| 5H | Phone Auth Fix SCRAPPED - DO NOT IMPLEMENT
 
 ---
 

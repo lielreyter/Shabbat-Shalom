@@ -142,8 +142,14 @@ const hydrateProfileWithFallback = async ({
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
       intentVisibility: "private",
+      streakVisibility: "public",
+      friendCode: firebaseUser.uid.slice(0, 8).toUpperCase(),
       friendUids: [],
       pendingFriendUids: [],
+      latitude: null,
+      longitude: null,
+      tefillinBuddyUids: [],
+      buddyChatIds: [],
     };
   }
   cachedUserProfile = profile;
@@ -187,8 +193,9 @@ export const signInWithApple = async (): Promise<UserProfile> => {
   } catch (error) {
     if (DEV_MODE) {
       // Last-resort DEV fallback so app can run without complete Firebase auth setup.
+      const devUid = `dev-local-${Date.now()}`;
       const fallbackProfile: UserProfile = {
-        uid: `dev-local-${Date.now()}`,
+        uid: devUid,
         createdAt: Timestamp.now(),
         lastLoginAt: Timestamp.now(),
         displayName: "Dev User",
@@ -214,8 +221,14 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         wantsModehAniReminder: false,
         wantsShemaReminder: false,
         intentVisibility: "private",
+        streakVisibility: "public",
+        friendCode: devUid.replace(/\D/g, "").slice(-8).padStart(8, "0").toUpperCase() || "DEV00001",
         friendUids: [],
         pendingFriendUids: [],
+        latitude: null,
+        longitude: null,
+        tefillinBuddyUids: [],
+        buddyChatIds: [],
       };
       cachedUserProfile = fallbackProfile;
       return fallbackProfile;
@@ -315,8 +328,14 @@ export const registerWithEmailPassword = async ({
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
       intentVisibility: "private",
+      streakVisibility: "public",
+      friendCode: result.user.uid.slice(0, 8).toUpperCase(),
       friendUids: [],
       pendingFriendUids: [],
+      latitude: null,
+      longitude: null,
+      tefillinBuddyUids: [],
+      buddyChatIds: [],
     };
     cachedUserProfile = stub;
     return stub;
@@ -399,8 +418,14 @@ export const confirmPhoneSignUp = async ({
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
       intentVisibility: "private",
+      streakVisibility: "public",
+      friendCode: result.user.uid.slice(0, 8).toUpperCase(),
       friendUids: [],
       pendingFriendUids: [],
+      latitude: null,
+      longitude: null,
+      tefillinBuddyUids: [],
+      buddyChatIds: [],
     };
     cachedUserProfile = stub;
     return stub;
@@ -550,8 +575,14 @@ export const subscribeToAuthState = (
         wantsModehAniReminder: false,
         wantsShemaReminder: false,
         intentVisibility: "private",
+        streakVisibility: "public",
+        friendCode: firebaseUser.uid.slice(0, 8).toUpperCase(),
         friendUids: [],
         pendingFriendUids: [],
+        latitude: null,
+        longitude: null,
+        tefillinBuddyUids: [],
+        buddyChatIds: [],
       };
       cachedUserProfile = stub;
       callback(stub);

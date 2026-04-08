@@ -22,4 +22,5 @@ export interface BuddyMessage {
   createdAt: Timestamp;
   opened: boolean;
   isStreakEligible: boolean;
+  savedByUids: string[];
 }

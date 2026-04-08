@@ -33,8 +33,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to take tefillin photos for your buddy streak</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>Used to get Shabbat times for your area</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Used to save photos to your camera roll</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Used to save photos from chat to your camera roll</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

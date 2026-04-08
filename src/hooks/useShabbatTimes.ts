@@ -66,6 +66,7 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
         await refresh();
       } else {
         setLoading(false);
+        refresh().catch(() => {});
       }
     };
 

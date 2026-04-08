@@ -54,6 +54,7 @@ const hydrateBuddyMessage = (id: string, data: Record<string, unknown>): BuddyMe
   createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
   opened: data.opened === true,
   isStreakEligible: data.isStreakEligible === true,
+  savedByUids: Array.isArray(data.savedByUids) ? data.savedByUids : [],
 });
 
 export const createBuddyChat = async (
@@ -118,6 +119,44 @@ export const deleteBuddyChat = async (chatId: string): Promise<void> => {
   await deleteDoc(chatDoc(chatId));
 };
 
+export const addGroupMember = async (
+  chatId: string,
+  uid: string
+): Promise<void> => {
+  const chat = await getBuddyChat(chatId);
+  if (!chat) throw new Error("Chat not found.");
+  if (chat.type !== "group") throw new Error("Cannot add members to a pair chat.");
+  if (chat.memberUids.includes(uid)) return;
+
+  await updateDoc(chatDoc(chatId), {
+    memberUids: arrayUnion(uid),
+  });
+  await updateDoc(userDoc(uid), {
+    buddyChatIds: arrayUnion(chatId),
+  });
+};
+
+export const removeGroupMember = async (
+  chatId: string,
+  uid: string
+): Promise<void> => {
+  const chat = await getBuddyChat(chatId);
+  if (!chat) throw new Error("Chat not found.");
+  if (chat.type !== "group") throw new Error("Cannot remove members from a pair chat.");
+
+  await updateDoc(chatDoc(chatId), {
+    memberUids: arrayRemove(uid),
+  });
+  await updateDoc(userDoc(uid), {
+    buddyChatIds: arrayRemove(chatId),
+  });
+
+  const updatedChat = await getBuddyChat(chatId);
+  if (updatedChat && updatedChat.memberUids.length < 2) {
+    await deleteBuddyChat(chatId);
+  }
+};
+
 export const findPairChat = async (
   uid1: string,
   uid2: string
@@ -177,6 +216,7 @@ export const sendBuddyMessage = async (
     createdAt: serverTimestamp(),
     opened: false,
     isStreakEligible: streakEligible,
+    savedByUids: [],
   };
 
   const docRef = await addDoc(messagesCol(chatId), payload);
@@ -238,6 +278,38 @@ export const uploadBuddyImage = async (
   return getDownloadURL(storageRef);
 };
 
+const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const saveMessageToChat = async (
+  chatId: string,
+  messageId: string,
+  uid: string
+): Promise<void> => {
+  await updateDoc(doc(firestore, "buddyChats", chatId, "messages", messageId), {
+    savedByUids: arrayUnion(uid),
+  });
+};
+
+export const purgeExpiredMessages = async (chatId: string): Promise<number> => {
+  const cutoff = Timestamp.fromDate(new Date(Date.now() - MESSAGE_TTL_MS));
+  const q = query(
+    messagesCol(chatId),
+    where("createdAt", "<", cutoff),
+    firestoreLimit(100)
+  );
+  const snapshot = await getDocs(q);
+  let purged = 0;
+  for (const msgDoc of snapshot.docs) {
+    const data = msgDoc.data() as Record<string, unknown>;
+    const saved = Array.isArray(data.savedByUids) ? data.savedByUids : [];
+    if (saved.length === 0) {
+      await deleteDoc(msgDoc.ref);
+      purged++;
+    }
+  }
+  return purged;
+};
+
 export const getStreakEligibleSendersForDate = async (
   chatId: string,
   date: string
@@ -260,4 +332,15 @@ export const getStreakEligibleSendersForDate = async (
     if (data.senderUid) senders.add(data.senderUid as string);
   });
   return senders;
+};
+
+export const getTodayStreakStatus = async (
+  chatId: string,
+  memberUids: string[]
+): Promise<{ sent: string[]; notSent: string[] }> => {
+  const today = new Date().toISOString().slice(0, 10);
+  const senders = await getStreakEligibleSendersForDate(chatId, today);
+  const sent = memberUids.filter((uid) => senders.has(uid));
+  const notSent = memberUids.filter((uid) => !senders.has(uid));
+  return { sent, notSent };
 };

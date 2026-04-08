@@ -30,6 +30,12 @@ export type ShabbatTimeError = {
   message: string;
 };
 
+export type HolidayEventCacheRecord = {
+  name: string;
+  candleLightingIso: string | null;
+  havdalahIso: string | null;
+};
+
 export type ShabbatTimesCacheRecord = {
   shabbatStartIso: string;
   shabbatEndIso: string;
@@ -41,4 +47,5 @@ export type ShabbatTimesCacheRecord = {
   fetchedAtIso: string;
   parsha?: string | null;
   locationHash: string;
+  holidays?: HolidayEventCacheRecord[];
 };

@@ -63,6 +63,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     pendingFriendUids: Array.isArray(data.pendingFriendUids) ? data.pendingFriendUids : [],
     latitude: typeof data.latitude === "number" ? data.latitude : null,
     longitude: typeof data.longitude === "number" ? data.longitude : null,
+    streakVisibility: data.streakVisibility ?? "public",
     tefillinBuddyUids: Array.isArray(data.tefillinBuddyUids) ? data.tefillinBuddyUids : [],
     buddyChatIds: Array.isArray(data.buddyChatIds) ? data.buddyChatIds : [],
   };
@@ -117,6 +118,7 @@ export const createUserProfile = async ({
     wantsModehAniReminder: false,
     wantsShemaReminder: false,
     intentVisibility: "private",
+    streakVisibility: "public",
     friendUids: [],
     pendingFriendUids: [],
     latitude: null,

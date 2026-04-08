@@ -45,6 +45,8 @@ export interface UserProfile {
   latitude: number | null;
   longitude: number | null;
 
+  streakVisibility: "public" | "friends" | "private";
+
   tefillinBuddyUids: string[];
   buddyChatIds: string[];
 }

@@ -82,7 +82,9 @@ import {
   listCongregationMembers,
   listNearbyCongregations,
   rejectJoinRequest,
+  searchCongregationsByCity as searchCongregationsByCityName,
   setCongregationJoinPolicy,
+  transferLeadership,
 } from "./src/congregation/congregationService";
 import {
   Congregation,
@@ -118,10 +120,18 @@ import {
   subscribeToBuddyMessages,
   uploadBuddyImage,
   markMessageOpened,
+  createBuddyChat,
+  addGroupMember,
+  removeGroupMember,
+  getTodayStreakStatus,
+  saveMessageToChat,
+  purgeExpiredMessages,
 } from "./src/friends/buddyChatService";
 import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
 import { getSunWindowMessage } from "./src/friends/zmanimService";
+import { evaluateAllStreaks } from "./src/friends/streakEvaluator";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
+import { CameraRoll } from "@react-native-camera-roll/camera-roll";
 
 /* ─── theme ──────────────────────────────────────────────────── */
 
@@ -144,10 +154,29 @@ const C = {
   streakBg: "#FEF3C7",
 };
 
+/* ─── camera icon component ────────────────────────────────── */
+
+function CameraIcon({ size = 22, color = "#FFF" }: { size?: number; color?: string }) {
+  const body = size;
+  const bodyH = body * 0.68;
+  const lens = body * 0.34;
+  const topW = body * 0.36;
+  const topH = body * 0.18;
+  const bw = Math.max(1.5, size * 0.09);
+  return (
+    <View style={{ width: body, height: body, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ position: "absolute", top: bodyH * 0.08, width: topW, height: topH, borderWidth: bw, borderColor: color, borderRadius: bw * 2, backgroundColor: "transparent" }} />
+      <View style={{ width: body, height: bodyH, borderWidth: bw, borderColor: color, borderRadius: body * 0.2, backgroundColor: "transparent", alignItems: "center", justifyContent: "center", marginTop: topH * 0.6 }}>
+        <View style={{ width: lens, height: lens, borderWidth: bw, borderColor: color, borderRadius: lens / 2, backgroundColor: "transparent" }} />
+      </View>
+    </View>
+  );
+}
+
 /* ─── types ──────────────────────────────────────────────────── */
 
 type TabKey = "home" | "social" | "parasha";
-type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat";
+type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat" | "groupCreate";
 type BlockLevel = "full" | "medium" | "custom" | "none";
 type RestrictionSetting = {
   id: string;
@@ -312,8 +341,22 @@ const formatTime24 = (date: Date): string => {
   return `${h}:${m}`;
 };
 
+const to24h = (time: string): string => {
+  const raw = (time ?? "07:00").trim();
+  if (/^\d{2}:\d{2}$/.test(raw)) return raw;
+  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(raw);
+  if (!match) return "07:00";
+  let h = Number(match[1]);
+  const m = Number(match[2]);
+  const ap = match[3].toUpperCase();
+  if (ap === "PM" && h < 12) h += 12;
+  if (ap === "AM" && h === 12) h = 0;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+};
+
 const addMinutesToTimeStr = (time: string, mins: number): string => {
-  const [hStr, mStr] = (time ?? "07:00").split(":");
+  const normalized = to24h(time);
+  const [hStr, mStr] = normalized.split(":");
   const total = Number(hStr) * 60 + Number(mStr) + mins;
   const h = Math.floor(total / 60) % 24;
   const m = total % 60;
@@ -420,6 +463,7 @@ export default function App() {
   const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
   const [customAppBlocks, setCustomAppBlocks] = useState<Record<string, boolean>>({});
   const [intentDraft, setIntentDraft] = useState("");
+  const [savedIntentText, setSavedIntentText] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
 
   /* ── intent calendar ── */
@@ -451,6 +495,10 @@ export default function App() {
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [newCongregationName, setNewCongregationName] = useState("");
+  const [newCongregationCity, setNewCongregationCity] = useState("");
+  const [newCongCitySuggestions, setNewCongCitySuggestions] = useState<GeocodingResult[]>([]);
+  const [newCongGeo, setNewCongGeo] = useState<GeocodingResult | null>(null);
+  const newCongCityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationResult | null>(null);
   const [currentCongregationName, setCurrentCongregationName] = useState<string | null>(null);
   const [currentCongregation, setCurrentCongregation] = useState<Congregation | null>(null);
@@ -492,8 +540,21 @@ export default function App() {
   const [sunBlockedMessage, setSunBlockedMessage] = useState<string | null>(null);
   const [showBuddyQuotes, setShowBuddyQuotes] = useState(false);
 
+  /* ── group buddy chat ── */
+  const [groupCreateSelectedUids, setGroupCreateSelectedUids] = useState<string[]>([]);
+  const [groupCreateName, setGroupCreateName] = useState("");
+  const [groupCreateLoading, setGroupCreateLoading] = useState(false);
+  const [groupDailyStatus, setGroupDailyStatus] = useState<{ sent: string[]; notSent: string[] } | null>(null);
+  const [showGroupMembers, setShowGroupMembers] = useState(false);
+
+  /* ── friend congregation name cache ── */
+  const [friendCongregationNames, setFriendCongregationNames] = useState<Record<string, string>>({});
+
   /* ── friend profile modal ── */
   const [viewingFriend, setViewingFriend] = useState<UserProfile | null>(null);
+
+  /* ── streak evaluation guard (once per app session) ── */
+  const streakEvalDone = useRef(false);
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
@@ -648,6 +709,13 @@ export default function App() {
     return () => clearIntentFlowHandler();
   }, [user?.shabbatIntentText]);
 
+  useEffect(() => {
+    if (user?.shabbatIntentText != null) {
+      setSavedIntentText(user.shabbatIntentText);
+      setIntentDraft(user.shabbatIntentText);
+    }
+  }, [user?.uid]);
+
   /* ── load location & congregations ── */
   const loadLocationAndCongregations = useCallback(async () => {
     if (!user) return;
@@ -656,7 +724,10 @@ export default function App() {
     try {
       const location = await getCurrentLocation();
       setCurrentLocation(location);
-      if (location.city) setCity(location.city);
+      if (location.city) {
+        setCity(location.city);
+        setNewCongregationCity(cleanCity(location.city));
+      }
 
       if (user.latitude == null || user.longitude == null) {
         updateUserProfile(user.uid, {
@@ -736,6 +807,26 @@ export default function App() {
     loadFriends().catch(() => {});
   }, [user?.friendUids, user?.pendingFriendUids, user]);
 
+  /* ── load friend congregation names ── */
+  useEffect(() => {
+    if (friends.length === 0) return;
+    const congIds = [...new Set(friends.map((f) => f.congregationId).filter((id): id is string => Boolean(id)))];
+    if (congIds.length === 0) return;
+    const fetchNames = async () => {
+      const names: Record<string, string> = {};
+      await Promise.all(
+        congIds.map(async (id) => {
+          try {
+            const cong = await getCongregationById(id);
+            if (cong) names[id] = cong.name;
+          } catch {}
+        })
+      );
+      setFriendCongregationNames(names);
+    };
+    fetchNames();
+  }, [friends]);
+
   /* ── chat subscription ── */
   useEffect(() => {
     if (!user?.congregationId || socialSubTab !== "chat") return;
@@ -759,6 +850,23 @@ export default function App() {
       .catch(() => setBuddyChats([]));
   }, [user?.buddyChatIds, user]);
 
+  /* ── streak evaluation (runs once per app session after auth) ── */
+  useEffect(() => {
+    if (!user || streakEvalDone.current) return;
+    if (user.buddyChatIds.length === 0) return;
+    streakEvalDone.current = true;
+    evaluateAllStreaks(user.uid)
+      .then(() => {
+        getUserBuddyChats(user.uid)
+          .then(setBuddyChats)
+          .catch(() => {});
+        getUserProfile(user.uid).then((updated) => {
+          if (updated) setUser(updated);
+        }).catch(() => {});
+      })
+      .catch(() => {});
+  }, [user]);
+
   /* ── buddy chat message subscription ── */
   useEffect(() => {
     if (!activeBuddyChat || socialSubTab !== "buddyChat") return;
@@ -777,6 +885,17 @@ export default function App() {
       .then(setSunBlockedMessage)
       .catch(() => setSunBlockedMessage(null));
   }, [socialSubTab, activeBuddyChat, currentLocation]);
+
+  /* ── group daily streak status ── */
+  useEffect(() => {
+    if (socialSubTab !== "buddyChat" || !activeBuddyChat || activeBuddyChat.type !== "group") {
+      setGroupDailyStatus(null);
+      return;
+    }
+    getTodayStreakStatus(activeBuddyChat.id, activeBuddyChat.memberUids)
+      .then(setGroupDailyStatus)
+      .catch(() => setGroupDailyStatus(null));
+  }, [socialSubTab, activeBuddyChat, buddyChatMessages]);
 
   /* ── restriction week outcomes ── */
   const applyRestrictionWeekOutcome = useCallback(
@@ -1071,7 +1190,7 @@ export default function App() {
     setActionLoading(true);
     try {
       if (next) {
-        await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: user.wakeUpTime ?? "07:00", title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
+        await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: to24h(user.wakeUpTime ?? "07:00"), title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
       } else {
         await cancelReminder(ReminderType.MODEH_ANI);
       }
@@ -1105,7 +1224,7 @@ export default function App() {
       setUser(updated);
       if (shabbatTimes) {
         if (updated.wantsModehAniReminder) {
-          await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time, title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
+          await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: to24h(time), title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
         }
         if (updated.wantsMorningReminders) {
           const tefillinTime = addMinutesToTimeStr(time, 15);
@@ -1132,6 +1251,7 @@ export default function App() {
     try {
       const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
       setUser(updated);
+      setSavedIntentText(text);
       const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
       const nextHistory = { ...intentHistory, [dateKey]: text };
       await saveIntentHistory(nextHistory);
@@ -1188,11 +1308,30 @@ export default function App() {
     if (!text) return;
     const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
     setUser(updated);
+    setSavedIntentText(text);
     const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
     const nextHistory = { ...intentHistory, [dateKey]: text };
     await saveIntentHistory(nextHistory);
     Alert.alert("Saved", "Your intention has been saved.");
   }, [intentDraft, intentHistory, saveIntentHistory, shabbatTimes, user]);
+
+  /* ── add intention to in-app calendar ── */
+  const onAddIntentToCalendar = useCallback(async () => {
+    const text = savedIntentText.trim() || intentDraft.trim();
+    if (!text) { Alert.alert("No intention", "Write and save your intention first."); return; }
+    if (!user) return;
+    const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
+    if (intentHistory[dateKey] === text) {
+      setShowIntentCalendar(true);
+      return;
+    }
+    const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
+    setUser(updated);
+    setSavedIntentText(text);
+    const nextHistory = { ...intentHistory, [dateKey]: text };
+    await saveIntentHistory(nextHistory);
+    setShowIntentCalendar(true);
+  }, [intentDraft, intentHistory, saveIntentHistory, savedIntentText, shabbatTimes, user]);
 
   /* ── congregation callbacks ── */
   const refreshCongregationData = useCallback(async () => {
@@ -1215,7 +1354,15 @@ export default function App() {
       if (result === "JOINED") {
         const profile = await getUserProfile(user.uid);
         if (profile) setUser(profile);
-        await refreshCongregationData();
+        const congregation = await getCongregationById(congregationId);
+        if (congregation) {
+          setCurrentCongregation(congregation);
+          setCurrentCongregationName(congregation.name);
+          const members = await listCongregationMembers(congregationId);
+          setCongregationMembers(members);
+          const pending = await Promise.all(congregation.pendingUids.map((uid) => getUserProfile(uid)));
+          setPendingMembers(pending.filter((p): p is UserProfile => Boolean(p)));
+        }
       } else {
         Alert.alert("Request sent", "The leader needs to approve your request.");
       }
@@ -1224,7 +1371,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [refreshCongregationData, user]);
+  }, [user]);
 
   const onLeaveCongregation = useCallback(async () => {
     if (!user?.congregationId) return;
@@ -1234,6 +1381,7 @@ export default function App() {
       const profile = await getUserProfile(user.uid);
       if (profile) setUser(profile);
       setCurrentCongregation(null);
+      setCurrentCongregationName(null);
       setCongregationMembers([]);
       setPendingMembers([]);
     } finally {
@@ -1245,22 +1393,33 @@ export default function App() {
     if (!user || !currentLocation) { Alert.alert("Location required", "Allow location to create a congregation."); return; }
     const name = newCongregationName.trim();
     if (!name) { Alert.alert("Missing info", "Please enter a congregation name."); return; }
-    const cityValue = cleanCity(currentLocation.city);
+    const cityValue = newCongregationCity.trim() || cleanCity(currentLocation.city);
+    if (!cityValue || cityValue === "Unknown city") { Alert.alert("Missing info", "Please enter a city name."); return; }
     setActionLoading(true);
     try {
-      const congregation = await createCongregation({ name, city: cityValue, latitude: currentLocation.latitude, longitude: currentLocation.longitude, timezone: currentLocation.timezone, creatorUid: user.uid });
+      const lat = newCongGeo?.latitude ?? currentLocation.latitude;
+      const lon = newCongGeo?.longitude ?? currentLocation.longitude;
+      const congregation = await createCongregation({ name, city: cityValue, latitude: lat, longitude: lon, timezone: currentLocation.timezone, creatorUid: user.uid });
       const profile = await setUserCongregation(user.uid, congregation.id);
       setUser(profile);
+      setCurrentCongregation(congregation);
+      setCurrentCongregationName(congregation.name);
+      const members = await listCongregationMembers(congregation.id);
+      setCongregationMembers(members);
+      setPendingMembers([]);
       setNewCongregationName("");
-      await loadLocationAndCongregations();
-      await refreshCongregationData();
+      setNewCongregationCity("");
+      setNewCongGeo(null);
+      setNewCongCitySuggestions([]);
       setJoinCongregationVisible(false);
     } catch (error) {
-      Alert.alert("Create congregation", errorMessage(error, "Failed to create."));
+      const msg = errorMessage(error, "Failed to create.");
+      const isDuplicate = msg.toLowerCase().includes("already exists");
+      Alert.alert(isDuplicate ? "Congregation Already Exists" : "Create Congregation", msg);
     } finally {
       setActionLoading(false);
     }
-  }, [currentLocation, loadLocationAndCongregations, newCongregationName, refreshCongregationData, user]);
+  }, [currentLocation, newCongregationCity, newCongregationName, newCongGeo, user]);
 
   const onChangeJoinPolicy = useCallback(async (policy: "OPEN" | "REQUEST" | "CLOSED") => {
     if (!user || !currentCongregation) return;
@@ -1302,18 +1461,54 @@ export default function App() {
     } finally { setActionLoading(false); }
   }, [currentCongregation, refreshCongregationData, user]);
 
+  const onTransferLeadership = useCallback(async (targetUid: string) => {
+    if (!user || !currentCongregation) return;
+    const targetMember = congregationMembers.find((m) => m.uid === targetUid);
+    Alert.alert(
+      "Transfer Leadership",
+      `Make ${targetMember?.displayName ?? "this member"} the leader?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Transfer",
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              await transferLeadership(currentCongregation.id, user.uid, targetUid);
+              await refreshCongregationData();
+            } catch (error) {
+              Alert.alert("Transfer failed", errorMessage(error, "Could not transfer leadership."));
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [congregationMembers, currentCongregation, refreshCongregationData, user]);
+
   /* ── city search for congregation ── */
   const onCitySearchChange = useCallback((text: string) => {
     setCongregationCitySearch(text);
     if (citySearchTimer.current) clearTimeout(citySearchTimer.current);
-    if (text.trim().length < 2) { setCitySuggestions([]); return; }
+    if (text.trim().length < 2) {
+      setCitySuggestions([]);
+      return;
+    }
     citySearchTimer.current = setTimeout(async () => {
       const results = await geocodeCitySuggestions(text, 5);
       setCitySuggestions(results);
+      try {
+        setNearbyError(null);
+        const byName = await searchCongregationsByCityName(text.trim());
+        setNearbyCongregations(byName.map((c) => ({ ...c, distanceMiles: 0 })));
+      } catch (error) {
+        setNearbyError(errorMessage(error, "City search failed."));
+      }
     }, 400);
   }, []);
 
-  const searchCongregationsByCity = useCallback(async (geo: GeocodingResult) => {
+  const searchCongregationsNearGeo = useCallback(async (geo: GeocodingResult) => {
     setNearbyLoading(true);
     setNearbyError(null);
     setCitySuggestions([]);
@@ -1334,6 +1529,28 @@ export default function App() {
       setNearbyLoading(false);
     }
   }, [currentLocation?.timezone]);
+
+  /* ── city autocomplete for "Create New" congregation ── */
+  const onNewCongCityChange = useCallback((text: string) => {
+    setNewCongregationCity(text);
+    setNewCongGeo(null);
+    if (newCongCityTimer.current) clearTimeout(newCongCityTimer.current);
+    if (text.trim().length < 2) {
+      setNewCongCitySuggestions([]);
+      return;
+    }
+    newCongCityTimer.current = setTimeout(async () => {
+      const results = await geocodeCitySuggestions(text, 5);
+      setNewCongCitySuggestions(results);
+    }, 400);
+  }, []);
+
+  const onSelectNewCongCity = useCallback((geo: GeocodingResult) => {
+    const cityName = geo.displayName.split(",")[0]?.trim() ?? geo.displayName;
+    setNewCongregationCity(cityName);
+    setNewCongGeo(geo);
+    setNewCongCitySuggestions([]);
+  }, []);
 
   /* ── friend callbacks ── */
   const friendCodeSearchRef = useRef(0);
@@ -1497,6 +1714,7 @@ export default function App() {
       setChattingWith(buddy);
       setBuddyChatInput("");
       setSocialSubTab("buddyChat");
+      purgeExpiredMessages(chat.id).catch(() => {});
     } else {
       openDmWith(buddy);
     }
@@ -1604,6 +1822,117 @@ export default function App() {
     }
   }, [activeBuddyChat, user?.uid]);
 
+  const onSaveMessageToChat = useCallback(async (msg: BuddyMessage) => {
+    if (!activeBuddyChat || !user) return;
+    try {
+      await saveMessageToChat(activeBuddyChat.id, msg.id, user.uid);
+      Alert.alert("Saved", "Message saved to chat — it won't auto-delete.");
+    } catch {
+      Alert.alert("Error", "Could not save message.");
+    }
+  }, [activeBuddyChat, user]);
+
+  const onSaveImageToCameraRoll = useCallback(async (imageUrl: string) => {
+    try {
+      await CameraRoll.save(imageUrl, { type: "photo" });
+      Alert.alert("Saved", "Image saved to your camera roll.");
+    } catch {
+      Alert.alert("Error", "Could not save image to camera roll. Make sure the app has photo library permissions.");
+    }
+  }, []);
+
+  /* ── group buddy chat callbacks ── */
+  const openGroupChat = useCallback((chat: BuddyChat) => {
+    setActiveBuddyChat(chat);
+    setChattingWith(null);
+    setBuddyChatInput("");
+    setSocialSubTab("buddyChat");
+    purgeExpiredMessages(chat.id).catch(() => {});
+  }, []);
+
+  const onCreateGroup = useCallback(async () => {
+    if (!user || groupCreateSelectedUids.length < 2 || !groupCreateName.trim()) return;
+    setGroupCreateLoading(true);
+    try {
+      const allUids = [user.uid, ...groupCreateSelectedUids];
+      await createBuddyChat(allUids, "group", groupCreateName.trim());
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+      const chats = await getUserBuddyChats(user.uid);
+      setBuddyChats(chats);
+      setGroupCreateSelectedUids([]);
+      setGroupCreateName("");
+      setSocialSubTab("friends");
+    } catch (error) {
+      Alert.alert("Create Group", errorMessage(error, "Failed to create group."));
+    } finally {
+      setGroupCreateLoading(false);
+    }
+  }, [user, groupCreateSelectedUids, groupCreateName]);
+
+  const onLeaveGroup = useCallback(async () => {
+    if (!user || !activeBuddyChat || activeBuddyChat.type !== "group") return;
+    Alert.alert("Leave Group", `Leave "${activeBuddyChat.name ?? "this group"}"?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Leave", style: "destructive", onPress: async () => {
+        try {
+          await removeGroupMember(activeBuddyChat.id, user.uid);
+          const updated = await getUserProfile(user.uid);
+          if (updated) setUser(updated);
+          const chats = await getUserBuddyChats(user.uid);
+          setBuddyChats(chats);
+          setActiveBuddyChat(null);
+          setChattingWith(null);
+          setSocialSubTab("friends");
+        } catch (error) {
+          Alert.alert("Leave Group", errorMessage(error, "Failed to leave group."));
+        }
+      }},
+    ]);
+  }, [user, activeBuddyChat]);
+
+  const onAddMemberToGroup = useCallback(async (friendUid: string) => {
+    if (!activeBuddyChat || activeBuddyChat.type !== "group") return;
+    try {
+      await addGroupMember(activeBuddyChat.id, friendUid);
+      const chats = await getUserBuddyChats(user!.uid);
+      setBuddyChats(chats);
+      const updated = chats.find((c) => c.id === activeBuddyChat.id);
+      if (updated) setActiveBuddyChat(updated);
+    } catch (error) {
+      Alert.alert("Add Member", errorMessage(error, "Failed to add member."));
+    }
+  }, [activeBuddyChat, user]);
+
+  const onRemoveMemberFromGroup = useCallback(async (memberUid: string) => {
+    if (!user || !activeBuddyChat || activeBuddyChat.type !== "group") return;
+    Alert.alert("Remove Member", "Remove this member from the group?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: async () => {
+        try {
+          await removeGroupMember(activeBuddyChat.id, memberUid);
+          const chats = await getUserBuddyChats(user.uid);
+          setBuddyChats(chats);
+          const updated = chats.find((c) => c.id === activeBuddyChat.id);
+          if (updated) setActiveBuddyChat(updated);
+        } catch (error) {
+          Alert.alert("Remove Member", errorMessage(error, "Failed to remove member."));
+        }
+      }},
+    ]);
+  }, [user, activeBuddyChat]);
+
+  const groupChatMembers = useMemo(() => {
+    if (!activeBuddyChat || activeBuddyChat.type !== "group") return [];
+    return activeBuddyChat.memberUids.map((uid) =>
+      friends.find((f) => f.uid === uid) ?? (user?.uid === uid ? user : null)
+    ).filter((p): p is UserProfile => p !== null);
+  }, [activeBuddyChat, friends, user]);
+
+  const groupChats = useMemo(() => {
+    return buddyChats.filter((c) => c.type === "group");
+  }, [buddyChats]);
+
   /* ── time display ── */
   const timesDisplay = useMemo(() => {
     if (timesLoading) return "Loading...";
@@ -1699,22 +2028,25 @@ export default function App() {
         {blockLevel === "custom" && (
           <View style={s.customBlockSection}>
             <Text style={s.customBlockTitle}>Select Apps to Block</Text>
-            {Object.entries(appCategories).map(([category, apps]) => (
-              <View key={category}>
-                <Text style={s.appCategoryHeader}>{category}</Text>
-                {apps.map((app) => (
-                  <View key={app.id} style={s.appToggleRow}>
-                    <Text style={s.appToggleName}>{app.name}</Text>
-                    <Switch
-                      value={Boolean(customAppBlocks[app.id])}
-                      onValueChange={(val) => saveCustomAppBlocks({ ...customAppBlocks, [app.id]: val })}
-                      trackColor={{ false: C.border, true: C.primaryLight }}
-                      thumbColor={customAppBlocks[app.id] ? C.primary : "#f4f4f5"}
-                    />
-                  </View>
-                ))}
-              </View>
-            ))}
+            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+              {Object.entries(appCategories).map(([category, apps]) => (
+                <View key={category}>
+                  <Text style={s.appCategoryHeader}>{category}</Text>
+                  {apps.map((app) => (
+                    <View key={app.id} style={s.appToggleRow}>
+                      <Text style={s.appToggleName}>{app.name}</Text>
+                      <Switch
+                        value={Boolean(customAppBlocks[app.id])}
+                        onValueChange={(val) => saveCustomAppBlocks({ ...customAppBlocks, [app.id]: val })}
+                        trackColor={{ false: C.border, true: C.primary }}
+                        thumbColor={customAppBlocks[app.id] ? "#FFFFFF" : "#f4f4f5"}
+                        ios_backgroundColor={C.border}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </ScrollView>
           </View>
         )}
 
@@ -1743,8 +2075,9 @@ export default function App() {
           <Switch
             value={Boolean(user?.wantsMorningReminders)}
             onValueChange={onToggleMorningReminder}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsMorningReminders ? C.primary : "#f4f4f5"}
+            trackColor={{ false: C.border, true: C.primary }}
+            thumbColor={user?.wantsMorningReminders ? "#FFFFFF" : "#f4f4f5"}
+            ios_backgroundColor={C.border}
           />
         </View>
         {/* Modeh Ani */}
@@ -1761,8 +2094,9 @@ export default function App() {
           <Switch
             value={Boolean(user?.wantsModehAniReminder)}
             onValueChange={onToggleModehAni}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsModehAniReminder ? C.primary : "#f4f4f5"}
+            trackColor={{ false: C.border, true: C.primary }}
+            thumbColor={user?.wantsModehAniReminder ? "#FFFFFF" : "#f4f4f5"}
+            ios_backgroundColor={C.border}
           />
         </View>
 
@@ -1801,8 +2135,9 @@ export default function App() {
           <Switch
             value={Boolean(user?.wantsShemaReminder)}
             onValueChange={onToggleShema}
-            trackColor={{ false: C.border, true: C.primaryLight }}
-            thumbColor={user?.wantsShemaReminder ? C.primary : "#f4f4f5"}
+            trackColor={{ false: C.border, true: C.primary }}
+            thumbColor={user?.wantsShemaReminder ? "#FFFFFF" : "#f4f4f5"}
+            ios_backgroundColor={C.border}
           />
         </View>
         {user?.wantsShemaReminder && (
@@ -1832,18 +2167,20 @@ export default function App() {
         <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. This will remind you if you try to break it.</Text>
         <TextInput
           multiline
-          value={user?.shabbatIntentText ?? ""}
-          onChangeText={(text) => {
-            setIntentDraft(text);
-            setUser((prev) => prev ? { ...prev, shabbatIntentText: text } : prev);
-          }}
+          value={intentDraft}
+          onChangeText={setIntentDraft}
           style={s.intentInput}
           placeholder="I am keeping Shabbat because..."
           placeholderTextColor={C.textLight}
         />
-        {intentDraft.trim() !== (user?.shabbatIntentText ?? "") && intentDraft.trim() && (
+        {intentDraft.trim() !== savedIntentText.trim() && intentDraft.trim().length > 0 && (
           <Pressable style={s.primaryBtn} onPress={onSaveIntentInline}>
             <Text style={s.primaryBtnText}>Save Intention</Text>
+          </Pressable>
+        )}
+        {savedIntentText.trim().length > 0 && (
+          <Pressable style={[s.outlineBtn, { marginTop: 8 }]} onPress={onAddIntentToCalendar}>
+            <Text style={s.outlineBtnText}>Save to Shabbat Calendar</Text>
           </Pressable>
         )}
       </View>
@@ -1872,8 +2209,9 @@ export default function App() {
             <Switch
               value={holidayOptIn}
               onValueChange={onToggleHolidayOptIn}
-              trackColor={{ false: C.border, true: C.primaryLight }}
-              thumbColor={holidayOptIn ? C.primary : "#f4f4f5"}
+              trackColor={{ false: C.border, true: C.primary }}
+              thumbColor={holidayOptIn ? "#FFFFFF" : "#f4f4f5"}
+              ios_backgroundColor={C.border}
             />
           </View>
         </View>
@@ -1889,45 +2227,52 @@ export default function App() {
 
   const renderSocialTab = () => (
     <View style={{ flex: 1 }}>
-      {/* Congregation Banner — Clash Royale style */}
-      <View style={s.congBanner}>
-        {user?.congregationId && currentCongregation ? (
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.congBannerName}>{currentCongregation.name}</Text>
-              <Text style={s.congBannerDetail}>{currentCongregation.city} · {congregationMembers.length} members</Text>
+      {/* Congregation Banner — only on friends/chat views, hidden during buddy chat, DM, group create */}
+      {socialSubTab !== "buddyChat" && socialSubTab !== "dm" && socialSubTab !== "groupCreate" && (
+        <View style={s.congBanner}>
+          {user?.congregationId && currentCongregation ? (
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.congBannerName}>{currentCongregation.name}</Text>
+                <Text style={s.congBannerDetail}>{currentCongregation.city} · {congregationMembers.length} members</Text>
+              </View>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Pressable style={s.congIconBtn} onPress={() => setCongregationSettingsVisible(true)}>
+                  <Text style={{ fontSize: 18 }}>⚙️</Text>
+                </Pressable>
+              </View>
             </View>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <Pressable style={s.congIconBtn} onPress={() => setCongregationSettingsVisible(true)}>
-                <Text style={{ fontSize: 18 }}>⚙️</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <>
-            <Text style={s.congBannerName}>No Congregation</Text>
-            <Text style={s.congBannerDetail}>Join or create one to connect</Text>
-          </>
-        )}
-        <View style={s.congBannerActions}>
-          {user?.congregationId ? (
-            <>
-              <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("chat")}>
-                <Text style={s.congBannerBtnText}>Chat</Text>
-              </Pressable>
-              <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("friends")}>
-                <Text style={s.congBannerBtnText}>Members</Text>
-              </Pressable>
-            </>
           ) : (
-            <Pressable style={s.congBannerBtn} onPress={() => setJoinCongregationVisible(true)}>
-              <Text style={s.congBannerBtnText}>Join / Create</Text>
-            </Pressable>
+            <>
+              <Text style={s.congBannerName}>No Congregation</Text>
+              <Text style={s.congBannerDetail}>Join or create one to connect</Text>
+            </>
           )}
+          <View style={s.congBannerActions}>
+            {user?.congregationId && currentCongregation ? (
+              <>
+                <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("chat")}>
+                  <Text style={s.congBannerBtnText}>Chat</Text>
+                </Pressable>
+                <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("friends")}>
+                  <Text style={s.congBannerBtnText}>Members</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable style={s.congBannerBtn} onPress={() => setJoinCongregationVisible(true)}>
+                <Text style={s.congBannerBtnText}>Join / Create</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
-      </View>
+      )}
 
-      {/* Back to friends from chat / DM view */}
+      {/* Back to friends from chat / DM / group create view */}
+      {socialSubTab === "groupCreate" && (
+        <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
+          <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
+        </Pressable>
+      )}
       {socialSubTab === "chat" && (
         <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
           <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
@@ -1946,20 +2291,41 @@ export default function App() {
           </Pressable>
         </View>
       )}
-      {socialSubTab === "buddyChat" && activeBuddyChat && chattingWith && (
+      {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 10 }}>
-          <Pressable onPress={() => { setSocialSubTab("friends"); setActiveBuddyChat(null); setChattingWith(null); }}>
+          <Pressable onPress={() => { setSocialSubTab("friends"); setActiveBuddyChat(null); setChattingWith(null); setShowGroupMembers(false); }}>
             <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back</Text>
           </Pressable>
-          <Pressable onPress={() => setViewingFriend(chattingWith)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
-            <View style={[s.friendAvatar, { width: 32, height: 32, borderRadius: 16 }]}>
-              <Text style={[s.friendAvatarText, { fontSize: 13 }]}>{(chattingWith.displayName ?? "?")[0]?.toUpperCase()}</Text>
-            </View>
-            <View>
-              <Text style={{ fontSize: 16, fontWeight: "700", color: C.text }}>{chattingWith.displayName ?? "Unknown"}</Text>
-              <Text style={{ fontSize: 12, color: C.textLight }}>{activeBuddyChat.streakCount} day streak</Text>
-            </View>
-          </Pressable>
+          {activeBuddyChat.type === "group" ? (
+            <Pressable onPress={() => setShowGroupMembers(true)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+              <View style={{ flexDirection: "row" }}>
+                {groupChatMembers.slice(0, 3).map((member, idx) => (
+                  <View key={member.uid} style={[s.friendAvatar, { width: 28, height: 28, borderRadius: 14, marginLeft: idx > 0 ? -8 : 0, borderWidth: 2, borderColor: C.card }]}>
+                    <Text style={[s.friendAvatarText, { fontSize: 11 }]}>{(member.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                  </View>
+                ))}
+                {groupChatMembers.length > 3 && (
+                  <View style={[s.friendAvatar, { width: 28, height: 28, borderRadius: 14, marginLeft: -8, borderWidth: 2, borderColor: C.card, backgroundColor: C.surface }]}>
+                    <Text style={[s.friendAvatarText, { fontSize: 10 }]}>+{groupChatMembers.length - 3}</Text>
+                  </View>
+                )}
+              </View>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: "700", color: C.text }} numberOfLines={1}>{activeBuddyChat.name ?? "Group"}</Text>
+                <Text style={{ fontSize: 12, color: C.textLight }}>{activeBuddyChat.streakCount} day streak · {activeBuddyChat.memberUids.length} members</Text>
+              </View>
+            </Pressable>
+          ) : chattingWith ? (
+            <Pressable onPress={() => setViewingFriend(chattingWith)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+              <View style={[s.friendAvatar, { width: 32, height: 32, borderRadius: 16 }]}>
+                <Text style={[s.friendAvatarText, { fontSize: 13 }]}>{(chattingWith.displayName ?? "?")[0]?.toUpperCase()}</Text>
+              </View>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: "700", color: C.text }}>{chattingWith.displayName ?? "Unknown"}</Text>
+                <Text style={{ fontSize: 12, color: C.textLight }}>{activeBuddyChat.streakCount} day streak</Text>
+              </View>
+            </Pressable>
+          ) : null}
         </View>
       )}
 
@@ -1998,7 +2364,7 @@ export default function App() {
                   <LeaderboardRow
                     profile={friend}
                     rank={idx + 1}
-                    congregationName={friend.congregationId ? currentCongregationName : null}
+                    congregationName={friend.congregationId ? (friendCongregationNames[friend.congregationId] ?? null) : null}
                     onAvatarPress={() => setViewingFriend(friend)}
                   />
                 </Pressable>
@@ -2081,10 +2447,14 @@ export default function App() {
                         </View>
                       </View>
                       <Pressable
-                        style={s.buddySnapBtn}
+                        style={[s.buddySnapBtn, !isToday && { backgroundColor: C.primary }]}
                         onPress={() => openBuddyChat(buddy)}
                       >
-                        <Text style={s.buddySnapBtnText}>{isToday ? "Wrapped" : "Chat"}</Text>
+                        {isToday ? (
+                          <Text style={s.buddySnapBtnText}>Wrapped</Text>
+                        ) : (
+                          <CameraIcon size={22} color="#FFF" />
+                        )}
                       </Pressable>
                     </Pressable>
                   );
@@ -2118,6 +2488,61 @@ export default function App() {
                 {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).length === 0 && (
                   <Text style={[s.emptyText, { paddingVertical: 8 }]}>All your friends are already buddies!</Text>
                 )}
+              </View>
+            )}
+          </View>
+
+          {/* ── Group Buddy Chats Section ── */}
+          <View style={s.buddiesSection}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={s.buddiesSectionTitle}>Group Chats</Text>
+              {friends.length >= 2 && (
+                <Pressable
+                  style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                  onPress={() => {
+                    setGroupCreateSelectedUids([]);
+                    setGroupCreateName("");
+                    setSocialSubTab("groupCreate");
+                  }}
+                >
+                  <Text style={[s.buddySnapBtnText, { color: "#FFF" }]}>+ Create Group</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {groupChats.length > 0 ? (
+              <View style={s.buddyStreakList}>
+                {groupChats.map((chat) => {
+                  const memberNames = chat.memberUids
+                    .filter((uid) => uid !== user?.uid)
+                    .map((uid) => friends.find((f) => f.uid === uid)?.displayName ?? "Unknown")
+                    .join(", ");
+                  return (
+                    <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openGroupChat(chat)}>
+                      <View style={[s.buddyAvatarLarge, { backgroundColor: C.streakBg }]}>
+                        <Text style={[s.buddyAvatarLargeText, { color: C.streak }]}>{chat.memberUids.length}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.buddyNameLarge}>{chat.name ?? "Group"}</Text>
+                        <Text style={{ fontSize: 12, color: C.textSecondary }} numberOfLines={1}>{memberNames}</Text>
+                        <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
+                      </View>
+                      <View style={s.buddySnapBtn}>
+                        <Text style={s.buddySnapBtnText}>Open</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={s.buddyEmptyState}>
+                <Text style={{ fontSize: 36, marginBottom: 8 }}>👥</Text>
+                <Text style={s.buddyEmptyTitle}>No group chats yet</Text>
+                <Text style={s.buddyEmptyDesc}>
+                  {friends.length >= 2
+                    ? "Create a group to hold each other accountable with 3+ members."
+                    : "Add at least 2 friends to create a group buddy chat."}
+                </Text>
               </View>
             )}
           </View>
@@ -2204,13 +2629,38 @@ export default function App() {
         </KeyboardAvoidingView>
       )}
 
-      {/* Buddy Chat View */}
-      {socialSubTab === "buddyChat" && activeBuddyChat && chattingWith && (
+      {/* Buddy Chat View (pair + group) */}
+      {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+          <View style={{ backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text style={{ fontSize: 11, color: C.textLight }}>Messages auto-delete after 24h. Long-press to save.</Text>
+          </View>
           {sunBlockedMessage && (
             <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{ fontSize: 16 }}>🌙</Text>
               <Text style={{ color: "#92400E", fontSize: 13, flex: 1 }}>{sunBlockedMessage}</Text>
+            </View>
+          )}
+          {activeBuddyChat.type === "group" && groupDailyStatus && (
+            <View style={{ backgroundColor: C.primaryLight, paddingHorizontal: 16, paddingVertical: 10 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: C.primary, marginBottom: 4 }}>Today's Progress</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {activeBuddyChat.memberUids.map((uid) => {
+                  const member = groupChatMembers.find((m) => m.uid === uid);
+                  const hasSent = groupDailyStatus.sent.includes(uid);
+                  const name = member?.displayName ?? "Unknown";
+                  return (
+                    <View key={uid} style={{
+                      flexDirection: "row", alignItems: "center", gap: 4,
+                      backgroundColor: hasSent ? C.successLight : C.surface,
+                      paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
+                    }}>
+                      <Text style={{ fontSize: 11 }}>{hasSent ? "✓" : "○"}</Text>
+                      <Text style={{ fontSize: 12, color: hasSent ? C.success : C.textSecondary, fontWeight: "600" }}>{name.split(" ")[0]}</Text>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
           )}
           <FlatList
@@ -2219,14 +2669,28 @@ export default function App() {
             contentContainerStyle={s.chatList}
             renderItem={({ item }) => {
               const isMine = item.senderUid === user?.uid;
+              const isSaved = user ? item.savedByUids?.includes(user.uid) : false;
               if (!isMine && !item.opened) {
                 onMarkBuddyMessageOpened(item);
               }
+              const onLongPressMessage = () => {
+                const buttons: { text: string; onPress?: () => void; style?: "cancel" | "destructive" }[] = [];
+                if (!isSaved) {
+                  buttons.push({ text: "Save to Chat", onPress: () => onSaveMessageToChat(item) });
+                }
+                if (item.type === "image" && item.imageUrl) {
+                  buttons.push({ text: "Save to Camera Roll", onPress: () => onSaveImageToCameraRoll(item.imageUrl!) });
+                }
+                buttons.push({ text: "Cancel", style: "cancel" });
+                if (buttons.length > 1) {
+                  Alert.alert("Message Options", isSaved ? "This message is saved and won't auto-delete." : "Messages auto-delete after 24 hours.", buttons);
+                }
+              };
               return (
-                <View style={[s.chatBubble, isMine && s.chatBubbleMine]}>
+                <Pressable onLongPress={onLongPressMessage} style={[s.chatBubble, isMine && s.chatBubbleMine]}>
                   {!isMine && <Text style={s.chatSender}>{item.senderName}</Text>}
                   {item.type === "image" && item.imageUrl ? (
-                    <Pressable onPress={() => onMarkBuddyMessageOpened(item)}>
+                    <Pressable onPress={() => onMarkBuddyMessageOpened(item)} onLongPress={onLongPressMessage}>
                       <Image
                         source={{ uri: item.imageUrl }}
                         style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
@@ -2236,17 +2700,22 @@ export default function App() {
                   ) : (
                     <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
                   )}
-                  {!isMine && item.type === "image" && (
-                    <Text style={{ fontSize: 10, color: C.textLight, marginTop: 2 }}>
-                      {item.opened ? "Opened" : "Tap to open"}
-                    </Text>
-                  )}
-                </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                    {!isMine && item.type === "image" && (
+                      <Text style={{ fontSize: 10, color: C.textLight }}>
+                        {item.opened ? "Opened" : "Tap to open"}
+                      </Text>
+                    )}
+                    {isSaved && (
+                      <Text style={{ fontSize: 10, color: C.primary }}>Saved</Text>
+                    )}
+                  </View>
+                </Pressable>
               );
             }}
             ListEmptyComponent={
               <View style={{ alignItems: "center", paddingVertical: 40 }}>
-                <Text style={{ fontSize: 36, marginBottom: 8 }}>📸</Text>
+                <CameraIcon size={48} color={C.textLight} />
                 <Text style={s.emptyText}>Send a tefillin photo to start your streak!</Text>
               </View>
             }
@@ -2257,13 +2726,17 @@ export default function App() {
               onPress={onBuddyChatCamera}
               disabled={buddyChatImageLoading}
             >
-              <Text style={{ fontSize: 18 }}>{buddyChatImageLoading ? "..." : "📷"}</Text>
+              {buddyChatImageLoading ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <CameraIcon size={22} color="#FFF" />
+              )}
             </Pressable>
             <TextInput
               style={[s.chatTextInput, { flex: 1 }]}
               value={buddyChatInput}
               onChangeText={setBuddyChatInput}
-              placeholder={`Message ${chattingWith.displayName ?? ""}...`}
+              placeholder={`Message ${activeBuddyChat.type === "group" ? (activeBuddyChat.name ?? "group") : (chattingWith?.displayName ?? "")}...`}
               placeholderTextColor={C.textLight}
               returnKeyType="send"
               onSubmitEditing={onSendBuddyChatText}
@@ -2283,6 +2756,63 @@ export default function App() {
             </Pressable>
           </View>
         </KeyboardAvoidingView>
+      )}
+
+      {/* Group Create View */}
+      {socialSubTab === "groupCreate" && (
+        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+          <Text style={[s.buddiesSectionTitle, { marginBottom: 16 }]}>Create Group Chat</Text>
+
+          <View style={[s.sectionCard, { marginBottom: 16 }]}>
+            <Text style={s.buddyAddHeader}>Group Name</Text>
+            <TextInput
+              style={[s.chatTextInput, { marginTop: 4 }]}
+              value={groupCreateName}
+              onChangeText={setGroupCreateName}
+              placeholder="e.g., Morning Crew"
+              placeholderTextColor={C.textLight}
+            />
+          </View>
+
+          <View style={s.sectionCard}>
+            <Text style={s.buddyAddHeader}>Select Friends ({groupCreateSelectedUids.length} selected, min 2)</Text>
+            {friends.map((friend) => {
+              const isSelected = groupCreateSelectedUids.includes(friend.uid);
+              return (
+                <Pressable
+                  key={friend.uid}
+                  style={[s.buddyAddRow, isSelected && { backgroundColor: C.primaryLight }]}
+                  onPress={() => {
+                    setGroupCreateSelectedUids((prev) =>
+                      isSelected ? prev.filter((uid) => uid !== friend.uid) : [...prev, friend.uid]
+                    );
+                  }}
+                >
+                  <View style={[s.friendAvatar, isSelected && { backgroundColor: C.primary }]}>
+                    <Text style={[s.friendAvatarText, isSelected && { color: "#FFF" }]}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                  </View>
+                  <Text style={[s.friendName, { flex: 1 }]}>{friend.displayName ?? "Unknown"}</Text>
+                  <Text style={{ fontSize: 20, color: isSelected ? C.primary : C.border }}>{isSelected ? "✓" : "○"}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={{ gap: 10, marginTop: 16 }}>
+            <Pressable
+              style={[s.primaryBtn, (groupCreateSelectedUids.length < 2 || !groupCreateName.trim() || groupCreateLoading) && s.disabled]}
+              onPress={onCreateGroup}
+              disabled={groupCreateSelectedUids.length < 2 || !groupCreateName.trim() || groupCreateLoading}
+            >
+              <Text style={s.primaryBtnText}>{groupCreateLoading ? "Creating..." : "Create Group"}</Text>
+            </Pressable>
+            <Pressable style={s.outlineBtn} onPress={() => setSocialSubTab("friends")}>
+              <Text style={s.outlineBtnText}>Cancel</Text>
+            </Pressable>
+          </View>
+
+          <View style={{ height: 24 }} />
+        </ScrollView>
       )}
     </View>
   );
@@ -2698,18 +3228,30 @@ export default function App() {
                     <Text style={[s.buddyAvatarLargeText, { fontSize: 26 }]}>{(viewingFriend.displayName ?? "?")[0]?.toUpperCase()}</Text>
                   </View>
                   <Text style={[s.modalTitle, { marginTop: 12, textAlign: "center" }]}>{viewingFriend.displayName ?? "Unknown"}</Text>
+                  {viewingFriend.congregationId && (
+                    <Text style={{ fontSize: 13, color: C.textSecondary, marginTop: 4 }}>
+                      {friendCongregationNames[viewingFriend.congregationId] ?? "In a congregation"}
+                    </Text>
+                  )}
                 </View>
 
-                <View style={s.streakRow}>
-                  <View style={[s.streakCard, { backgroundColor: C.streakBg, flex: 1 }]}>
-                    <Text style={s.streakNumber}>{viewingFriend.currentStreak ?? 0}</Text>
-                    <Text style={s.streakLabel}>Shabbat</Text>
+                {viewingFriend.streakVisibility !== "private" && (
+                  <View style={s.streakRow}>
+                    <View style={[s.streakCard, { backgroundColor: C.streakBg, flex: 1 }]}>
+                      <Text style={s.streakNumber}>{viewingFriend.currentStreak ?? 0}</Text>
+                      <Text style={s.streakLabel}>Shabbat</Text>
+                    </View>
+                    <View style={[s.streakCard, { backgroundColor: C.primaryLight, flex: 1 }]}>
+                      <Text style={[s.streakNumber, { color: C.primary }]}>{viewingFriend.tefillinCurrentStreak ?? 0}</Text>
+                      <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin</Text>
+                    </View>
                   </View>
-                  <View style={[s.streakCard, { backgroundColor: C.primaryLight, flex: 1 }]}>
-                    <Text style={[s.streakNumber, { color: C.primary }]}>{viewingFriend.tefillinCurrentStreak ?? 0}</Text>
-                    <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin</Text>
+                )}
+                {viewingFriend.streakVisibility === "private" && (
+                  <View style={{ alignItems: "center", paddingVertical: 12, backgroundColor: C.surface, borderRadius: 16, marginBottom: 8 }}>
+                    <Text style={{ fontSize: 13, color: C.textLight }}>Streaks are private</Text>
                   </View>
-                </View>
+                )}
 
                 <View style={{ gap: 10, marginTop: 20 }}>
                   <Pressable
@@ -2757,6 +3299,69 @@ export default function App() {
                 </Pressable>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Group Members Modal */}
+      <Modal visible={showGroupMembers && activeBuddyChat?.type === "group"} transparent animationType="slide">
+        <View style={s.modalOverlay}>
+          <View style={[s.modalCard, { maxHeight: "80%" }]}>
+            <Text style={s.modalTitle}>{activeBuddyChat?.name ?? "Group"}</Text>
+            <Text style={[s.sectionDesc, { marginBottom: 12 }]}>{activeBuddyChat?.memberUids.length ?? 0} members · {activeBuddyChat?.streakCount ?? 0} day streak</Text>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {groupChatMembers.map((member) => {
+                const isMe = member.uid === user?.uid;
+                return (
+                  <View key={member.uid} style={[s.buddyAddRow, { paddingVertical: 10 }]}>
+                    <View style={s.friendAvatar}>
+                      <Text style={s.friendAvatarText}>{(member.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.friendName}>{member.displayName ?? "Unknown"}{isMe ? " (you)" : ""}</Text>
+                    </View>
+                    {!isMe && (
+                      <Pressable
+                        style={[s.rejectBtn, { paddingHorizontal: 8, paddingVertical: 4 }]}
+                        onPress={() => onRemoveMemberFromGroup(member.uid)}
+                      >
+                        <Text style={[s.rejectBtnText, { fontSize: 11 }]}>Remove</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+
+              {friends.filter((f) => !activeBuddyChat?.memberUids.includes(f.uid)).length > 0 && (
+                <View style={{ marginTop: 16 }}>
+                  <Text style={s.buddyAddHeader}>Add Members</Text>
+                  {friends.filter((f) => !activeBuddyChat?.memberUids.includes(f.uid)).map((friend) => (
+                    <View key={friend.uid} style={s.buddyAddRow}>
+                      <View style={s.friendAvatar}>
+                        <Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                      </View>
+                      <Text style={[s.friendName, { flex: 1 }]}>{friend.displayName ?? "Unknown"}</Text>
+                      <Pressable style={s.acceptBtn} onPress={() => onAddMemberToGroup(friend.uid)}>
+                        <Text style={s.acceptBtnText}>+ Add</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={{ gap: 10, marginTop: 16 }}>
+              <Pressable
+                style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                onPress={() => { setShowGroupMembers(false); onLeaveGroup(); }}
+              >
+                <Text style={[s.primaryBtnText, { color: C.danger }]}>Leave Group</Text>
+              </Pressable>
+              <Pressable style={s.outlineBtn} onPress={() => setShowGroupMembers(false)}>
+                <Text style={s.outlineBtnText}>Close</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2816,7 +3421,26 @@ export default function App() {
               <Text style={[s.sectionTitle, { marginTop: 20 }]}>Shabbat Reminder</Text>
               <View style={s.toggleRow}>
                 <Text style={s.toggleLabel}>15 min before Shabbat</Text>
-                <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: C.primaryLight }} thumbColor={user?.wantsShabbatReminders ? C.primary : "#f4f4f5"} />
+                <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: C.primary }} thumbColor={user?.wantsShabbatReminders ? "#FFFFFF" : "#f4f4f5"} ios_backgroundColor={C.border} />
+              </View>
+
+              <Text style={[s.sectionTitle, { marginTop: 20 }]}>Privacy</Text>
+              <View style={s.toggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.toggleLabel}>Hide my streaks</Text>
+                  <Text style={s.toggleHint}>Others won't see your streak counts</Text>
+                </View>
+                <Switch
+                  value={user?.streakVisibility === "private"}
+                  onValueChange={async (val) => {
+                    if (!user) return;
+                    const updated = await updateUserProfile(user.uid, { streakVisibility: val ? "private" : "public" });
+                    setUser(updated);
+                  }}
+                  trackColor={{ false: C.border, true: C.primary }}
+                  thumbColor={user?.streakVisibility === "private" ? "#FFFFFF" : "#f4f4f5"}
+                  ios_backgroundColor={C.border}
+                />
               </View>
 
               <Pressable style={[s.dangerBtn, { marginTop: 24 }]} onPress={() => { setSettingsVisible(false); onPressSignOut(); }}>
@@ -2870,11 +3494,18 @@ export default function App() {
               {congregationMembers.map((m) => (
                 <View key={m.uid} style={s.friendRow}>
                   <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
-                  <Text style={[s.friendName, { flex: 1 }]}>{m.displayName ?? "Unknown"}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.friendName}>{m.displayName ?? "Unknown"}{m.uid === currentCongregation?.leaderUid ? " ⭐" : ""}</Text>
+                  </View>
                   {currentCongregation?.leaderUid === user?.uid && m.uid !== user?.uid && (
-                    <Pressable style={s.rejectBtn} onPress={() => Alert.alert("Remove Member", `Remove ${m.displayName}?`, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => onKickMember(m.uid) }])}>
-                      <Text style={s.rejectBtnText}>Remove</Text>
-                    </Pressable>
+                    <View style={{ flexDirection: "row", gap: 4 }}>
+                      <Pressable style={s.acceptBtn} onPress={() => onTransferLeadership(m.uid)}>
+                        <Text style={s.acceptBtnText}>Lead</Text>
+                      </Pressable>
+                      <Pressable style={s.rejectBtn} onPress={() => Alert.alert("Remove Member", `Remove ${m.displayName}?`, [{ text: "Cancel", style: "cancel" }, { text: "Remove", style: "destructive", onPress: () => onKickMember(m.uid) }])}>
+                        <Text style={s.rejectBtnText}>Remove</Text>
+                      </Pressable>
+                    </View>
                   )}
                 </View>
               ))}
@@ -2983,7 +3614,7 @@ export default function App() {
             {citySuggestions.length > 0 && (
               <View style={s.suggestionsBox}>
                 {citySuggestions.map((sug, idx) => (
-                  <Pressable key={`${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => { setCongregationCitySearch(sug.displayName.split(",")[0]?.trim() ?? sug.displayName); searchCongregationsByCity(sug); }}>
+                  <Pressable key={`${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => { setCongregationCitySearch(sug.displayName.split(",")[0]?.trim() ?? sug.displayName); searchCongregationsNearGeo(sug); }}>
                     <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
                   </Pressable>
                 ))}
@@ -3008,7 +3639,22 @@ export default function App() {
             <View style={s.createCongSection}>
               <Text style={s.sectionTitle}>Create New</Text>
               <TextInput placeholder="Congregation name" value={newCongregationName} onChangeText={setNewCongregationName} style={s.authInput} placeholderTextColor={C.textLight} />
-              <Text style={[s.sectionDesc, { marginTop: 4 }]}>City: {cleanCity(currentLocation?.city)}</Text>
+              <TextInput
+                placeholder="Search city..."
+                value={newCongregationCity}
+                onChangeText={onNewCongCityChange}
+                style={[s.authInput, { marginTop: 8 }]}
+                placeholderTextColor={C.textLight}
+              />
+              {newCongCitySuggestions.length > 0 && (
+                <View style={s.suggestionsBox}>
+                  {newCongCitySuggestions.map((sug, idx) => (
+                    <Pressable key={`newcong-${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => onSelectNewCongCity(sug)}>
+                      <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
               <Pressable style={[s.primaryBtn, actionLoading && s.disabled]} onPress={onCreateCongregation} disabled={actionLoading}>
                 <Text style={s.primaryBtnText}>Create and Join</Text>
               </Pressable>
@@ -3035,6 +3681,7 @@ function TabItem({ label, active, onPress }: { label: string; active: boolean; o
 }
 
 function LeaderboardRow({ profile, rank, isCurrentUser, congregationName, onAvatarPress }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null; onAvatarPress?: () => void }) {
+  const hideStreak = !isCurrentUser && profile.streakVisibility === "private";
   return (
     <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
       <Text style={s.leaderRank}>{rank}</Text>
@@ -3045,10 +3692,14 @@ function LeaderboardRow({ profile, rank, isCurrentUser, congregationName, onAvat
         <Text style={s.friendName}>{profile.displayName ?? "Unknown"}{isCurrentUser ? " (You)" : ""}</Text>
         <Text style={s.friendCong}>{congregationName ?? (profile.congregationId ? "In a congregation" : "")}</Text>
       </View>
-      <View style={s.streakBadges}>
-        <View style={s.streakBadge}><Text style={s.streakBadgeText}>{profile.currentStreak ?? 0}</Text></View>
-        <View style={s.tefillinStreakBadge}><Text style={s.tefillinStreakBadgeText}>{profile.tefillinCurrentStreak ?? 0}</Text></View>
-      </View>
+      {hideStreak ? (
+        <Text style={{ fontSize: 11, color: C.textLight }}>Private</Text>
+      ) : (
+        <View style={s.streakBadges}>
+          <View style={s.streakBadge}><Text style={s.streakBadgeText}>{profile.currentStreak ?? 0}</Text></View>
+          <View style={s.tefillinStreakBadge}><Text style={s.tefillinStreakBadgeText}>{profile.tefillinCurrentStreak ?? 0}</Text></View>
+        </View>
+      )}
     </View>
   );
 }
@@ -3123,7 +3774,7 @@ const s = StyleSheet.create({
   blockDesc: { fontSize: 10, color: C.textSecondary, textAlign: "center", marginTop: 4 },
   blockDescActive: { color: C.primaryDark },
 
-  customBlockSection: { marginTop: 12, backgroundColor: C.surface, borderRadius: 14, padding: 12, maxHeight: 300 },
+  customBlockSection: { marginTop: 12, backgroundColor: C.surface, borderRadius: 14, padding: 12, maxHeight: 320, overflow: "hidden" },
   customBlockTitle: { fontSize: 14, fontWeight: "700", color: C.text, marginBottom: 8 },
   appCategoryHeader: { fontSize: 12, fontWeight: "800", color: C.textSecondary, marginTop: 10, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 },
   appToggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },

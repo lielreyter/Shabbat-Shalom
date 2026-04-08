@@ -50,6 +50,11 @@ const toCacheRecord = (
   fetchedAtIso: times.fetchedAt.toISOString(),
   parsha: times.parsha ?? null,
   locationHash,
+  holidays: times.holidays?.map((h) => ({
+    name: h.name,
+    candleLightingIso: h.candleLighting?.toISOString() ?? null,
+    havdalahIso: h.havdalah?.toISOString() ?? null,
+  })),
 });
 
 const fromCacheRecord = (record: ShabbatTimesCacheRecord): ShabbatTimes => ({
@@ -62,6 +67,11 @@ const fromCacheRecord = (record: ShabbatTimesCacheRecord): ShabbatTimes => ({
   source: record.source,
   fetchedAt: new Date(record.fetchedAtIso),
   parsha: record.parsha ?? null,
+  holidays: record.holidays?.map((h) => ({
+    name: h.name,
+    candleLighting: h.candleLightingIso ? new Date(h.candleLightingIso) : null,
+    havdalah: h.havdalahIso ? new Date(h.havdalahIso) : null,
+  })),
 });
 
 export const getCachedShabbatTimes =
