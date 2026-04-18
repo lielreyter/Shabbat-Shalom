@@ -9,7 +9,10 @@
 /* Begin PBXBuildFile section */
 		0C80B921A6F3F58F76C31292 /* libPods-shabbat_shalomv1.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-shabbat_shalomv1.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		5AF5282DD85A4F84B1F30237 /* ScreenTimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BAFFBF2B4E24A04BBF8B098 /* ScreenTimeService.swift */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		7F8610F5E2184259B54C0A41 /* NotificationsService.m in Sources */ = {isa = PBXBuildFile; fileRef = 2456A1CBF0A647A79562B8C8 /* NotificationsService.m */; };
+		80C1C90DB02141869F568193 /* ScreenTimeServiceBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = AF08447494A54CF0B62B6A84 /* ScreenTimeServiceBridge.m */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		CD43298790028F7F7DB0D0B0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -19,11 +22,15 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = shabbat_shalomv1/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = shabbat_shalomv1/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = shabbat_shalomv1/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		2456A1CBF0A647A79562B8C8 /* NotificationsService.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NotificationsService.m; path = shabbat_shalomv1/NotificationsService.m; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-shabbat_shalomv1.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-shabbat_shalomv1.debug.xcconfig"; path = "Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1.debug.xcconfig"; sourceTree = "<group>"; };
+		4BAFFBF2B4E24A04BBF8B098 /* ScreenTimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScreenTimeService.swift; path = shabbat_shalomv1/ScreenTimeService.swift; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-shabbat_shalomv1.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-shabbat_shalomv1.release.xcconfig"; path = "Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-shabbat_shalomv1.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-shabbat_shalomv1.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = shabbat_shalomv1/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = shabbat_shalomv1/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8E6F552D2F93116B007641AC /* shabbat_shalomv1.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = shabbat_shalomv1.entitlements; path = shabbat_shalomv1/shabbat_shalomv1.entitlements; sourceTree = "<group>"; };
+		AF08447494A54CF0B62B6A84 /* ScreenTimeServiceBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ScreenTimeServiceBridge.m; path = shabbat_shalomv1/ScreenTimeServiceBridge.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -42,8 +49,12 @@
 		13B07FAE1A68108700A75B9A /* shabbat_shalomv1 */ = {
 			isa = PBXGroup;
 			children = (
+				8E6F552D2F93116B007641AC /* shabbat_shalomv1.entitlements */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
+				2456A1CBF0A647A79562B8C8 /* NotificationsService.m */,
+				4BAFFBF2B4E24A04BBF8B098 /* ScreenTimeService.swift */,
+				AF08447494A54CF0B62B6A84 /* ScreenTimeServiceBridge.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
@@ -128,7 +139,8 @@
 		83CBB9F71A601CBA00E9B192 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1210;
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1120;
@@ -191,9 +203,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -230,9 +246,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -247,6 +267,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				7F8610F5E2184259B54C0A41 /* NotificationsService.m in Sources */,
+				5AF5282DD85A4F84B1F30237 /* ScreenTimeService.swift in Sources */,
+				80C1C90DB02141869F568193 /* ScreenTimeServiceBridge.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -259,8 +282,11 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = shabbat_shalomv1/shabbat_shalomv1.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
 				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = shabbat_shalomv1/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -273,7 +299,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem;
 				PRODUCT_NAME = shabbat_shalomv1;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -287,7 +313,10 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = shabbat_shalomv1/shabbat_shalomv1.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = shabbat_shalomv1/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -300,7 +329,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "org.reactjs.native.example.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem;
 				PRODUCT_NAME = shabbat_shalomv1;
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
@@ -338,8 +367,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -379,6 +410,7 @@
 				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				USE_HERMES = true;
 			};
@@ -415,8 +447,10 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				COPY_PHASE_STRIP = YES;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = "";
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -448,6 +482,8 @@
 				);
 				REACT_NATIVE_PATH = "${PODS_ROOT}/../../node_modules/react-native";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
 				USE_HERMES = true;
 				VALIDATE_PRODUCT = YES;
 			};

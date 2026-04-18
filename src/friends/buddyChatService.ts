@@ -32,12 +32,25 @@ const messagesCol = (chatId: string) =>
   collection(firestore, "buddyChats", chatId, "messages");
 const userDoc = (uid: string) => doc(firestore, "users", uid);
 
+const sortBuddyChats = (chats: BuddyChat[]): BuddyChat[] =>
+  [...chats].sort(
+    (a, b) =>
+      (b.lastActivityAt?.toMillis?.() ?? b.createdAt.toMillis()) -
+      (a.lastActivityAt?.toMillis?.() ?? a.createdAt.toMillis())
+  );
+
 const hydrateBuddyChat = (id: string, data: Record<string, unknown>): BuddyChat => ({
   id,
   type: (data.type as "pair" | "group") ?? "pair",
   name: (data.name as string) ?? null,
   memberUids: Array.isArray(data.memberUids) ? data.memberUids : [],
   createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
+  lastActivityAt:
+    data.lastActivityAt instanceof Timestamp
+      ? data.lastActivityAt
+      : data.createdAt instanceof Timestamp
+        ? data.createdAt
+        : Timestamp.now(),
   streakCount: typeof data.streakCount === "number" ? data.streakCount : 0,
   longestStreak: typeof data.longestStreak === "number" ? data.longestStreak : 0,
   lastStreakDate: typeof data.lastStreakDate === "string" ? data.lastStreakDate : null,
@@ -67,6 +80,7 @@ export const createBuddyChat = async (
     name: name ?? null,
     memberUids,
     createdAt: serverTimestamp(),
+    lastActivityAt: serverTimestamp(),
     streakCount: 0,
     longestStreak: 0,
     lastStreakDate: null,
@@ -94,9 +108,27 @@ export const getBuddyChat = async (chatId: string): Promise<BuddyChat | null> =>
 export const getUserBuddyChats = async (uid: string): Promise<BuddyChat[]> => {
   const q = query(chatsCol, where("memberUids", "array-contains", uid));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) =>
-    hydrateBuddyChat(d.id, d.data() as Record<string, unknown>)
+  return sortBuddyChats(
+    snapshot.docs.map((d) =>
+      hydrateBuddyChat(d.id, d.data() as Record<string, unknown>)
+    )
   );
+};
+
+export const subscribeToUserBuddyChats = (
+  uid: string,
+  callback: (chats: BuddyChat[]) => void
+): Unsubscribe => {
+  const q = query(chatsCol, where("memberUids", "array-contains", uid));
+  return onSnapshot(q, (snapshot) => {
+    callback(
+      sortBuddyChats(
+        snapshot.docs.map((d) =>
+          hydrateBuddyChat(d.id, d.data() as Record<string, unknown>)
+        )
+      )
+    );
+  });
 };
 
 export const deleteBuddyChat = async (chatId: string): Promise<void> => {
@@ -220,6 +252,9 @@ export const sendBuddyMessage = async (
   };
 
   const docRef = await addDoc(messagesCol(chatId), payload);
+  await updateDoc(chatDoc(chatId), {
+    lastActivityAt: serverTimestamp(),
+  });
   const snap = await getDoc(docRef);
   return hydrateBuddyMessage(snap.id, snap.data() as Record<string, unknown>);
 };

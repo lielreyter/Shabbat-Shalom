@@ -1,6 +1,8 @@
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   serverTimestamp,
@@ -291,4 +293,37 @@ export const recordBrokenShabbatWeek = async (
     currentStreak: 0,
     lastStreakWeekId: normalizedWeekId,
   });
+};
+
+/* ── intent history (Firestore-persisted per user) ── */
+
+const intentHistoryCol = (uid: string) =>
+  collection(firestore, "users", uid, "intentHistory");
+
+const intentHistoryDoc = (uid: string, weekDate: string) =>
+  doc(firestore, "users", uid, "intentHistory", weekDate);
+
+export const saveIntentEntry = async (
+  uid: string,
+  weekDate: string,
+  text: string
+): Promise<void> => {
+  await setDoc(intentHistoryDoc(uid, weekDate), {
+    text,
+    savedAt: serverTimestamp(),
+  });
+};
+
+export const getIntentHistory = async (
+  uid: string
+): Promise<Record<string, string>> => {
+  const snapshot = await getDocs(intentHistoryCol(uid));
+  const history: Record<string, string> = {};
+  snapshot.docs.forEach((d) => {
+    const data = d.data() as { text?: string };
+    if (data.text) {
+      history[d.id] = data.text;
+    }
+  });
+  return history;
 };

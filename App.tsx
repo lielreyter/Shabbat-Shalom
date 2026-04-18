@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Animated,
   Easing,
   FlatList,
@@ -31,6 +32,8 @@ import {
   recordKeptShabbatWeek,
   setUserCongregation,
   updateUserProfile,
+  saveIntentEntry,
+  getIntentHistory,
 } from "./src/firebase/firestore";
 import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
@@ -116,6 +119,7 @@ import {
 } from "./src/friends/directMessages";
 import {
   getUserBuddyChats,
+  subscribeToUserBuddyChats,
   sendBuddyMessage,
   subscribeToBuddyMessages,
   uploadBuddyImage,
@@ -128,7 +132,7 @@ import {
   purgeExpiredMessages,
 } from "./src/friends/buddyChatService";
 import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
-import { getSunWindowMessage } from "./src/friends/zmanimService";
+import { getCachedZmanim, getSunWindowMessage } from "./src/friends/zmanimService";
 import { evaluateAllStreaks } from "./src/friends/streakEvaluator";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import { CameraRoll } from "@react-native-camera-roll/camera-roll";
@@ -206,7 +210,8 @@ const SHABBAT_UI_STATE_KEY = "shabbatUiState:v1";
 const BLOCK_LEVEL_KEY = "blockLevel:v1";
 const CUSTOM_APP_BLOCKS_KEY = "customAppBlocks:v1";
 const INTENT_HISTORY_KEY = "intentHistory:v1";
-const TEFILLIN_DATE_KEY = "tefillinConfirmedDate:v1";
+const TEFILLIN_DATE_KEY_PREFIX = "tefillinConfirmedDay:v2:";
+const TEFILLIN_IGNORE_KEY_PREFIX = "tefillinPromptIgnored:v1:";
 const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
 
 
@@ -401,6 +406,8 @@ const withTimeout = async <T,>(
 };
 
 const todayDateStr = (): string => new Date().toISOString().slice(0, 10);
+const tefillinDateKey = (uid: string): string => `${TEFILLIN_DATE_KEY_PREFIX}${uid}`;
+const tefillinIgnoreKey = (uid: string): string => `${TEFILLIN_IGNORE_KEY_PREFIX}${uid}`;
 
 const getPastShabbatDates = (count: number): string[] => {
   const dates: string[] = [];
@@ -475,7 +482,9 @@ export default function App() {
   const [holidayOptIn, setHolidayOptIn] = useState(false);
 
   /* ── tefillin daily ── */
-  const [tefillinConfirmedToday, setTefillinConfirmedToday] = useState(false);
+  const [_tefillinConfirmedToday, setTefillinConfirmedToday] = useState(false);
+  const [soloTefillinPromptVisible, setSoloTefillinPromptVisible] = useState(false);
+  const [appForegroundTick, setAppForegroundTick] = useState(0);
 
   /* ── daily info ── */
   const [showDailyInfo, setShowDailyInfo] = useState<string | null>(null);
@@ -539,6 +548,7 @@ export default function App() {
   const [buddyChatImageLoading, setBuddyChatImageLoading] = useState(false);
   const [sunBlockedMessage, setSunBlockedMessage] = useState<string | null>(null);
   const [showBuddyQuotes, setShowBuddyQuotes] = useState(false);
+  const [buddyChatViewportHeight, setBuddyChatViewportHeight] = useState(0);
 
   /* ── group buddy chat ── */
   const [groupCreateSelectedUids, setGroupCreateSelectedUids] = useState<string[]>([]);
@@ -555,6 +565,8 @@ export default function App() {
 
   /* ── streak evaluation guard (once per app session) ── */
   const streakEvalDone = useRef(false);
+  const buddyChatListRef = useRef<FlatList<BuddyMessage> | null>(null);
+  const buddyChatShouldSnapRef = useRef(false);
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
@@ -569,6 +581,10 @@ export default function App() {
     if (existing) return existing;
     if (shabbatTimes) return `week-${shabbatTimes.shabbatStart.toISOString().slice(0, 10)}`;
     return `week-${new Date().toISOString().slice(0, 10)}`;
+  }, [shabbatTimes]);
+
+  const currentWeekDate = useMemo(() => {
+    return shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
   }, [shabbatTimes]);
 
   const isShabbatNow = useMemo(() => {
@@ -598,6 +614,7 @@ export default function App() {
 
   const isStreakEligible = effectiveBlockLevel !== "none";
   const tefillinBuddyUids = useMemo(() => user?.tefillinBuddyUids ?? [], [user?.tefillinBuddyUids]);
+  const hasTefillinBuddies = tefillinBuddyUids.length > 0;
 
   const displayTefillinStreak = useMemo(() => {
     if (buddyChats.length > 0) {
@@ -608,6 +625,75 @@ export default function App() {
     }
     return user?.tefillinCurrentStreak ?? 0;
   }, [buddyChats, user?.tefillinCurrentStreak]);
+
+  const buddyChatSavedPeekOnly = useMemo(() => {
+    if (!user || buddyChatMessages.length === 0) return false;
+    return buddyChatMessages.every((message) => message.savedByUids?.includes(user.uid));
+  }, [buddyChatMessages, user]);
+
+  const buddyChatPeekHeight = useMemo(() => {
+    if (!buddyChatSavedPeekOnly) return 0;
+    return Math.max(buddyChatViewportHeight, 180);
+  }, [buddyChatSavedPeekOnly, buddyChatViewportHeight]);
+
+  const queueBuddyChatSnapToBottom = useCallback(() => {
+    buddyChatShouldSnapRef.current = true;
+  }, []);
+
+  const flushBuddyChatSnapToBottom = useCallback((animated: boolean) => {
+    requestAnimationFrame(() => {
+      buddyChatListRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  const getSoloTefillinPromptDay = useCallback(async (): Promise<string> => {
+    const lat = user?.latitude ?? currentLocation?.latitude;
+    const lon = user?.longitude ?? currentLocation?.longitude;
+    const tzid = user?.timeZone ?? currentLocation?.timezone ?? "UTC";
+    if (lat == null || lon == null) {
+      return todayDateStr();
+    }
+    try {
+      const { sunrise } = await getCachedZmanim(lat, lon, tzid);
+      const now = new Date();
+      if (now >= sunrise) {
+        return todayDateStr();
+      }
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return yesterday.toISOString().slice(0, 10);
+    } catch {
+      return todayDateStr();
+    }
+  }, [
+    currentLocation?.latitude,
+    currentLocation?.longitude,
+    currentLocation?.timezone,
+    user?.latitude,
+    user?.longitude,
+    user?.timeZone,
+  ]);
+
+  const refreshSoloTefillinPrompt = useCallback(async () => {
+    if (!user) {
+      setTefillinConfirmedToday(false);
+      setSoloTefillinPromptVisible(false);
+      return;
+    }
+    if (hasTefillinBuddies) {
+      setTefillinConfirmedToday(false);
+      setSoloTefillinPromptVisible(false);
+      return;
+    }
+    const promptDay = await getSoloTefillinPromptDay();
+    const [answeredDay, ignored] = await Promise.all([
+      AsyncStorage.getItem(tefillinDateKey(user.uid)),
+      AsyncStorage.getItem(tefillinIgnoreKey(user.uid)),
+    ]);
+    const confirmed = answeredDay === promptDay;
+    setTefillinConfirmedToday(confirmed);
+    setSoloTefillinPromptVisible(!confirmed && ignored !== "true");
+  }, [getSoloTefillinPromptDay, hasTefillinBuddies, user]);
 
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
@@ -630,33 +716,39 @@ export default function App() {
     await AsyncStorage.setItem(CUSTOM_APP_BLOCKS_KEY, JSON.stringify(next));
   }, []);
 
-  const saveIntentHistory = useCallback(async (next: Record<string, string>) => {
-    setIntentHistory(next);
-    await AsyncStorage.setItem(INTENT_HISTORY_KEY, JSON.stringify(next));
-  }, []);
+  const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
+    if (!user) return;
+    setIntentHistory((prev) => ({ ...prev, [weekDate]: text }));
+    await saveIntentEntry(user.uid, weekDate, text);
+  }, [user]);
 
   /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawR, rawU, rawB, rawCab, rawIH, rawTD, rawHO] = await Promise.all([
+      const [rawR, rawU, rawB, rawCab, rawHO] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
         AsyncStorage.getItem(BLOCK_LEVEL_KEY),
         AsyncStorage.getItem(CUSTOM_APP_BLOCKS_KEY),
-        AsyncStorage.getItem(INTENT_HISTORY_KEY),
-        AsyncStorage.getItem(TEFILLIN_DATE_KEY),
         AsyncStorage.getItem(HOLIDAY_OPTIN_KEY),
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
       if (rawB && ["full", "medium", "custom", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
       if (rawCab) { try { setCustomAppBlocks(JSON.parse(rawCab)); } catch { /* use defaults */ } }
-      if (rawIH) { try { setIntentHistory(JSON.parse(rawIH)); } catch { /* use defaults */ } }
-      if (rawTD === todayDateStr()) setTefillinConfirmedToday(true);
       if (rawHO === "true") setHolidayOptIn(true);
       AsyncStorage.removeItem("tefillinBuddies:v1").catch(() => {});
     };
     loadLocal().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        setAppForegroundTick((tick) => tick + 1);
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -670,12 +762,27 @@ export default function App() {
         checkAndBreakStaleStreaks(profile.uid).then((updated) => {
           if (updated) setUser(updated);
         }).catch(() => {});
+        getIntentHistory(profile.uid).then((history) => {
+          setIntentHistory(history);
+        }).catch(() => {});
       } else {
         setPendingEmailVerification(false);
+        setIntentHistory({});
       }
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    checkAndBreakStaleStreaks(user.uid).then((updated) => {
+      if (updated) setUser(updated);
+    }).catch(() => {});
+  }, [appForegroundTick, user]);
+
+  useEffect(() => {
+    refreshSoloTefillinPrompt().catch(() => {});
+  }, [appForegroundTick, refreshSoloTefillinPrompt]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -710,11 +817,19 @@ export default function App() {
   }, [user?.shabbatIntentText]);
 
   useEffect(() => {
-    if (user?.shabbatIntentText != null) {
-      setSavedIntentText(user.shabbatIntentText);
+    if (!user) return;
+    const thisWeekIntent = intentHistory[currentWeekDate];
+    if (thisWeekIntent) {
+      setSavedIntentText(thisWeekIntent);
+      setIntentDraft(thisWeekIntent);
+    } else if (user.shabbatIntentText) {
       setIntentDraft(user.shabbatIntentText);
+      setSavedIntentText("");
+    } else {
+      setIntentDraft("");
+      setSavedIntentText("");
     }
-  }, [user?.uid]);
+  }, [user?.uid, currentWeekDate, intentHistory]);
 
   /* ── load location & congregations ── */
   const loadLocationAndCongregations = useCallback(async () => {
@@ -845,10 +960,17 @@ export default function App() {
   /* ── load buddy chats ── */
   useEffect(() => {
     if (!user) return;
-    getUserBuddyChats(user.uid)
-      .then(setBuddyChats)
-      .catch(() => setBuddyChats([]));
-  }, [user?.buddyChatIds, user]);
+    const unsubscribe = subscribeToUserBuddyChats(user.uid, setBuddyChats);
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!activeBuddyChat) return;
+    const updated = buddyChats.find((chat) => chat.id === activeBuddyChat.id);
+    if (updated && updated !== activeBuddyChat) {
+      setActiveBuddyChat(updated);
+    }
+  }, [activeBuddyChat, buddyChats]);
 
   /* ── streak evaluation (runs once per app session after auth) ── */
   useEffect(() => {
@@ -874,6 +996,12 @@ export default function App() {
     const unsubscribe = subscribeToBuddyMessages(activeBuddyChat.id, setBuddyChatMessages);
     return () => unsubscribe();
   }, [activeBuddyChat, socialSubTab]);
+
+  useEffect(() => {
+    if (socialSubTab === "buddyChat" && activeBuddyChat) {
+      queueBuddyChatSnapToBottom();
+    }
+  }, [activeBuddyChat?.id, socialSubTab, queueBuddyChatSnapToBottom]);
 
   /* ── check sun window when entering buddy chat ── */
   useEffect(() => {
@@ -1252,15 +1380,13 @@ export default function App() {
       const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
       setUser(updated);
       setSavedIntentText(text);
-      const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
-      const nextHistory = { ...intentHistory, [dateKey]: text };
-      await saveIntentHistory(nextHistory);
+      await saveIntentHistoryEntry(currentWeekDate, text);
       await saveShabbatUiState({ ...shabbatUiState, lastIntentPromptWeekId: weekId });
       setIntentModalVisible(false);
     } finally {
       setActionLoading(false);
     }
-  }, [intentDraft, intentHistory, saveIntentHistory, saveShabbatUiState, shabbatTimes, shabbatUiState, user, weekId]);
+  }, [intentDraft, currentWeekDate, saveIntentHistoryEntry, saveShabbatUiState, shabbatUiState, user, weekId]);
 
   const onOptOutThisWeek = useCallback(async () => {
     if (!user) return;
@@ -1279,20 +1405,31 @@ export default function App() {
   /* ── tefillin confirmation ── */
   const onConfirmTefillin = useCallback(async () => {
     if (!user) return;
+    const promptDay = await getSoloTefillinPromptDay();
     setTefillinConfirmedToday(true);
-    await AsyncStorage.setItem(TEFILLIN_DATE_KEY, todayDateStr());
+    setSoloTefillinPromptVisible(false);
+    await AsyncStorage.setItem(tefillinDateKey(user.uid), promptDay);
     try {
-      const today = todayDateStr();
       const fresh = await getUserProfile(user.uid);
-      if (!fresh || fresh.lastTefillinDate === today) return;
+      if (!fresh || fresh.lastTefillinDate === promptDay) return;
       const nextStreak = fresh.tefillinCurrentStreak + 1;
       const updated = await updateUserProfile(user.uid, {
         tefillinCurrentStreak: nextStreak,
         tefillinLongestStreak: Math.max(fresh.tefillinLongestStreak, nextStreak),
-        lastTefillinDate: today,
+        lastTefillinDate: promptDay,
       });
       setUser(updated);
     } catch { /* keep going */ }
+  }, [getSoloTefillinPromptDay, user]);
+
+  const onDeclineTefillinPrompt = useCallback(() => {
+    setSoloTefillinPromptVisible(false);
+  }, []);
+
+  const onIgnoreTefillinPrompt = useCallback(async () => {
+    if (!user) return;
+    setSoloTefillinPromptVisible(false);
+    await AsyncStorage.setItem(tefillinIgnoreKey(user.uid), "true");
   }, [user]);
 
   /* ── holiday opt-in ── */
@@ -1309,29 +1446,9 @@ export default function App() {
     const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
     setUser(updated);
     setSavedIntentText(text);
-    const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
-    const nextHistory = { ...intentHistory, [dateKey]: text };
-    await saveIntentHistory(nextHistory);
-    Alert.alert("Saved", "Your intention has been saved.");
-  }, [intentDraft, intentHistory, saveIntentHistory, shabbatTimes, user]);
-
-  /* ── add intention to in-app calendar ── */
-  const onAddIntentToCalendar = useCallback(async () => {
-    const text = savedIntentText.trim() || intentDraft.trim();
-    if (!text) { Alert.alert("No intention", "Write and save your intention first."); return; }
-    if (!user) return;
-    const dateKey = shabbatTimes?.shabbatStart?.toISOString().slice(0, 10) ?? todayDateStr();
-    if (intentHistory[dateKey] === text) {
-      setShowIntentCalendar(true);
-      return;
-    }
-    const updated = await updateUserProfile(user.uid, { shabbatIntentText: text });
-    setUser(updated);
-    setSavedIntentText(text);
-    const nextHistory = { ...intentHistory, [dateKey]: text };
-    await saveIntentHistory(nextHistory);
-    setShowIntentCalendar(true);
-  }, [intentDraft, intentHistory, saveIntentHistory, savedIntentText, shabbatTimes, user]);
+    await saveIntentHistoryEntry(currentWeekDate, text);
+    Alert.alert("Saved", "Your intention has been saved for this week.");
+  }, [intentDraft, currentWeekDate, saveIntentHistoryEntry, user]);
 
   /* ── congregation callbacks ── */
   const refreshCongregationData = useCallback(async () => {
@@ -1710,6 +1827,7 @@ export default function App() {
       (c) => c.type === "pair" && c.memberUids.includes(buddy.uid)
     );
     if (chat) {
+      queueBuddyChatSnapToBottom();
       setActiveBuddyChat(chat);
       setChattingWith(buddy);
       setBuddyChatInput("");
@@ -1718,13 +1836,14 @@ export default function App() {
     } else {
       openDmWith(buddy);
     }
-  }, [buddyChats, openDmWith]);
+  }, [buddyChats, openDmWith, queueBuddyChatSnapToBottom]);
 
   const onSendBuddyChatText = useCallback(async () => {
     if (!user || !activeBuddyChat || !buddyChatInput.trim()) return;
     const text = buddyChatInput.trim();
     setBuddyChatInput("");
     Keyboard.dismiss();
+    queueBuddyChatSnapToBottom();
     try {
       await sendBuddyMessage(
         activeBuddyChat.id,
@@ -1736,7 +1855,7 @@ export default function App() {
     } catch (error) {
       Alert.alert("Buddy Chat", errorMessage(error, "Failed to send message."));
     }
-  }, [buddyChatInput, user, activeBuddyChat]);
+  }, [buddyChatInput, user, activeBuddyChat, queueBuddyChatSnapToBottom]);
 
   const onBuddyChatCamera = useCallback(async () => {
     if (!user || !activeBuddyChat) return;
@@ -1777,6 +1896,7 @@ export default function App() {
   const onSendBuddyQuote = useCallback(async (quote: string) => {
     if (!user || !activeBuddyChat) return;
     setShowBuddyQuotes(false);
+    queueBuddyChatSnapToBottom();
     try {
       await sendBuddyMessage(
         activeBuddyChat.id,
@@ -1788,11 +1908,12 @@ export default function App() {
     } catch (error) {
       Alert.alert("Quote", errorMessage(error, "Failed to send quote."));
     }
-  }, [user, activeBuddyChat]);
+  }, [user, activeBuddyChat, queueBuddyChatSnapToBottom]);
 
   const handleBuddyImageSend = useCallback(async (imageUri: string, fromCamera: boolean) => {
     if (!user || !activeBuddyChat) return;
     setBuddyChatImageLoading(true);
+    queueBuddyChatSnapToBottom();
     try {
       const downloadUrl = await uploadBuddyImage(activeBuddyChat.id, user.uid, imageUri);
       await sendBuddyMessage(
@@ -1811,7 +1932,7 @@ export default function App() {
     } finally {
       setBuddyChatImageLoading(false);
     }
-  }, [user, activeBuddyChat, currentLocation]);
+  }, [user, activeBuddyChat, currentLocation, queueBuddyChatSnapToBottom]);
 
   const onMarkBuddyMessageOpened = useCallback(async (msg: BuddyMessage) => {
     if (!activeBuddyChat || msg.opened || msg.senderUid === user?.uid) return;
@@ -1843,12 +1964,13 @@ export default function App() {
 
   /* ── group buddy chat callbacks ── */
   const openGroupChat = useCallback((chat: BuddyChat) => {
+    queueBuddyChatSnapToBottom();
     setActiveBuddyChat(chat);
     setChattingWith(null);
     setBuddyChatInput("");
     setSocialSubTab("buddyChat");
     purgeExpiredMessages(chat.id).catch(() => {});
-  }, []);
+  }, [queueBuddyChatSnapToBottom]);
 
   const onCreateGroup = useCallback(async () => {
     if (!user || groupCreateSelectedUids.length < 2 || !groupCreateName.trim()) return;
@@ -1933,6 +2055,12 @@ export default function App() {
     return buddyChats.filter((c) => c.type === "group");
   }, [buddyChats]);
 
+  const allBuddyChatsOrdered = useMemo(() => {
+    const chatSortKey = (chat: BuddyChat): number =>
+      chat.lastActivityAt?.toMillis?.() ?? chat.createdAt.toMillis();
+    return [...buddyChats].sort((a, b) => chatSortKey(b) - chatSortKey(a));
+  }, [buddyChats]);
+
   /* ── time display ── */
   const timesDisplay = useMemo(() => {
     if (timesLoading) return "Loading...";
@@ -1955,22 +2083,19 @@ export default function App() {
   /* ═══════════════════════════════════════════════════════════ */
 
   const renderHomeTab = () => (
-    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={110}
+    >
+      <ScrollView
+        contentContainerStyle={s.tabContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
       {/* Greeting */}
       <Text style={s.greeting}>Welcome, {user?.displayName?.split(" ")[0] ?? "Friend"}</Text>
-
-      {/* Tefillin daily prompt (hidden when user has tefillin buddies) */}
-      {user?.wantsMorningReminders && !tefillinConfirmedToday && (user?.tefillinBuddyUids?.length ?? 0) === 0 && (
-        <Pressable style={s.tefillinPromptBar} onPress={onConfirmTefillin}>
-          <Text style={s.tefillinPromptText}>Have you wrapped tefillin today?</Text>
-          <View style={s.tefillinPromptBtn}><Text style={s.tefillinPromptBtnText}>Yes</Text></View>
-        </Pressable>
-      )}
-      {(user?.tefillinBuddyUids?.length ?? 0) > 0 && !tefillinConfirmedToday && (
-        <View style={[s.tefillinPromptBar, { backgroundColor: C.primaryLight }]}>
-          <Text style={[s.tefillinPromptText, { color: C.primary }]}>Your tefillin streak is tracked through your buddy chats</Text>
-        </View>
-      )}
 
       {/* Streaks */}
       <View style={s.streakRow}>
@@ -1983,6 +2108,12 @@ export default function App() {
           <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin Streak</Text>
         </View>
       </View>
+
+      {hasTefillinBuddies && (
+        <View style={[s.tefillinPromptBar, { backgroundColor: C.primaryLight, marginTop: 12 }]}>
+          <Text style={[s.tefillinPromptText, { color: C.primary }]}>Your tefillin streak is tracked through your buddies.</Text>
+        </View>
+      )}
 
       {!isStreakEligible && blockLevel !== "none" && (
         <View style={[s.highlightBox, { marginBottom: 12, backgroundColor: C.dangerLight }]}>
@@ -2164,7 +2295,7 @@ export default function App() {
             </View>
           </Pressable>
         </View>
-        <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. This will remind you if you try to break it.</Text>
+        <Text style={s.sectionDesc}>Write why you're keeping Shabbat this week. Resets each week.</Text>
         <TextInput
           multiline
           value={intentDraft}
@@ -2172,16 +2303,16 @@ export default function App() {
           style={s.intentInput}
           placeholder="I am keeping Shabbat because..."
           placeholderTextColor={C.textLight}
+          scrollEnabled
+          blurOnSubmit={false}
         />
-        {intentDraft.trim() !== savedIntentText.trim() && intentDraft.trim().length > 0 && (
+        {intentDraft.trim().length > 0 && intentDraft.trim() !== savedIntentText.trim() && (
           <Pressable style={s.primaryBtn} onPress={onSaveIntentInline}>
             <Text style={s.primaryBtnText}>Save Intention</Text>
           </Pressable>
         )}
-        {savedIntentText.trim().length > 0 && (
-          <Pressable style={[s.outlineBtn, { marginTop: 8 }]} onPress={onAddIntentToCalendar}>
-            <Text style={s.outlineBtnText}>Save to Shabbat Calendar</Text>
-          </Pressable>
+        {savedIntentText.trim().length > 0 && intentDraft.trim() === savedIntentText.trim() && (
+          <Text style={{ fontSize: 12, color: C.success, marginTop: 6, fontWeight: "600" }}>Intention saved for this week</Text>
         )}
       </View>
 
@@ -2217,8 +2348,9 @@ export default function App() {
         </View>
       )}
 
-      <View style={{ height: 24 }} />
-    </ScrollView>
+        <View style={{ height: 24 }} />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 
   /* ═══════════════════════════════════════════════════════════ */
@@ -2400,7 +2532,7 @@ export default function App() {
             )}
           </View>
 
-          {/* ── Tefillin Buddies Section ── */}
+          {/* ── Tefillin Buddies Section (unified pair + group) ── */}
           <View style={s.buddiesSection}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -2409,52 +2541,76 @@ export default function App() {
                   <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
                 </Pressable>
               </View>
+              {friends.length >= 2 && (
+                <Pressable
+                  style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                  onPress={() => {
+                    setGroupCreateSelectedUids([]);
+                    setGroupCreateName("");
+                    setSocialSubTab("groupCreate");
+                  }}
+                >
+                  <Text style={[s.buddySnapBtnText, { color: "#FFF" }]}>+ Group</Text>
+                </Pressable>
+              )}
             </View>
 
-            {/* Active Buddies (Snapchat-style streak list) */}
-            {tefillinBuddyUids.length > 0 ? (
+            {allBuddyChatsOrdered.length > 0 ? (
               <View style={s.buddyStreakList}>
-                {tefillinBuddyUids.map((uid) => {
-                  const buddy = friends.find((f) => f.uid === uid);
-                  if (!buddy) return null;
-                  const streak = buddy.tefillinCurrentStreak ?? 0;
-                  const lastDate = buddy.lastTefillinDate;
-                  const isToday = lastDate === todayDateStr();
-                  const showHourglass = !isToday;
-                  return (
-                    <Pressable key={uid} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
-                      <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
-                        <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
-                          <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
-                          {isToday && <View style={s.buddyAvatarDot} />}
+                {allBuddyChatsOrdered.map((chat) => {
+                  if (chat.type === "pair") {
+                    const buddyUid = chat.memberUids.find((uid) => uid !== user?.uid);
+                    const buddy = friends.find((f) => f.uid === buddyUid);
+                    if (!buddy) return null;
+                    const lastDate = buddy.lastTefillinDate;
+                    const isToday = lastDate === todayDateStr();
+                    return (
+                      <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
+                        <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
+                          <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
+                            <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                            {isToday && <View style={s.buddyAvatarDot} />}
+                          </View>
+                        </Pressable>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
+                            {!isToday && <Text style={{ fontSize: 14 }}>⏳</Text>}
+                          </View>
                         </View>
+                        <Pressable
+                          style={[s.buddySnapBtn, !isToday && { backgroundColor: C.primary }]}
+                          onPress={() => openBuddyChat(buddy)}
+                        >
+                          {isToday ? (
+                            <Text style={s.buddySnapBtnText}>Wrapped</Text>
+                          ) : (
+                            <CameraIcon size={22} color="#FFF" />
+                          )}
+                        </Pressable>
                       </Pressable>
+                    );
+                  }
+                  const memberNames = chat.memberUids
+                    .filter((uid) => uid !== user?.uid)
+                    .map((uid) => friends.find((f) => f.uid === uid)?.displayName ?? "Unknown")
+                    .join(", ");
+                  return (
+                    <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openGroupChat(chat)}>
+                      <View style={[s.buddyAvatarLarge, { backgroundColor: C.streakBg }]}>
+                        <Text style={[s.buddyAvatarLargeText, { color: C.streak }]}>{chat.memberUids.length}</Text>
+                      </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          {(() => {
-                            const chatForBuddy = buddyChats.find(
-                              (c) => c.type === "pair" && c.memberUids.includes(uid)
-                            );
-                            const chatStreak = chatForBuddy?.streakCount ?? streak;
-                            return (
-                              <>
-                                <Text style={s.buddyStreakText}>{chatStreak} day streak</Text>
-                                {showHourglass && <Text style={{ fontSize: 14 }}>⏳</Text>}
-                              </>
-                            );
-                          })()}
-                        </View>
+                        <Text style={s.buddyNameLarge}>{chat.name ?? "Group"}</Text>
+                        <Text style={{ fontSize: 12, color: C.textSecondary }} numberOfLines={1}>{memberNames}</Text>
+                        <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
                       </View>
                       <Pressable
-                        style={[s.buddySnapBtn, !isToday && { backgroundColor: C.primary }]}
-                        onPress={() => openBuddyChat(buddy)}
+                        style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                        onPress={() => openGroupChat(chat)}
                       >
-                        {isToday ? (
-                          <Text style={s.buddySnapBtnText}>Wrapped</Text>
-                        ) : (
-                          <CameraIcon size={22} color="#FFF" />
-                        )}
+                        <CameraIcon size={22} color="#FFF" />
                       </Pressable>
                     </Pressable>
                   );
@@ -2488,61 +2644,6 @@ export default function App() {
                 {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).length === 0 && (
                   <Text style={[s.emptyText, { paddingVertical: 8 }]}>All your friends are already buddies!</Text>
                 )}
-              </View>
-            )}
-          </View>
-
-          {/* ── Group Buddy Chats Section ── */}
-          <View style={s.buddiesSection}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <Text style={s.buddiesSectionTitle}>Group Chats</Text>
-              {friends.length >= 2 && (
-                <Pressable
-                  style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
-                  onPress={() => {
-                    setGroupCreateSelectedUids([]);
-                    setGroupCreateName("");
-                    setSocialSubTab("groupCreate");
-                  }}
-                >
-                  <Text style={[s.buddySnapBtnText, { color: "#FFF" }]}>+ Create Group</Text>
-                </Pressable>
-              )}
-            </View>
-
-            {groupChats.length > 0 ? (
-              <View style={s.buddyStreakList}>
-                {groupChats.map((chat) => {
-                  const memberNames = chat.memberUids
-                    .filter((uid) => uid !== user?.uid)
-                    .map((uid) => friends.find((f) => f.uid === uid)?.displayName ?? "Unknown")
-                    .join(", ");
-                  return (
-                    <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openGroupChat(chat)}>
-                      <View style={[s.buddyAvatarLarge, { backgroundColor: C.streakBg }]}>
-                        <Text style={[s.buddyAvatarLargeText, { color: C.streak }]}>{chat.memberUids.length}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.buddyNameLarge}>{chat.name ?? "Group"}</Text>
-                        <Text style={{ fontSize: 12, color: C.textSecondary }} numberOfLines={1}>{memberNames}</Text>
-                        <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
-                      </View>
-                      <View style={s.buddySnapBtn}>
-                        <Text style={s.buddySnapBtnText}>Open</Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : (
-              <View style={s.buddyEmptyState}>
-                <Text style={{ fontSize: 36, marginBottom: 8 }}>👥</Text>
-                <Text style={s.buddyEmptyTitle}>No group chats yet</Text>
-                <Text style={s.buddyEmptyDesc}>
-                  {friends.length >= 2
-                    ? "Create a group to hold each other accountable with 3+ members."
-                    : "Add at least 2 friends to create a group buddy chat."}
-                </Text>
               </View>
             )}
           </View>
@@ -2632,9 +2733,6 @@ export default function App() {
       {/* Buddy Chat View (pair + group) */}
       {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
-          <View style={{ backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={{ fontSize: 11, color: C.textLight }}>Messages auto-delete after 24h. Long-press to save.</Text>
-          </View>
           {sunBlockedMessage && (
             <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{ fontSize: 16 }}>🌙</Text>
@@ -2664,39 +2762,52 @@ export default function App() {
             </View>
           )}
           <FlatList
+            ref={buddyChatListRef}
+            style={[s.chatThread, buddyChatSavedPeekOnly && s.chatThreadPeek]}
             data={buddyChatMessages}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={s.chatList}
+            contentContainerStyle={[
+              s.buddyChatList,
+              buddyChatMessages.length === 0 && s.buddyChatListEmpty,
+            ]}
+            onLayout={(event) => setBuddyChatViewportHeight(event.nativeEvent.layout.height)}
+            onContentSizeChange={() => {
+              if (!buddyChatShouldSnapRef.current) return;
+              buddyChatShouldSnapRef.current = false;
+              flushBuddyChatSnapToBottom(false);
+            }}
             renderItem={({ item }) => {
               const isMine = item.senderUid === user?.uid;
               const isSaved = user ? item.savedByUids?.includes(user.uid) : false;
-              if (!isMine && !item.opened) {
-                onMarkBuddyMessageOpened(item);
-              }
-              const onLongPressMessage = () => {
-                const buttons: { text: string; onPress?: () => void; style?: "cancel" | "destructive" }[] = [];
+              const onPressMessage = () => {
+                if (!isMine && item.type === "image" && !item.opened) {
+                  onMarkBuddyMessageOpened(item);
+                }
                 if (!isSaved) {
-                  buttons.push({ text: "Save to Chat", onPress: () => onSaveMessageToChat(item) });
-                }
-                if (item.type === "image" && item.imageUrl) {
-                  buttons.push({ text: "Save to Camera Roll", onPress: () => onSaveImageToCameraRoll(item.imageUrl!) });
-                }
-                buttons.push({ text: "Cancel", style: "cancel" });
-                if (buttons.length > 1) {
-                  Alert.alert("Message Options", isSaved ? "This message is saved and won't auto-delete." : "Messages auto-delete after 24 hours.", buttons);
+                  onSaveMessageToChat(item);
                 }
               };
+              const onLongPressImage = () => {
+                if (item.type !== "image" || !item.imageUrl) return;
+                const imageUrl = item.imageUrl;
+                Alert.alert("Image Options", undefined, [
+                  { text: "Save to Camera Roll", onPress: () => onSaveImageToCameraRoll(imageUrl) },
+                  { text: "Cancel", style: "cancel" },
+                ]);
+              };
               return (
-                <Pressable onLongPress={onLongPressMessage} style={[s.chatBubble, isMine && s.chatBubbleMine]}>
+                <Pressable
+                  onPress={onPressMessage}
+                  onLongPress={item.type === "image" && item.imageUrl ? onLongPressImage : undefined}
+                  style={[s.chatBubble, isMine && s.chatBubbleMine]}
+                >
                   {!isMine && <Text style={s.chatSender}>{item.senderName}</Text>}
                   {item.type === "image" && item.imageUrl ? (
-                    <Pressable onPress={() => onMarkBuddyMessageOpened(item)} onLongPress={onLongPressMessage}>
-                      <Image
-                        source={{ uri: item.imageUrl }}
-                        style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
-                        resizeMode="cover"
-                      />
-                    </Pressable>
+                    <Image
+                      source={{ uri: item.imageUrl }}
+                      style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
+                      resizeMode="cover"
+                    />
                   ) : (
                     <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
                   )}
@@ -2718,6 +2829,13 @@ export default function App() {
                 <CameraIcon size={48} color={C.textLight} />
                 <Text style={s.emptyText}>Send a tefillin photo to start your streak!</Text>
               </View>
+            }
+            ListFooterComponent={
+              buddyChatSavedPeekOnly ? (
+                <View style={[s.buddyChatPeekSpacer, { height: buddyChatPeekHeight }]}>
+                  <Text style={s.buddyChatPeekLabel}>Scroll up to view saved chats</Text>
+                </View>
+              ) : null
             }
           />
           <View style={s.chatInputRow}>
@@ -3067,8 +3185,10 @@ export default function App() {
         <Text style={s.headerTitle}>
           {activeTab === "home" ? "Home" : activeTab === "social" ? "Social" : "Torah"}
         </Text>
-        <Pressable style={s.settingsBtn} onPress={() => setSettingsVisible(true)}>
-          <Text style={s.settingsBtnText}>⚙️</Text>
+        <Pressable style={s.profileBtn} onPress={() => setSettingsVisible(true)}>
+          <View style={s.profileBtnCircle}>
+            <Text style={s.profileBtnText}>{(user?.displayName ?? "?")[0]?.toUpperCase()}</Text>
+          </View>
         </Pressable>
       </View>
 
@@ -3090,15 +3210,28 @@ export default function App() {
 
       {/* Intent Modal */}
       <Modal visible={intentModalVisible} transparent animationType="fade">
-        <View style={s.modalOverlay}>
+        <KeyboardAvoidingView
+          style={s.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={90}
+        >
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>Shabbat is starting</Text>
             <Text style={s.sectionDesc}>Write your intention for keeping Shabbat this week. This will remind you if you try to break it.</Text>
-            <TextInput multiline value={intentDraft} onChangeText={setIntentDraft} style={s.intentInput} placeholder="I am keeping Shabbat because..." placeholderTextColor={C.textLight} />
+            <TextInput
+              multiline
+              value={intentDraft}
+              onChangeText={setIntentDraft}
+              style={s.intentInput}
+              placeholder="I am keeping Shabbat because..."
+              placeholderTextColor={C.textLight}
+              scrollEnabled
+              blurOnSubmit={false}
+            />
             <Pressable style={s.primaryBtn} onPress={onSubmitIntent}><Text style={s.primaryBtnText}>Save intention</Text></Pressable>
             <Pressable style={s.dangerBtn} onPress={onOptOutThisWeek}><Text style={s.dangerBtnText}>Not keeping this week</Text></Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Break Shabbat Confirmation Modal */}
@@ -3128,32 +3261,39 @@ export default function App() {
         <View style={s.modalOverlay}>
           <View style={[s.modalCard, { maxHeight: "80%" }]}>
             <Text style={s.modalTitle}>Shabbat Intentions</Text>
-            <Text style={s.sectionDesc}>Look back at your past Shabbat intentions.</Text>
+            <Text style={s.sectionDesc}>Your saved weekly intentions.</Text>
             <ScrollView style={{ maxHeight: 400, marginTop: 12 }}>
-              {getPastShabbatDates(26).map((date) => {
-                const intent = intentHistory[date];
-                const d = new Date(date + "T12:00:00");
-                const label = d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-                return (
-                  <Pressable
-                    key={date}
-                    style={[s.calendarDateItem, selectedPastDate === date && s.calendarDateItemActive]}
-                    onPress={() => setSelectedPastDate(selectedPastDate === date ? null : date)}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                      <Text style={[s.calendarDateText, selectedPastDate === date && { color: C.primaryDark }]}>{label}</Text>
-                      {intent ? (
-                        <View style={s.calendarDot} />
-                      ) : (
-                        <Text style={{ fontSize: 11, color: C.textLight }}>No entry</Text>
+              {Object.entries(intentHistory)
+                .sort(([a], [b]) => b.localeCompare(a))
+                .map(([date, intent]) => {
+                  const d = new Date(date + "T12:00:00");
+                  const label = d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+                  const isCurrentWeek = date === currentWeekDate;
+                  return (
+                    <Pressable
+                      key={date}
+                      style={[s.calendarDateItem, selectedPastDate === date && s.calendarDateItemActive]}
+                      onPress={() => setSelectedPastDate(selectedPastDate === date ? null : date)}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <Text style={[s.calendarDateText, selectedPastDate === date && { color: C.primaryDark }]}>{label}</Text>
+                        {isCurrentWeek && (
+                          <View style={{ backgroundColor: C.primary, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                            <Text style={{ fontSize: 10, color: "#FFF", fontWeight: "700" }}>This Week</Text>
+                          </View>
+                        )}
+                      </View>
+                      {selectedPastDate === date && (
+                        <Text style={s.calendarIntentText}>"{intent}"</Text>
                       )}
-                    </View>
-                    {selectedPastDate === date && intent && (
-                      <Text style={s.calendarIntentText}>"{intent}"</Text>
-                    )}
-                  </Pressable>
-                );
-              })}
+                    </Pressable>
+                  );
+                })}
+              {Object.keys(intentHistory).length === 0 && (
+                <View style={{ alignItems: "center", paddingVertical: 30 }}>
+                  <Text style={s.emptyText}>No intentions saved yet. Save your first one from the Home tab.</Text>
+                </View>
+              )}
             </ScrollView>
             <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => { setShowIntentCalendar(false); setSelectedPastDate(null); }}>
               <Text style={s.ghostBtnText}>Close</Text>
@@ -3189,6 +3329,26 @@ export default function App() {
             </Text>
             <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setShowBuddyInfo(false)}>
               <Text style={s.primaryBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={soloTefillinPromptVisible} transparent animationType="fade">
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>Have you wrapped tefillin today?</Text>
+            <Text style={[s.sectionDesc, { marginTop: 12 }]}>
+              Answer yes to keep your solo tefillin streak going. Ignore turns this question off.
+            </Text>
+            <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={onConfirmTefillin}>
+              <Text style={s.primaryBtnText}>Yes</Text>
+            </Pressable>
+            <Pressable style={s.outlineBtn} onPress={onDeclineTefillinPrompt}>
+              <Text style={s.outlineBtnText}>No</Text>
+            </Pressable>
+            <Pressable style={s.ghostBtn} onPress={onIgnoreTefillinPrompt}>
+              <Text style={s.ghostBtnText}>Ignore</Text>
             </Pressable>
           </View>
         </View>
@@ -3718,6 +3878,9 @@ const s = StyleSheet.create({
   headerTitle: { fontSize: 26, fontWeight: "800", color: C.text },
   settingsBtn: { padding: 8 },
   settingsBtnText: { fontSize: 22 },
+  profileBtn: { padding: 4 },
+  profileBtnCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.primary, alignItems: "center", justifyContent: "center" },
+  profileBtnText: { fontSize: 16, fontWeight: "700", color: "#FFF" },
 
   /* tab bar */
   tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingBottom: 4, paddingTop: 10 },
@@ -3839,7 +4002,7 @@ const s = StyleSheet.create({
   ghostBtnText: { color: C.primary, fontWeight: "700", fontSize: 14 },
 
   /* intent */
-  intentInput: { marginTop: 10, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.surface, color: C.text, paddingHorizontal: 14, paddingVertical: 12, minHeight: 80, textAlignVertical: "top", fontSize: 14 },
+  intentInput: { marginTop: 10, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.surface, color: C.text, paddingHorizontal: 14, paddingVertical: 12, minHeight: 120, textAlignVertical: "top", fontSize: 14, lineHeight: 20 },
 
   /* highlight box */
   highlightBox: { backgroundColor: C.primaryLight, borderRadius: 14, padding: 14, marginTop: 8 },
@@ -3886,7 +4049,13 @@ const s = StyleSheet.create({
   emptyCentered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
 
   /* chat */
+  chatThread: { flex: 1, backgroundColor: C.bg },
+  chatThreadPeek: { backgroundColor: C.surface },
   chatList: { paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1, justifyContent: "flex-end" },
+  buddyChatList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, flexGrow: 1 },
+  buddyChatListEmpty: { justifyContent: "center" },
+  buddyChatPeekSpacer: { justifyContent: "flex-end", alignItems: "center", paddingBottom: 12 },
+  buddyChatPeekLabel: { fontSize: 12, color: C.textLight, fontWeight: "600" },
   chatBubble: { backgroundColor: C.surface, borderRadius: 16, padding: 10, marginBottom: 8, alignSelf: "flex-start", maxWidth: "80%" },
   chatBubbleMine: { backgroundColor: C.primaryLight, alignSelf: "flex-end" },
   chatSender: { fontSize: 11, fontWeight: "700", color: C.primary, marginBottom: 2 },

@@ -6,6 +6,7 @@ export interface BuddyChat {
   name: string | null;
   memberUids: string[];
   createdAt: Timestamp;
+  lastActivityAt: Timestamp;
   streakCount: number;
   longestStreak: number;
   lastStreakDate: string | null;

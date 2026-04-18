@@ -1,3 +1,4 @@
+import { NativeModules } from "react-native";
 import { DEV_MODE } from "../config/devMode";
 
 export enum ReminderErrorCode {
@@ -22,6 +23,32 @@ let stubConfig: NotificationStubConfig = {
   forceCancelFailure: false,
 };
 
+type NotificationNativeModule = {
+  requestPermission: () => Promise<boolean>;
+  scheduleNotification: (
+    id: string,
+    title: string,
+    body: string,
+    isoTime: string,
+    metadata: Record<string, string>
+  ) => Promise<void>;
+  cancelNotificationById: (id: string) => Promise<void>;
+  cancelAllNotifications: () => Promise<void>;
+};
+
+const NotificationModule =
+  NativeModules.NotificationsService as NotificationNativeModule | undefined;
+
+const ensureModule = (): NotificationNativeModule => {
+  if (!NotificationModule) {
+    throw {
+      code: ReminderErrorCode.SCHEDULING_FAILED,
+      message: "Notification native module is not installed.",
+    } satisfies ReminderError;
+  }
+  return NotificationModule;
+};
+
 // DEV MODE STUB — replace with real native implementation.
 export const setNotificationStubConfig = (
   next: Partial<NotificationStubConfig>
@@ -34,11 +61,14 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
     console.log("DEV MODE STUB — notification permission requested.");
     return !stubConfig.forcePermissionDenied;
   }
-  // Production: use UNUserNotificationCenter via a native module.
-  throw {
-    code: ReminderErrorCode.PERMISSION_DENIED,
-    message: "Notification permission not implemented.",
-  } satisfies ReminderError;
+  try {
+    return await ensureModule().requestPermission();
+  } catch {
+    throw {
+      code: ReminderErrorCode.PERMISSION_DENIED,
+      message: "Failed to request notification permission.",
+    } satisfies ReminderError;
+  }
 };
 
 export const scheduleDailyNotification = async (
@@ -64,10 +94,14 @@ export const scheduleDailyNotification = async (
     }
     return;
   }
-  throw {
-    code: ReminderErrorCode.SCHEDULING_FAILED,
-    message: "Notification scheduling not implemented.",
-  } satisfies ReminderError;
+  try {
+    await ensureModule().scheduleNotification(id, title, body, time, metadata);
+  } catch {
+    throw {
+      code: ReminderErrorCode.SCHEDULING_FAILED,
+      message: "Failed to schedule notification.",
+    } satisfies ReminderError;
+  }
 };
 
 export const cancelNotificationById = async (id: string): Promise<void> => {
@@ -81,10 +115,14 @@ export const cancelNotificationById = async (id: string): Promise<void> => {
     }
     return;
   }
-  throw {
-    code: ReminderErrorCode.SCHEDULING_FAILED,
-    message: "Notification cancel not implemented.",
-  } satisfies ReminderError;
+  try {
+    await ensureModule().cancelNotificationById(id);
+  } catch {
+    throw {
+      code: ReminderErrorCode.SCHEDULING_FAILED,
+      message: "Failed to cancel notification.",
+    } satisfies ReminderError;
+  }
 };
 
 export const cancelAllNotifications = async (): Promise<void> => {
@@ -98,8 +136,12 @@ export const cancelAllNotifications = async (): Promise<void> => {
     }
     return;
   }
-  throw {
-    code: ReminderErrorCode.SCHEDULING_FAILED,
-    message: "Notification cancel not implemented.",
-  } satisfies ReminderError;
+  try {
+    await ensureModule().cancelAllNotifications();
+  } catch {
+    throw {
+      code: ReminderErrorCode.SCHEDULING_FAILED,
+      message: "Failed to cancel notifications.",
+    } satisfies ReminderError;
+  }
 };
