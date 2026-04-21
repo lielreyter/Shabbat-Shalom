@@ -7,7 +7,25 @@ export type ZmanimResult = {
 
 const ZMANIM_CACHE_PREFIX = "zmanim:";
 
-const todayStr = (): string => new Date().toISOString().slice(0, 10);
+const todayStr = (tzid?: string): string => {
+  if (tzid) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tzid,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const y = parts.find((p) => p.type === "year")!.value;
+      const m = parts.find((p) => p.type === "month")!.value;
+      const d = parts.find((p) => p.type === "day")!.value;
+      return `${y}-${m}-${d}`;
+    } catch {
+      // fall through to UTC
+    }
+  }
+  return new Date().toISOString().slice(0, 10);
+};
 
 const cacheKey = (lat: number, lon: number, date: string): string =>
   `${ZMANIM_CACHE_PREFIX}${lat.toFixed(2)}_${lon.toFixed(2)}_${date}`;
@@ -44,7 +62,7 @@ export const getCachedZmanim = async (
   lon: number,
   tzid: string
 ): Promise<ZmanimResult> => {
-  const date = todayStr();
+  const date = todayStr(tzid);
   const key = cacheKey(lat, lon, date);
 
   const cached = await AsyncStorage.getItem(key);

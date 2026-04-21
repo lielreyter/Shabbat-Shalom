@@ -68,6 +68,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     streakVisibility: data.streakVisibility ?? "public",
     tefillinBuddyUids: Array.isArray(data.tefillinBuddyUids) ? data.tefillinBuddyUids : [],
     buddyChatIds: Array.isArray(data.buddyChatIds) ? data.buddyChatIds : [],
+    fcmToken: data.fcmToken ?? null,
   };
 };
 
@@ -127,6 +128,7 @@ export const createUserProfile = async ({
     longitude: null,
     tefillinBuddyUids: [],
     buddyChatIds: [],
+    fcmToken: null,
   };
 
   await setDoc(userDocRef(uid), payload);

@@ -1,5 +1,4 @@
 import { NativeModules } from "react-native";
-import { DEV_MODE } from "../config/devMode";
 
 export enum ReminderErrorCode {
   PERMISSION_DENIED = "PERMISSION_DENIED",
@@ -9,18 +8,6 @@ export enum ReminderErrorCode {
 export type ReminderError = {
   code: ReminderErrorCode;
   message: string;
-};
-
-type NotificationStubConfig = {
-  forcePermissionDenied: boolean;
-  forceScheduleFailure: boolean;
-  forceCancelFailure: boolean;
-};
-
-let stubConfig: NotificationStubConfig = {
-  forcePermissionDenied: false,
-  forceScheduleFailure: false,
-  forceCancelFailure: false,
 };
 
 type NotificationNativeModule = {
@@ -49,17 +36,10 @@ const ensureModule = (): NotificationNativeModule => {
   return NotificationModule;
 };
 
-// DEV MODE STUB — replace with real native implementation.
-export const setNotificationStubConfig = (
-  next: Partial<NotificationStubConfig>
-): void => {
-  stubConfig = { ...stubConfig, ...next };
-};
-
 export const requestNotificationPermission = async (): Promise<boolean> => {
-  if (DEV_MODE) {
-    console.log("DEV MODE STUB — notification permission requested.");
-    return !stubConfig.forcePermissionDenied;
+  if (!NotificationModule) {
+    console.warn("NotificationsService native module not available.");
+    return false;
   }
   try {
     return await ensureModule().requestPermission();
@@ -78,20 +58,8 @@ export const scheduleDailyNotification = async (
   time: string,
   metadata: Record<string, string>
 ): Promise<void> => {
-  if (DEV_MODE) {
-    console.log("DEV MODE STUB — schedule notification:", {
-      id,
-      title,
-      body,
-      time,
-      metadata,
-    });
-    if (stubConfig.forceScheduleFailure) {
-      throw {
-        code: ReminderErrorCode.SCHEDULING_FAILED,
-        message: "Failed to schedule notification (stub).",
-      } satisfies ReminderError;
-    }
+  if (!NotificationModule) {
+    console.warn("NotificationsService native module not available — skipping schedule.");
     return;
   }
   try {
@@ -105,14 +73,8 @@ export const scheduleDailyNotification = async (
 };
 
 export const cancelNotificationById = async (id: string): Promise<void> => {
-  if (DEV_MODE) {
-    console.log("DEV MODE STUB — cancel notification by id:", id);
-    if (stubConfig.forceCancelFailure) {
-      throw {
-        code: ReminderErrorCode.SCHEDULING_FAILED,
-        message: "Failed to cancel notification (stub).",
-      } satisfies ReminderError;
-    }
+  if (!NotificationModule) {
+    console.warn("NotificationsService native module not available — skipping cancel.");
     return;
   }
   try {
@@ -126,14 +88,8 @@ export const cancelNotificationById = async (id: string): Promise<void> => {
 };
 
 export const cancelAllNotifications = async (): Promise<void> => {
-  if (DEV_MODE) {
-    console.log("DEV MODE STUB — cancel all notifications.");
-    if (stubConfig.forceCancelFailure) {
-      throw {
-        code: ReminderErrorCode.SCHEDULING_FAILED,
-        message: "Failed to cancel notifications (stub).",
-      } satisfies ReminderError;
-    }
+  if (!NotificationModule) {
+    console.warn("NotificationsService native module not available — skipping cancel all.");
     return;
   }
   try {

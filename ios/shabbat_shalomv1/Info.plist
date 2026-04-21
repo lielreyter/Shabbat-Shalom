@@ -33,6 +33,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Used during development to connect to the React Native bundler. This will not appear in the production release.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to take tefillin photos for your buddy streak</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

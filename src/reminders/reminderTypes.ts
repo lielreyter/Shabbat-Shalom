@@ -1,6 +1,7 @@
 export enum ReminderType {
   MODEH_ANI = "MODEH_ANI",
   TEFILLIN = "TEFILLIN",
+  SHEMA = "SHEMA",
   SHABBAT_PREP = "SHABBAT_PREP",
 }
 
@@ -11,6 +12,9 @@ export type ReminderConfig = {
   title: string;
   body: string;
   metadata?: Record<string, string>;
+  // Weekday numbers to skip (0 = Sunday … 6 = Saturday). Used to skip
+  // Shabbat-day for tefillin even when shabbatTimes are missing/stale.
+  skipWeekdays?: number[];
 };
 
 export enum ReminderErrorCode {

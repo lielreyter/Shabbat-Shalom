@@ -3,7 +3,6 @@ import {
   ShabbatModeError,
   ShabbatModeErrorCode,
 } from "../shabbatMode/shabbatModeTypes";
-import { DEV_MODE } from "../config/devMode";
 
 type ScreenTimeNativeModule = {
   requestAuthorization: () => Promise<boolean>;
@@ -13,25 +12,6 @@ type ScreenTimeNativeModule = {
 
 const ScreenTimeModule =
   NativeModules.ScreenTimeService as ScreenTimeNativeModule | undefined;
-
-type ScreenTimeStubConfig = {
-  forcePermissionDenied: boolean;
-  forceEnableFailure: boolean;
-  forceDisableFailure: boolean;
-};
-
-let stubConfig: ScreenTimeStubConfig = {
-  forcePermissionDenied: false,
-  forceEnableFailure: false,
-  forceDisableFailure: false,
-};
-
-// DEV MODE STUB — replace with real native implementation.
-export const setScreenTimeStubConfig = (
-  next: Partial<ScreenTimeStubConfig>
-): void => {
-  stubConfig = { ...stubConfig, ...next };
-};
 
 const ensureIos = (): void => {
   if (Platform.OS !== "ios") {
@@ -54,13 +34,9 @@ const ensureModule = (): ScreenTimeNativeModule => {
 
 export const requestScreenTimePermission = async (): Promise<boolean> => {
   ensureIos();
-  if (DEV_MODE) {
-    // DEV MODE STUB — replace with real native implementation.
-    console.log("DEV MODE STUB — Screen Time permission requested.");
-    if (stubConfig.forcePermissionDenied) {
-      return false;
-    }
-    return true;
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — returning false.");
+    return false;
   }
   const module = ensureModule();
   try {
@@ -76,15 +52,8 @@ export const requestScreenTimePermission = async (): Promise<boolean> => {
 
 export const enableFullAppBlocking = async (): Promise<void> => {
   ensureIos();
-  if (DEV_MODE) {
-    // DEV MODE STUB — replace with real native implementation.
-    console.log("DEV MODE STUB — Screen Time blocking enabled.");
-    if (stubConfig.forceEnableFailure) {
-      throw {
-        code: ShabbatModeErrorCode.BLOCKING_FAILED,
-        message: "Failed to enable Screen Time blocking (stub).",
-      } satisfies ShabbatModeError;
-    }
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping enable.");
     return;
   }
   const module = ensureModule();
@@ -101,15 +70,8 @@ export const enableFullAppBlocking = async (): Promise<void> => {
 
 export const disableAllBlocking = async (): Promise<void> => {
   ensureIos();
-  if (DEV_MODE) {
-    // DEV MODE STUB — replace with real native implementation.
-    console.log("DEV MODE STUB — Screen Time blocking disabled.");
-    if (stubConfig.forceDisableFailure) {
-      throw {
-        code: ShabbatModeErrorCode.BLOCKING_FAILED,
-        message: "Failed to disable Screen Time blocking (stub).",
-      } satisfies ShabbatModeError;
-    }
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping disable.");
     return;
   }
   const module = ensureModule();

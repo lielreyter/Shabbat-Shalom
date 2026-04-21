@@ -228,14 +228,21 @@ export const sendBuddyMessage = async (
       senderLon != null &&
       senderTzid
     ) {
-      const inSunWindow = await isWithinSunWindow(senderLat, senderLon, senderTzid)
-        .catch(() => false);
-      if (!inSunWindow) {
-        throw new Error(
-          "The sun is not visible — tefillin photos can only be sent between sunrise and sunset"
-        );
+      try {
+        const inSunWindow = await isWithinSunWindow(senderLat, senderLon, senderTzid);
+        if (!inSunWindow) {
+          throw new Error(
+            "The sun is not visible — tefillin photos can only be sent between sunrise and sunset"
+          );
+        }
+        streakEligible = true;
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("sun is not visible")) {
+          throw e;
+        }
+        // Zmanim fetch failed — allow photo but without streak eligibility
+        streakEligible = false;
       }
-      streakEligible = true;
     }
   }
 

@@ -49,4 +49,6 @@ export interface UserProfile {
 
   tefillinBuddyUids: string[];
   buddyChatIds: string[];
+
+  fcmToken: string | null;
 }

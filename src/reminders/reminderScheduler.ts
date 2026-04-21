@@ -64,7 +64,8 @@ const isInsideShabbat = (
 const findNextValidCandidate = (
   hours: number,
   minutes: number,
-  shabbatTimes: ShabbatTimes
+  shabbatTimes: ShabbatTimes,
+  skipWeekdays?: number[]
 ): Date | null => {
   const now = Date.now();
 
@@ -74,6 +75,9 @@ const findNextValidCandidate = (
       continue;
     }
     if (isInsideShabbat(candidate, shabbatTimes)) {
+      continue;
+    }
+    if (skipWeekdays && skipWeekdays.includes(candidate.getDay())) {
       continue;
     }
     return candidate;
@@ -108,7 +112,8 @@ export const scheduleNextReminder = async (
   const candidate = findNextValidCandidate(
     parsed.hours,
     parsed.minutes,
-    shabbatTimes
+    shabbatTimes,
+    config.skipWeekdays
   );
   if (!candidate) {
     throw {

@@ -5,7 +5,6 @@ import {
   ShabbatModeError,
   ShabbatModeErrorCode,
 } from "./shabbatModeTypes";
-import { DEV_MODE } from "../config/devMode";
 
 type SchedulerNativeModule = {
   scheduleShabbatMode: (startIso: string, endIso: string) => Promise<void>;
@@ -24,23 +23,6 @@ type ScheduleRecord = {
   weekId: string;
   timezone: string;
   updatedAtIso: string;
-};
-
-type SchedulerStubConfig = {
-  forceScheduleFailure: boolean;
-  forceCancelFailure: boolean;
-};
-
-let stubConfig: SchedulerStubConfig = {
-  forceScheduleFailure: false,
-  forceCancelFailure: false,
-};
-
-// DEV MODE STUB — replace with real native implementation.
-export const setSchedulerStubConfig = (
-  next: Partial<SchedulerStubConfig>
-): void => {
-  stubConfig = { ...stubConfig, ...next };
 };
 
 const ensureIos = (): void => {
@@ -97,19 +79,10 @@ export const scheduleShabbatMode = async (
   times: ShabbatTimes
 ): Promise<void> => {
   ensureIos();
-  if (DEV_MODE) {
-    // DEV MODE STUB — replace with real native implementation.
-    console.log(
-      "DEV MODE STUB — scheduling Shabbat Mode:",
-      times.shabbatStart.toISOString(),
-      times.shabbatEnd.toISOString()
-    );
-    if (stubConfig.forceScheduleFailure) {
-      throw {
-        code: ShabbatModeErrorCode.SCHEDULING_FAILED,
-        message: "Failed to schedule Shabbat Mode (stub).",
-      } satisfies ShabbatModeError;
-    }
+
+  if (!SchedulerModule) {
+    // Native module not yet installed — persist record locally so the app
+    // can track the schedule once the module is added.
     await writeScheduleRecord({
       startIso: times.shabbatStart.toISOString(),
       endIso: times.shabbatEnd.toISOString(),
@@ -119,6 +92,7 @@ export const scheduleShabbatMode = async (
     });
     return;
   }
+
   const module = ensureModule();
   const weekId = computeWeekId(times);
   const existing = await readScheduleRecord();
@@ -155,18 +129,12 @@ export const scheduleShabbatMode = async (
 
 export const cancelScheduledShabbatMode = async (): Promise<void> => {
   ensureIos();
-  if (DEV_MODE) {
-    // DEV MODE STUB — replace with real native implementation.
-    console.log("DEV MODE STUB — canceling Shabbat Mode schedule.");
-    if (stubConfig.forceCancelFailure) {
-      throw {
-        code: ShabbatModeErrorCode.SCHEDULING_FAILED,
-        message: "Failed to cancel Shabbat Mode schedule (stub).",
-      } satisfies ShabbatModeError;
-    }
+
+  if (!SchedulerModule) {
     await AsyncStorage.removeItem(SCHEDULE_STORAGE_KEY);
     return;
   }
+
   const module = ensureModule();
   try {
     await module.cancelScheduledShabbatMode();

@@ -54,7 +54,8 @@ import {
   setIntentFlowHandler,
 } from "./src/shabbatMode/shabbatIntentFlow";
 import { scheduleShabbatMode } from "./src/shabbatMode/shabbatModeScheduler";
-import { getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
+import { getCurrentState, getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
+import { ShabbatModeStatus } from "./src/shabbatMode/shabbatModeTypes";
 import {
   checkEmailVerified,
   confirmPhoneSignIn,
@@ -134,6 +135,7 @@ import {
 import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
 import { getCachedZmanim, getSunWindowMessage } from "./src/friends/zmanimService";
 import { evaluateAllStreaks } from "./src/friends/streakEvaluator";
+import { enableFullAppBlocking, disableAllBlocking } from "./src/ios/screenTimeService";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import { CameraRoll } from "@react-native-camera-roll/camera-roll";
 
@@ -213,6 +215,8 @@ const INTENT_HISTORY_KEY = "intentHistory:v1";
 const TEFILLIN_DATE_KEY_PREFIX = "tefillinConfirmedDay:v2:";
 const TEFILLIN_IGNORE_KEY_PREFIX = "tefillinPromptIgnored:v1:";
 const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
+const MODEH_ANI_DONE_PREFIX = "modehAniDone:v1:";
+const SHEMA_DONE_PREFIX = "shemaDone:v1:";
 
 
 const generateTimes = (startH: number, endH: number): string[] => {
@@ -489,15 +493,17 @@ export default function App() {
   /* ── daily info ── */
   const [showDailyInfo, setShowDailyInfo] = useState<string | null>(null);
 
-  /* ── prayer overlay ── */
-  const [showPrayerOverlay, setShowPrayerOverlay] = useState(false);
-  const [prayerOverlayType, setPrayerOverlayType] = useState<"modehAni" | "shema" | null>(null);
+  /* ── prayer blocking overlay (blocks apps until user acknowledges) ──
+     This is the single Modeh Ani / Shema flow. It only triggers at the
+     wake/bed time the user picked, and only once per day (per prayer). */
+  const [prayerBlockingType, setPrayerBlockingType] = useState<"modehAni" | "shema" | null>(null);
 
   /* ── break shabbat confirmation ── */
   const [showBreakConfirm, setShowBreakConfirm] = useState(false);
 
   /* ── congregation settings ── */
   const [congregationSettingsVisible, setCongregationSettingsVisible] = useState(false);
+  const [showCongregationLeaderboard, setShowCongregationLeaderboard] = useState(false);
 
   /* ── congregation ── */
   const [nearbyCongregations, setNearbyCongregations] = useState<NearbyCongregation[]>([]);
@@ -685,6 +691,12 @@ export default function App() {
       setSoloTefillinPromptVisible(false);
       return;
     }
+    // Tefillin is not worn on Shabbat (Saturday). Suppress the prompt entirely.
+    if (new Date().getDay() === 6) {
+      setTefillinConfirmedToday(false);
+      setSoloTefillinPromptVisible(false);
+      return;
+    }
     const promptDay = await getSoloTefillinPromptDay();
     const [answeredDay, ignored] = await Promise.all([
       AsyncStorage.getItem(tefillinDateKey(user.uid)),
@@ -694,6 +706,65 @@ export default function App() {
     setTefillinConfirmedToday(confirmed);
     setSoloTefillinPromptVisible(!confirmed && ignored !== "true");
   }, [getSoloTefillinPromptDay, hasTefillinBuddies, user]);
+
+  /* ── prayer blocking (Modeh Ani / Shema block apps until read) ──
+     Behaves like a Screen Time block: only triggers if the user enabled
+     the toggle AND set a wake/bed time AND that time has arrived today.
+     Once dismissed, a per-day flag suppresses it for the rest of the day. */
+  const checkPrayerBlocking = useCallback(async () => {
+    if (!user) return;
+
+    // If Shabbat mode is currently active it already blocks all apps —
+    // don't layer the prayer blocker on top (and don't risk toggling
+    // the shared screen-time blocker out from under it).
+    const shabbatActive = getCurrentState().status === ShabbatModeStatus.ACTIVE;
+
+    const now = new Date();
+    const currentHHMM = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const todayKey = todayDateStr();
+
+    if (user.wantsModehAniReminder && user.wakeUpTime) {
+      const wakeTime24 = to24h(user.wakeUpTime);
+      const doneKey = `${MODEH_ANI_DONE_PREFIX}${todayKey}`;
+      const done = await AsyncStorage.getItem(doneKey);
+      if (!done && currentHHMM >= wakeTime24) {
+        setPrayerBlockingType("modehAni");
+        if (!shabbatActive) enableFullAppBlocking().catch(() => {});
+        return;
+      }
+    }
+
+    if (user.wantsShemaReminder && user.bedTime) {
+      const bedTime24 = to24h(user.bedTime);
+      const doneKey = `${SHEMA_DONE_PREFIX}${todayKey}`;
+      const done = await AsyncStorage.getItem(doneKey);
+      if (!done && currentHHMM >= bedTime24) {
+        setPrayerBlockingType("shema");
+        if (!shabbatActive) enableFullAppBlocking().catch(() => {});
+        return;
+      }
+    }
+
+    setPrayerBlockingType(null);
+  }, [user]);
+
+  const onDismissPrayerBlocking = useCallback(async () => {
+    const todayKey = todayDateStr();
+    if (prayerBlockingType === "modehAni") {
+      await AsyncStorage.setItem(`${MODEH_ANI_DONE_PREFIX}${todayKey}`, "true");
+    } else if (prayerBlockingType === "shema") {
+      await AsyncStorage.setItem(`${SHEMA_DONE_PREFIX}${todayKey}`, "true");
+    }
+    setPrayerBlockingType(null);
+    // Only release the screen-time block if Shabbat mode isn't keeping it on.
+    if (getCurrentState().status !== ShabbatModeStatus.ACTIVE) {
+      disableAllBlocking().catch(() => {});
+    }
+  }, [prayerBlockingType]);
+
+  useEffect(() => {
+    checkPrayerBlocking().catch(() => {});
+  }, [appForegroundTick, checkPrayerBlocking]);
 
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
@@ -972,30 +1043,41 @@ export default function App() {
     }
   }, [activeBuddyChat, buddyChats]);
 
-  /* ── streak evaluation (runs once per app session after auth) ── */
+  /* ── streak evaluation (runs on mount and on app foreground) ── */
   useEffect(() => {
-    if (!user || streakEvalDone.current) return;
-    if (user.buddyChatIds.length === 0) return;
-    streakEvalDone.current = true;
-    evaluateAllStreaks(user.uid)
-      .then(() => {
-        getUserBuddyChats(user.uid)
-          .then(setBuddyChats)
-          .catch(() => {});
-        getUserProfile(user.uid).then((updated) => {
-          if (updated) setUser(updated);
-        }).catch(() => {});
-      })
-      .catch(() => {});
-  }, [user]);
+    if (!user || user.buddyChatIds.length === 0) return;
+    const runEval = () => {
+      evaluateAllStreaks(user.uid)
+        .then(() => {
+          getUserBuddyChats(user.uid).then(setBuddyChats).catch(() => {});
+          getUserProfile(user.uid).then((updated) => {
+            if (updated) setUser(updated);
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    };
+    if (!streakEvalDone.current) {
+      streakEvalDone.current = true;
+      runEval();
+    }
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") runEval();
+    });
+    return () => sub.remove();
+  }, [user?.uid, user?.buddyChatIds.length]);
 
   /* ── buddy chat message subscription ── */
+  // Depend on chat id (not the chat object) so this effect doesn't re-run
+  // every time the parent buddyChats snapshot updates lastActivityAt and
+  // produces a new object reference. Re-running the effect would clear the
+  // current message list for one frame, briefly showing the empty state.
   useEffect(() => {
-    if (!activeBuddyChat || socialSubTab !== "buddyChat") return;
+    const chatId = activeBuddyChat?.id;
+    if (!chatId || socialSubTab !== "buddyChat") return;
     setBuddyChatMessages([]);
-    const unsubscribe = subscribeToBuddyMessages(activeBuddyChat.id, setBuddyChatMessages);
+    const unsubscribe = subscribeToBuddyMessages(chatId, setBuddyChatMessages);
     return () => unsubscribe();
-  }, [activeBuddyChat, socialSubTab]);
+  }, [activeBuddyChat?.id, socialSubTab]);
 
   useEffect(() => {
     if (socialSubTab === "buddyChat" && activeBuddyChat) {
@@ -1003,15 +1085,22 @@ export default function App() {
     }
   }, [activeBuddyChat?.id, socialSubTab, queueBuddyChatSnapToBottom]);
 
-  /* ── check sun window when entering buddy chat ── */
+  /* ── check sun window when entering buddy chat + on app foreground ── */
   useEffect(() => {
     if (socialSubTab !== "buddyChat" || !activeBuddyChat || !currentLocation) {
       setSunBlockedMessage(null);
       return;
     }
-    getSunWindowMessage(currentLocation.latitude, currentLocation.longitude, currentLocation.timezone)
-      .then(setSunBlockedMessage)
-      .catch(() => setSunBlockedMessage(null));
+    const checkSun = () => {
+      getSunWindowMessage(currentLocation.latitude, currentLocation.longitude, currentLocation.timezone)
+        .then(setSunBlockedMessage)
+        .catch(() => setSunBlockedMessage(null));
+    };
+    checkSun();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkSun();
+    });
+    return () => sub.remove();
   }, [socialSubTab, activeBuddyChat, currentLocation]);
 
   /* ── group daily streak status ── */
@@ -1279,7 +1368,7 @@ export default function App() {
     try {
       if (next) {
         const tefillinTime = addMinutesToTimeStr(user.wakeUpTime ?? "07:00", 15);
-        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
+        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!", skipWeekdays: [6] }, shabbatTimes);
       } else {
         await cancelReminder(ReminderType.TEFILLIN);
       }
@@ -1313,13 +1402,11 @@ export default function App() {
   }, [shabbatTimes, user]);
 
   const onToggleModehAni = useCallback(async () => {
-    if (!user || !shabbatTimes) return;
+    if (!user) return;
     const next = !user.wantsModehAniReminder;
     setActionLoading(true);
     try {
-      if (next) {
-        await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: to24h(user.wakeUpTime ?? "07:00"), title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
-      } else {
+      if (!next) {
         await cancelReminder(ReminderType.MODEH_ANI);
       }
       const updated = await updateUserProfile(user.uid, { wantsModehAniReminder: next });
@@ -1329,13 +1416,16 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [shabbatTimes, user]);
+  }, [user]);
 
   const onToggleShema = useCallback(async () => {
     if (!user) return;
     const next = !user.wantsShemaReminder;
     setActionLoading(true);
     try {
+      if (!next) {
+        await cancelReminder(ReminderType.SHEMA);
+      }
       const updated = await updateUserProfile(user.uid, { wantsShemaReminder: next });
       setUser(updated);
     } catch (error) {
@@ -1350,14 +1440,9 @@ export default function App() {
     try {
       const updated = await updateUserProfile(user.uid, { wakeUpTime: time });
       setUser(updated);
-      if (shabbatTimes) {
-        if (updated.wantsModehAniReminder) {
-          await scheduleNextReminder({ type: ReminderType.MODEH_ANI, enabled: true, time: to24h(time), title: "Modeh Ani", body: "Start your day with gratitude — say Modeh Ani." }, shabbatTimes);
-        }
-        if (updated.wantsMorningReminders) {
-          const tefillinTime = addMinutesToTimeStr(time, 15);
-          await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!" }, shabbatTimes);
-        }
+      if (shabbatTimes && updated.wantsMorningReminders) {
+        const tefillinTime = addMinutesToTimeStr(time, 15);
+        await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!", skipWeekdays: [6] }, shabbatTimes);
       }
     } catch { /* keep going */ }
   }, [shabbatTimes, user]);
@@ -1927,6 +2012,16 @@ export default function App() {
         user.timeZone,
         fromCamera
       );
+      if (fromCamera) {
+        evaluateAllStreaks(user.uid)
+          .then(() => {
+            getUserBuddyChats(user.uid).then(setBuddyChats).catch(() => {});
+            getUserProfile(user.uid).then((updated) => {
+              if (updated) setUser(updated);
+            }).catch(() => {});
+          })
+          .catch(() => {});
+      }
     } catch (error) {
       Alert.alert("Tefillin Photo", errorMessage(error, "Failed to send image."));
     } finally {
@@ -2220,7 +2315,7 @@ export default function App() {
                 <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
               </Pressable>
             </View>
-            <Text style={s.toggleHint}>Say Modeh Ani first thing each morning</Text>
+            <Text style={s.toggleHint}>Blocks your apps at wake-up until you read the prayer</Text>
           </View>
           <Switch
             value={Boolean(user?.wantsModehAniReminder)}
@@ -2237,10 +2332,10 @@ export default function App() {
             <Text style={s.timeSectionTitle}>Wake Up Time</Text>
             <Text style={s.toggleHint}>
               {user?.wantsModehAniReminder && user?.wantsMorningReminders
-                ? "Modeh Ani at this time, tefillin 15 min later"
+                ? "Modeh Ani prayer overlay at this time, tefillin notification 15 min later"
                 : user?.wantsModehAniReminder
-                  ? "Modeh Ani reminder at this time"
-                  : "Tefillin reminder 15 min after this time"}
+                  ? "Modeh Ani prayer overlay at this time"
+                  : "Tefillin notification 15 min after this time"}
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
               {WAKE_TIMES.map((t) => (
@@ -2261,7 +2356,7 @@ export default function App() {
                 <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
               </Pressable>
             </View>
-            <Text style={s.toggleHint}>Say Shema before going to sleep</Text>
+            <Text style={s.toggleHint}>Blocks your apps at bedtime until you read the prayer</Text>
           </View>
           <Switch
             value={Boolean(user?.wantsShemaReminder)}
@@ -2507,16 +2602,20 @@ export default function App() {
           {/* Congregation Members */}
           {congregationMembers.length > 0 && (
             <>
-              <View style={s.leaderboardHeader}>
-                <Text style={s.leaderboardHeaderText}>{currentCongregation?.name ?? "Congregation"}</Text>
-              </View>
-              <View style={s.leaderboardCard}>
-                {congregationMembers
-                  .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
-                  .map((member, idx) => (
-                    <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} congregationName={currentCongregation?.name ?? null} />
-                  ))}
-              </View>
+              <Pressable style={s.leaderboardHeader} onPress={() => setShowCongregationLeaderboard((v) => !v)}>
+                <Text style={s.leaderboardHeaderText}>
+                  {currentCongregation?.name ?? "Congregation"} {showCongregationLeaderboard ? "▲" : "▼"}
+                </Text>
+              </Pressable>
+              {showCongregationLeaderboard && (
+                <View style={s.leaderboardCard}>
+                  {congregationMembers
+                    .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
+                    .map((member, idx) => (
+                      <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} congregationName={currentCongregation?.name ?? null} />
+                    ))}
+                </View>
+              )}
             </>
           )}
 
@@ -2665,7 +2764,8 @@ export default function App() {
           ) : (
             <>
               <FlatList
-                data={chatMessages}
+                inverted
+                data={[...chatMessages].reverse()}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={s.chatList}
                 renderItem={({ item }) => (
@@ -2698,7 +2798,8 @@ export default function App() {
       {socialSubTab === "dm" && chattingWith && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
           <FlatList
-            data={dmMessages}
+            inverted
+            data={[...dmMessages].reverse()}
             keyExtractor={(item) => item.id}
             contentContainerStyle={s.chatList}
             renderItem={({ item }) => (
@@ -3526,31 +3627,29 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* Prayer Overlay Modal */}
-      <Modal visible={showPrayerOverlay} transparent animationType="fade">
-        <View style={[s.modalOverlay, { backgroundColor: "rgba(0,0,0,0.7)" }]}>
-          <View style={[s.modalCard, { alignItems: "center" }]}>
-            {prayerOverlayType === "modehAni" && (
-              <>
-                <Text style={s.modalTitle}>Modeh Ani</Text>
-                <Text style={s.prayerHebrew}>{PRAYER_TEXTS.modehAni.hebrew}</Text>
-                <Text style={s.prayerEnglish}>{PRAYER_TEXTS.modehAni.english}</Text>
-              </>
-            )}
-            {prayerOverlayType === "shema" && (
-              <>
-                <Text style={s.modalTitle}>Shema</Text>
-                <Text style={s.prayerHebrew}>{PRAYER_TEXTS.shema.hebrew}</Text>
-                <Text style={s.prayerEnglish}>{PRAYER_TEXTS.shema.english}</Text>
-              </>
-            )}
-            <Pressable style={[s.primaryBtn, { marginTop: 20, width: "100%" }]} onPress={() => { setShowPrayerOverlay(false); setPrayerOverlayType(null); }}>
-              <Text style={s.primaryBtnText}>OK</Text>
-            </Pressable>
-            <Pressable style={s.ghostBtn} onPress={() => { setShowPrayerOverlay(false); setPrayerOverlayType(null); }}>
-              <Text style={s.ghostBtnText}>Dismiss</Text>
-            </Pressable>
-          </View>
+      {/* Prayer Blocking Overlay — blocks all app usage until user reads the prayer */}
+      <Modal visible={prayerBlockingType !== null} animationType="fade">
+        <View style={s.prayerBlockingContainer}>
+          <StatusBar barStyle="light-content" />
+          {prayerBlockingType === "modehAni" && (
+            <>
+              <Text style={s.prayerBlockingLabel}>Good Morning</Text>
+              <Text style={s.prayerBlockingTitle}>Modeh Ani</Text>
+              <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.modehAni.hebrew}</Text>
+              <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.modehAni.english}</Text>
+            </>
+          )}
+          {prayerBlockingType === "shema" && (
+            <>
+              <Text style={s.prayerBlockingLabel}>Good Night</Text>
+              <Text style={s.prayerBlockingTitle}>Shema</Text>
+              <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.shema.hebrew}</Text>
+              <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.shema.english}</Text>
+            </>
+          )}
+          <Pressable style={s.prayerBlockingBtn} onPress={onDismissPrayerBlocking}>
+            <Text style={s.prayerBlockingBtnText}>I have read this</Text>
+          </Pressable>
         </View>
       </Modal>
 
@@ -3987,9 +4086,61 @@ const s = StyleSheet.create({
   holidayName: { fontSize: 15, fontWeight: "700", color: C.text },
   holidayTime: { fontSize: 13, color: C.textSecondary, marginTop: 2 },
 
-  /* prayer overlay */
+  /* prayer overlay (manual preview in modal) */
   prayerHebrew: { fontSize: 20, fontWeight: "600", color: C.text, textAlign: "center", marginTop: 20, lineHeight: 32 },
   prayerEnglish: { fontSize: 14, color: C.textSecondary, textAlign: "center", marginTop: 16, lineHeight: 22, fontStyle: "italic" },
+
+  /* prayer blocking overlay (full-screen blocker) */
+  prayerBlockingContainer: {
+    flex: 1,
+    backgroundColor: "#1a1a2e",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+  },
+  prayerBlockingLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
+    textTransform: "uppercase",
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  prayerBlockingTitle: {
+    fontSize: 32,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    marginBottom: 32,
+  },
+  prayerBlockingHebrew: {
+    fontSize: 22,
+    fontWeight: "600",
+    color: "#e8d5b7",
+    textAlign: "center",
+    lineHeight: 36,
+    marginBottom: 24,
+  },
+  prayerBlockingEnglish: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.7)",
+    textAlign: "center",
+    lineHeight: 24,
+    fontStyle: "italic",
+    marginBottom: 40,
+  },
+  prayerBlockingBtn: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    borderRadius: 20,
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+  },
+  prayerBlockingBtnText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
 
   /* buttons */
   primaryBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginTop: 12 },
@@ -4051,7 +4202,7 @@ const s = StyleSheet.create({
   /* chat */
   chatThread: { flex: 1, backgroundColor: C.bg },
   chatThreadPeek: { backgroundColor: C.surface },
-  chatList: { paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1, justifyContent: "flex-end" },
+  chatList: { paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1 },
   buddyChatList: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, flexGrow: 1 },
   buddyChatListEmpty: { justifyContent: "center" },
   buddyChatPeekSpacer: { justifyContent: "flex-end", alignItems: "center", paddingBottom: 12 },
