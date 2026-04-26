@@ -59,6 +59,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     shabbatBlockLevel: data.shabbatBlockLevel ?? "none",
     wantsModehAniReminder: data.wantsModehAniReminder ?? false,
     wantsShemaReminder: data.wantsShemaReminder ?? false,
+    wantsChatNotifications: data.wantsChatNotifications ?? true,
     intentVisibility: data.intentVisibility ?? "private",
     friendCode: data.friendCode ?? uid.slice(0, 8).toUpperCase(),
     friendUids: Array.isArray(data.friendUids) ? data.friendUids : [],
@@ -120,6 +121,7 @@ export const createUserProfile = async ({
     shabbatBlockLevel: "none",
     wantsModehAniReminder: false,
     wantsShemaReminder: false,
+    wantsChatNotifications: true,
     intentVisibility: "private",
     streakVisibility: "public",
     friendUids: [],
@@ -186,6 +188,9 @@ export const getOrCreateUserProfileOnLogin = async ({
   }
   if (typeof existing.wantsShabbatReminders !== "boolean") {
     updates.wantsShabbatReminders = true;
+  }
+  if (typeof existing.wantsChatNotifications !== "boolean") {
+    updates.wantsChatNotifications = true;
   }
 
   await updateDoc(userDocRef(uid), updates);

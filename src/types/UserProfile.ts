@@ -35,6 +35,7 @@ export interface UserProfile {
 
   wantsModehAniReminder: boolean;
   wantsShemaReminder: boolean;
+  wantsChatNotifications: boolean;
 
   intentVisibility: "public" | "friends" | "private";
 

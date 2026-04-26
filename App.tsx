@@ -135,7 +135,16 @@ import {
 import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
 import { getCachedZmanim, getSunWindowMessage } from "./src/friends/zmanimService";
 import { evaluateAllStreaks } from "./src/friends/streakEvaluator";
-import { enableFullAppBlocking, disableAllBlocking } from "./src/ios/screenTimeService";
+import {
+  clearChatPushToken,
+  registerForChatPushNotifications,
+  subscribeToChatPushTokenRefresh,
+} from "./src/notifications/pushRegistration";
+import {
+  enableFullAppBlocking,
+  disableAllBlocking,
+  requestScreenTimePermission,
+} from "./src/ios/screenTimeService";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import { CameraRoll } from "@react-native-camera-roll/camera-roll";
 
@@ -183,7 +192,7 @@ function CameraIcon({ size = 22, color = "#FFF" }: { size?: number; color?: stri
 
 type TabKey = "home" | "social" | "parasha";
 type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat" | "groupCreate";
-type BlockLevel = "full" | "medium" | "custom" | "none";
+type BlockLevel = "full" | "none";
 type RestrictionSetting = {
   id: string;
   label: string;
@@ -199,18 +208,11 @@ type ShabbatUiState = {
   firstRestrictionPromptWeekId: string | null;
 };
 
-type CommonApp = {
-  id: string;
-  name: string;
-  category: string;
-};
-
 /* ─── constants ──────────────────────────────────────────────── */
 
 const RESTRICTIONS_KEY = "restrictions:v1";
 const SHABBAT_UI_STATE_KEY = "shabbatUiState:v1";
 const BLOCK_LEVEL_KEY = "blockLevel:v1";
-const CUSTOM_APP_BLOCKS_KEY = "customAppBlocks:v1";
 const INTENT_HISTORY_KEY = "intentHistory:v1";
 const TEFILLIN_DATE_KEY_PREFIX = "tefillinConfirmedDay:v2:";
 const TEFILLIN_IGNORE_KEY_PREFIX = "tefillinPromptIgnored:v1:";
@@ -233,42 +235,6 @@ const generateTimes = (startH: number, endH: number): string[] => {
 
 const WAKE_TIMES = generateTimes(4, 11);
 const BED_TIMES = generateTimes(19, 24);
-
-const COMMON_APPS: CommonApp[] = [
-  { id: "instagram", name: "Instagram", category: "Social" },
-  { id: "tiktok", name: "TikTok", category: "Social" },
-  { id: "snapchat", name: "Snapchat", category: "Social" },
-  { id: "facebook", name: "Facebook", category: "Social" },
-  { id: "twitter", name: "X (Twitter)", category: "Social" },
-  { id: "reddit", name: "Reddit", category: "Social" },
-  { id: "threads", name: "Threads", category: "Social" },
-  { id: "bereal", name: "BeReal", category: "Social" },
-  { id: "youtube", name: "YouTube", category: "Streaming" },
-  { id: "netflix", name: "Netflix", category: "Streaming" },
-  { id: "hulu", name: "Hulu", category: "Streaming" },
-  { id: "spotify", name: "Spotify", category: "Streaming" },
-  { id: "hbomax", name: "Max (HBO)", category: "Streaming" },
-  { id: "disney", name: "Disney+", category: "Streaming" },
-  { id: "twitch", name: "Twitch", category: "Streaming" },
-  { id: "appletv", name: "Apple TV+", category: "Streaming" },
-  { id: "roblox", name: "Roblox", category: "Games" },
-  { id: "minecraft", name: "Minecraft", category: "Games" },
-  { id: "candycrush", name: "Candy Crush", category: "Games" },
-  { id: "clashroyale", name: "Clash Royale", category: "Games" },
-  { id: "clashofclans", name: "Clash of Clans", category: "Games" },
-  { id: "brawlstars", name: "Brawl Stars", category: "Games" },
-  { id: "fortnite", name: "Fortnite", category: "Games" },
-  { id: "whatsapp", name: "WhatsApp", category: "Messaging" },
-  { id: "telegram", name: "Telegram", category: "Messaging" },
-  { id: "discord", name: "Discord", category: "Messaging" },
-  { id: "gmail", name: "Gmail", category: "Productivity" },
-  { id: "slack", name: "Slack", category: "Productivity" },
-  { id: "safari", name: "Safari", category: "Browser" },
-  { id: "chrome", name: "Chrome", category: "Browser" },
-  { id: "amazon", name: "Amazon", category: "Shopping" },
-  { id: "uber", name: "Uber", category: "Other" },
-  { id: "doordash", name: "DoorDash", category: "Other" },
-];
 
 const DAILY_INFO: Record<string, { title: string; explanation: string }> = {
   tefillin: {
@@ -320,11 +286,7 @@ const RABBI_QUOTES: string[] = [
   "When you put on tefillin, you are crowning God as King over your thoughts, emotions, and actions.",
 ];
 
-const defaultRestrictions: RestrictionSetting[] = [
-  { id: "social", label: "Social apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
-  { id: "video", label: "Streaming apps", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
-  { id: "games", label: "Games", enabled: true, currentStreak: 0, longestStreak: 0, lastWeekId: null },
-];
+const defaultRestrictions: RestrictionSetting[] = [];
 
 const defaultShabbatUiState: ShabbatUiState = {
   lastIntentPromptWeekId: null,
@@ -334,8 +296,6 @@ const defaultShabbatUiState: ShabbatUiState = {
 
 const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string }> = {
   full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!" },
-  medium: { title: "Medium", desc: "Block social media & games. Start reclaiming your Shabbat." },
-  custom: { title: "Custom", desc: "Choose exactly which apps to block during Shabbat." },
   none: { title: "No Block", desc: "No apps blocked. Your streak will not grow." },
 };
 
@@ -472,7 +432,6 @@ export default function App() {
   const [restrictions, setRestrictions] = useState<RestrictionSetting[]>(defaultRestrictions);
   const [shabbatUiState, setShabbatUiState] = useState<ShabbatUiState>(defaultShabbatUiState);
   const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
-  const [customAppBlocks, setCustomAppBlocks] = useState<Record<string, boolean>>({});
   const [intentDraft, setIntentDraft] = useState("");
   const [savedIntentText, setSavedIntentText] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
@@ -609,14 +568,9 @@ export default function App() {
     return getParashaInfo(shabbatTimes.parsha);
   }, [shabbatTimes?.parsha]);
 
-  const hasCustomAppsBlocked = useMemo(() => {
-    return Object.values(customAppBlocks).some((v) => v);
-  }, [customAppBlocks]);
-
   const effectiveBlockLevel = useMemo((): BlockLevel => {
-    if (blockLevel === "custom" && !hasCustomAppsBlocked) return "none";
     return blockLevel;
-  }, [blockLevel, hasCustomAppsBlocked]);
+  }, [blockLevel]);
 
   const isStreakEligible = effectiveBlockLevel !== "none";
   const tefillinBuddyUids = useMemo(() => user?.tefillinBuddyUids ?? [], [user?.tefillinBuddyUids]);
@@ -782,11 +736,6 @@ export default function App() {
     await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
   }, []);
 
-  const saveCustomAppBlocks = useCallback(async (next: Record<string, boolean>) => {
-    setCustomAppBlocks(next);
-    await AsyncStorage.setItem(CUSTOM_APP_BLOCKS_KEY, JSON.stringify(next));
-  }, []);
-
   const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
     if (!user) return;
     setIntentHistory((prev) => ({ ...prev, [weekDate]: text }));
@@ -796,19 +745,19 @@ export default function App() {
   /* ── effects ── */
   useEffect(() => {
     const loadLocal = async () => {
-      const [rawR, rawU, rawB, rawCab, rawHO] = await Promise.all([
+      const [rawR, rawU, rawB, rawHO] = await Promise.all([
         AsyncStorage.getItem(RESTRICTIONS_KEY),
         AsyncStorage.getItem(SHABBAT_UI_STATE_KEY),
         AsyncStorage.getItem(BLOCK_LEVEL_KEY),
-        AsyncStorage.getItem(CUSTOM_APP_BLOCKS_KEY),
         AsyncStorage.getItem(HOLIDAY_OPTIN_KEY),
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
-      if (rawB && ["full", "medium", "custom", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
-      if (rawCab) { try { setCustomAppBlocks(JSON.parse(rawCab)); } catch { /* use defaults */ } }
+      if (rawB && ["full", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
+      if (rawB === "medium" || rawB === "custom") setBlockLevel("full");
       if (rawHO === "true") setHolidayOptIn(true);
       AsyncStorage.removeItem("tefillinBuddies:v1").catch(() => {});
+      AsyncStorage.removeItem("customAppBlocks:v1").catch(() => {});
     };
     loadLocal().catch(() => {});
   }, []);
@@ -850,6 +799,23 @@ export default function App() {
       if (updated) setUser(updated);
     }).catch(() => {});
   }, [appForegroundTick, user]);
+
+  useEffect(() => {
+    if (!user || !user.wantsChatNotifications) return;
+    let mounted = true;
+    registerForChatPushNotifications(user)
+      .then((updated) => {
+        if (mounted && updated) setUser(updated);
+      })
+      .catch(() => {});
+    const unsubscribe = subscribeToChatPushTokenRefresh(user, (updated) => {
+      if (mounted) setUser(updated);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [user]);
 
   useEffect(() => {
     refreshSoloTefillinPrompt().catch(() => {});
@@ -1401,11 +1367,51 @@ export default function App() {
     }
   }, [shabbatTimes, user]);
 
+  const onToggleChatNotifications = useCallback(async () => {
+    if (!user) return;
+    const next = !user.wantsChatNotifications;
+    setActionLoading(true);
+    try {
+      if (!next) {
+        await clearChatPushToken(user);
+        const updated = await updateUserProfile(user.uid, {
+          wantsChatNotifications: false,
+          fcmToken: null,
+        });
+        setUser(updated);
+        return;
+      }
+
+      const enabled = await updateUserProfile(user.uid, {
+        wantsChatNotifications: true,
+      });
+      const updated = await registerForChatPushNotifications(enabled);
+      setUser(updated ?? enabled);
+    } catch (error) {
+      Alert.alert(
+        "Notifications",
+        errorMessage(error, "Failed to update chat notifications.")
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }, [user]);
+
   const onToggleModehAni = useCallback(async () => {
     if (!user) return;
     const next = !user.wantsModehAniReminder;
     setActionLoading(true);
     try {
+      if (next) {
+        const granted = await requestScreenTimePermission();
+        if (!granted) {
+          Alert.alert(
+            "Screen Time Required",
+            "Allow Screen Time access to block all apps for Modeh Ani."
+          );
+          return;
+        }
+      }
       if (!next) {
         await cancelReminder(ReminderType.MODEH_ANI);
       }
@@ -1423,6 +1429,16 @@ export default function App() {
     const next = !user.wantsShemaReminder;
     setActionLoading(true);
     try {
+      if (next) {
+        const granted = await requestScreenTimePermission();
+        if (!granted) {
+          Alert.alert(
+            "Screen Time Required",
+            "Allow Screen Time access to block all apps for Shema."
+          );
+          return;
+        }
+      }
       if (!next) {
         await cancelReminder(ReminderType.SHEMA);
       }
@@ -2164,15 +2180,6 @@ export default function App() {
     return `Fri ${formatTime(shabbatTimes.shabbatStart)} – Sat ${formatTime(shabbatTimes.shabbatEnd)}`;
   }, [shabbatTimes, timesError, timesLoading]);
 
-  const appCategories = useMemo(() => {
-    const cats: Record<string, CommonApp[]> = {};
-    COMMON_APPS.forEach((app) => {
-      if (!cats[app.category]) cats[app.category] = [];
-      cats[app.category]!.push(app);
-    });
-    return cats;
-  }, []);
-
   /* ═══════════════════════════════════════════════════════════ */
   /*                     RENDER: HOME TAB                       */
   /* ═══════════════════════════════════════════════════════════ */
@@ -2210,14 +2217,6 @@ export default function App() {
         </View>
       )}
 
-      {!isStreakEligible && blockLevel !== "none" && (
-        <View style={[s.highlightBox, { marginBottom: 12, backgroundColor: C.dangerLight }]}>
-          <Text style={{ fontSize: 12, color: C.danger, lineHeight: 16 }}>
-            Custom mode requires at least 1 app blocked to keep your streak.
-          </Text>
-        </View>
-      )}
-
       {/* Shabbat Times */}
       <View style={s.sectionCard}>
         <Text style={s.sectionTitle}>This Shabbat</Text>
@@ -2235,7 +2234,7 @@ export default function App() {
         <Text style={s.sectionTitle}>Shabbat Mode</Text>
         <Text style={s.sectionDesc}>Choose your level of observance</Text>
         <View style={s.blockGrid}>
-          {(["full", "medium", "custom", "none"] as BlockLevel[]).map((level) => {
+          {(["full", "none"] as BlockLevel[]).map((level) => {
             const info = BLOCK_INFO[level];
             const active = blockLevel === level;
             return (
@@ -2250,31 +2249,6 @@ export default function App() {
             );
           })}
         </View>
-
-        {blockLevel === "custom" && (
-          <View style={s.customBlockSection}>
-            <Text style={s.customBlockTitle}>Select Apps to Block</Text>
-            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
-              {Object.entries(appCategories).map(([category, apps]) => (
-                <View key={category}>
-                  <Text style={s.appCategoryHeader}>{category}</Text>
-                  {apps.map((app) => (
-                    <View key={app.id} style={s.appToggleRow}>
-                      <Text style={s.appToggleName}>{app.name}</Text>
-                      <Switch
-                        value={Boolean(customAppBlocks[app.id])}
-                        onValueChange={(val) => saveCustomAppBlocks({ ...customAppBlocks, [app.id]: val })}
-                        trackColor={{ false: C.border, true: C.primary }}
-                        thumbColor={customAppBlocks[app.id] ? "#FFFFFF" : "#f4f4f5"}
-                        ios_backgroundColor={C.border}
-                      />
-                    </View>
-                  ))}
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        )}
 
         {isModeActive && (
           <Pressable style={s.dangerBtn} onPress={() => setShowBreakConfirm(true)} disabled={actionLoading}>
@@ -3681,6 +3655,21 @@ export default function App() {
               <View style={s.toggleRow}>
                 <Text style={s.toggleLabel}>15 min before Shabbat</Text>
                 <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: C.primary }} thumbColor={user?.wantsShabbatReminders ? "#FFFFFF" : "#f4f4f5"} ios_backgroundColor={C.border} />
+              </View>
+
+              <Text style={[s.sectionTitle, { marginTop: 20 }]}>Chat Notifications</Text>
+              <View style={s.toggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.toggleLabel}>Buddy + congregation chats</Text>
+                  <Text style={s.toggleHint}>Turn push alerts for chat messages on or off</Text>
+                </View>
+                <Switch
+                  value={Boolean(user?.wantsChatNotifications)}
+                  onValueChange={onToggleChatNotifications}
+                  trackColor={{ false: C.border, true: C.primary }}
+                  thumbColor={user?.wantsChatNotifications ? "#FFFFFF" : "#f4f4f5"}
+                  ios_backgroundColor={C.border}
+                />
               </View>
 
               <Text style={[s.sectionTitle, { marginTop: 20 }]}>Privacy</Text>

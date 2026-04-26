@@ -141,6 +141,7 @@ const hydrateProfileWithFallback = async ({
       shabbatBlockLevel: "none",
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
+      wantsChatNotifications: true,
       intentVisibility: "private",
       streakVisibility: "public",
       friendCode: firebaseUser.uid.slice(0, 8).toUpperCase(),
@@ -150,6 +151,7 @@ const hydrateProfileWithFallback = async ({
       longitude: null,
       tefillinBuddyUids: [],
       buddyChatIds: [],
+      fcmToken: null,
     };
   }
   cachedUserProfile = profile;
@@ -220,6 +222,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         shabbatBlockLevel: "none",
         wantsModehAniReminder: false,
         wantsShemaReminder: false,
+        wantsChatNotifications: true,
         intentVisibility: "private",
         streakVisibility: "public",
         friendCode: devUid.replace(/\D/g, "").slice(-8).padStart(8, "0").toUpperCase() || "DEV00001",
@@ -229,6 +232,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         longitude: null,
         tefillinBuddyUids: [],
         buddyChatIds: [],
+        fcmToken: null,
       };
       cachedUserProfile = fallbackProfile;
       return fallbackProfile;
@@ -327,6 +331,7 @@ export const registerWithEmailPassword = async ({
       shabbatBlockLevel: "none",
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
+      wantsChatNotifications: true,
       intentVisibility: "private",
       streakVisibility: "public",
       friendCode: result.user.uid.slice(0, 8).toUpperCase(),
@@ -336,6 +341,7 @@ export const registerWithEmailPassword = async ({
       longitude: null,
       tefillinBuddyUids: [],
       buddyChatIds: [],
+      fcmToken: null,
     };
     cachedUserProfile = stub;
     return stub;
@@ -417,6 +423,7 @@ export const confirmPhoneSignUp = async ({
       shabbatBlockLevel: "none",
       wantsModehAniReminder: false,
       wantsShemaReminder: false,
+      wantsChatNotifications: true,
       intentVisibility: "private",
       streakVisibility: "public",
       friendCode: result.user.uid.slice(0, 8).toUpperCase(),
@@ -426,6 +433,7 @@ export const confirmPhoneSignUp = async ({
       longitude: null,
       tefillinBuddyUids: [],
       buddyChatIds: [],
+      fcmToken: null,
     };
     cachedUserProfile = stub;
     return stub;
@@ -574,6 +582,7 @@ export const subscribeToAuthState = (
         shabbatBlockLevel: "none",
         wantsModehAniReminder: false,
         wantsShemaReminder: false,
+        wantsChatNotifications: true,
         intentVisibility: "private",
         streakVisibility: "public",
         friendCode: firebaseUser.uid.slice(0, 8).toUpperCase(),
@@ -583,6 +592,7 @@ export const subscribeToAuthState = (
         longitude: null,
         tefillinBuddyUids: [],
         buddyChatIds: [],
+        fcmToken: null,
       };
       cachedUserProfile = stub;
       callback(stub);
