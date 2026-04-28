@@ -8,6 +8,14 @@ type ScreenTimeNativeModule = {
   requestAuthorization: () => Promise<boolean>;
   enableFullAppBlocking: () => Promise<void>;
   disableAllBlocking: () => Promise<void>;
+  scheduleBlock: (
+    identifier: "modehAni" | "shema" | "shabbat",
+    startIso: string,
+    endIso: string
+  ) => Promise<void>;
+  cancelScheduledBlock: (
+    identifier: "modehAni" | "shema" | "shabbat"
+  ) => Promise<void>;
 };
 
 const ScreenTimeModule =
@@ -82,6 +90,47 @@ export const disableAllBlocking = async (): Promise<void> => {
     throw {
       code: ShabbatModeErrorCode.BLOCKING_FAILED,
       message: "Failed to disable Screen Time blocking.",
+    } satisfies ShabbatModeError;
+  }
+};
+
+export const scheduleScreenTimeBlock = async (
+  identifier: "modehAni" | "shema" | "shabbat",
+  startDate: Date,
+  endDate: Date
+): Promise<void> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping schedule.");
+    return;
+  }
+  const module = ensureModule();
+  try {
+    await module.scheduleBlock(identifier, startDate.toISOString(), endDate.toISOString());
+  } catch {
+    console.error("Failed to schedule Screen Time block.");
+    throw {
+      code: ShabbatModeErrorCode.BLOCKING_FAILED,
+      message: "Failed to schedule Screen Time block.",
+    } satisfies ShabbatModeError;
+  }
+};
+
+export const cancelScheduledScreenTimeBlock = async (
+  identifier: "modehAni" | "shema" | "shabbat"
+): Promise<void> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping cancel schedule.");
+    return;
+  }
+  const module = ensureModule();
+  try {
+    await module.cancelScheduledBlock(identifier);
+  } catch {
+    throw {
+      code: ShabbatModeErrorCode.BLOCKING_FAILED,
+      message: "Failed to cancel Screen Time block.",
     } satisfies ShabbatModeError;
   }
 };

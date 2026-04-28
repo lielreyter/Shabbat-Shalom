@@ -1,19 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NativeModules, Platform } from "react-native";
+import { Platform } from "react-native";
 import { ShabbatTimes } from "../shabbat/shabbatTimeTypes";
 import {
   ShabbatModeError,
   ShabbatModeErrorCode,
 } from "./shabbatModeTypes";
-
-type SchedulerNativeModule = {
-  scheduleShabbatMode: (startIso: string, endIso: string) => Promise<void>;
-  cancelScheduledShabbatMode: () => Promise<void>;
-};
-
-const SchedulerModule =
-  NativeModules.ShabbatModeScheduler as SchedulerNativeModule | undefined;
-// Scheduling relies on a native iOS module backed by DeviceActivity/ManagedSettings.
+import {
+  cancelScheduledScreenTimeBlock,
+  requestScreenTimePermission,
+  scheduleScreenTimeBlock,
+} from "../ios/screenTimeService";
 
 const SCHEDULE_STORAGE_KEY = "shabbatMode:schedule";
 
@@ -32,16 +28,6 @@ const ensureIos = (): void => {
       message: "Shabbat Mode scheduling is iOS-only.",
     } satisfies ShabbatModeError;
   }
-};
-
-const ensureModule = (): SchedulerNativeModule => {
-  if (!SchedulerModule) {
-    throw {
-      code: ShabbatModeErrorCode.SCHEDULING_FAILED,
-      message: "Shabbat Mode scheduler native module is not installed.",
-    } satisfies ShabbatModeError;
-  }
-  return SchedulerModule;
 };
 
 const formatDateKey = (date: Date, timeZone: string): string => {
@@ -80,20 +66,6 @@ export const scheduleShabbatMode = async (
 ): Promise<void> => {
   ensureIos();
 
-  if (!SchedulerModule) {
-    // Native module not yet installed — persist record locally so the app
-    // can track the schedule once the module is added.
-    await writeScheduleRecord({
-      startIso: times.shabbatStart.toISOString(),
-      endIso: times.shabbatEnd.toISOString(),
-      weekId: computeWeekId(times),
-      timezone: times.timezone,
-      updatedAtIso: new Date().toISOString(),
-    });
-    return;
-  }
-
-  const module = ensureModule();
   const weekId = computeWeekId(times);
   const existing = await readScheduleRecord();
   if (
@@ -106,10 +78,11 @@ export const scheduleShabbatMode = async (
   }
 
   try {
-    await module.scheduleShabbatMode(
-      times.shabbatStart.toISOString(),
-      times.shabbatEnd.toISOString()
-    );
+    const granted = await requestScreenTimePermission();
+    if (!granted) {
+      throw new Error("Screen Time permission denied.");
+    }
+    await scheduleScreenTimeBlock("shabbat", times.shabbatStart, times.shabbatEnd);
   } catch {
     console.error("Shabbat Mode scheduling failed.");
     throw {
@@ -129,15 +102,8 @@ export const scheduleShabbatMode = async (
 
 export const cancelScheduledShabbatMode = async (): Promise<void> => {
   ensureIos();
-
-  if (!SchedulerModule) {
-    await AsyncStorage.removeItem(SCHEDULE_STORAGE_KEY);
-    return;
-  }
-
-  const module = ensureModule();
   try {
-    await module.cancelScheduledShabbatMode();
+    await cancelScheduledScreenTimeBlock("shabbat");
   } catch {
     console.error("Failed to cancel Shabbat Mode schedule.");
     throw {

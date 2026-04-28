@@ -63,6 +63,10 @@ const mapAppleError = (error: unknown): AuthError => {
     if (code === appleAuth.Error.CANCELED) {
       return { code: AuthErrorCode.CANCELED, message: "Sign in canceled." };
     }
+    const message = String((error as { message?: string }).message ?? "");
+    if (message) {
+      return { code: AuthErrorCode.UNKNOWN, message };
+    }
   }
 
   return { code: AuthErrorCode.UNKNOWN, message: "Unknown auth error." };

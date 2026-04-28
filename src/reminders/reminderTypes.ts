@@ -3,6 +3,7 @@ export enum ReminderType {
   TEFILLIN = "TEFILLIN",
   SHEMA = "SHEMA",
   SHABBAT_PREP = "SHABBAT_PREP",
+  SHABBAT_END = "SHABBAT_END",
 }
 
 export type ReminderConfig = {

@@ -45,6 +45,7 @@ import {
 import { LocationResult } from "./src/location/locationTypes";
 import {
   cancelReminder,
+  scheduleExactReminder,
   scheduleNextReminder,
 } from "./src/reminders/reminderScheduler";
 import { ReminderType } from "./src/reminders/reminderTypes";
@@ -141,9 +142,11 @@ import {
   subscribeToChatPushTokenRefresh,
 } from "./src/notifications/pushRegistration";
 import {
+  cancelScheduledScreenTimeBlock,
   enableFullAppBlocking,
   disableAllBlocking,
   requestScreenTimePermission,
+  scheduleScreenTimeBlock,
 } from "./src/ios/screenTimeService";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import { CameraRoll } from "@react-native-camera-roll/camera-roll";
@@ -304,12 +307,6 @@ const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string }> = {
 const formatTime = (date: Date): string =>
   date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-const formatTime24 = (date: Date): string => {
-  const h = date.getHours().toString().padStart(2, "0");
-  const m = date.getMinutes().toString().padStart(2, "0");
-  return `${h}:${m}`;
-};
-
 const to24h = (time: string): string => {
   const raw = (time ?? "07:00").trim();
   if (/^\d{2}:\d{2}$/.test(raw)) return raw;
@@ -331,6 +328,37 @@ const addMinutesToTimeStr = (time: string, mins: number): string => {
   const m = total % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 };
+
+const nextLocalDateForTime = (time: string, skipToday = false): Date => {
+  const [hStr, mStr] = to24h(time).split(":");
+  const now = new Date();
+  const candidate = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    Number(hStr),
+    Number(mStr),
+    0,
+    0
+  );
+
+  if (skipToday || candidate.getTime() <= now.getTime()) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  return candidate;
+};
+
+const endOfLocalDay = (date: Date): Date =>
+  new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    0
+  );
 
 const formatDay = (date: Date): string => {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -661,6 +689,26 @@ export default function App() {
     setSoloTefillinPromptVisible(!confirmed && ignored !== "true");
   }, [getSoloTefillinPromptDay, hasTefillinBuddies, user]);
 
+  const schedulePrayerScreenTimeBlocks = useCallback(async (profile: UserProfile) => {
+    const todayKey = todayDateStr();
+
+    if (profile.wantsModehAniReminder && profile.wakeUpTime) {
+      const doneToday = await AsyncStorage.getItem(`${MODEH_ANI_DONE_PREFIX}${todayKey}`);
+      const startDate = nextLocalDateForTime(profile.wakeUpTime, doneToday === "true");
+      await scheduleScreenTimeBlock("modehAni", startDate, endOfLocalDay(startDate));
+    } else {
+      await cancelScheduledScreenTimeBlock("modehAni");
+    }
+
+    if (profile.wantsShemaReminder && profile.bedTime) {
+      const doneToday = await AsyncStorage.getItem(`${SHEMA_DONE_PREFIX}${todayKey}`);
+      const startDate = nextLocalDateForTime(profile.bedTime, doneToday === "true");
+      await scheduleScreenTimeBlock("shema", startDate, endOfLocalDay(startDate));
+    } else {
+      await cancelScheduledScreenTimeBlock("shema");
+    }
+  }, []);
+
   /* ── prayer blocking (Modeh Ani / Shema block apps until read) ──
      Behaves like a Screen Time block: only triggers if the user enabled
      the toggle AND set a wake/bed time AND that time has arrived today.
@@ -704,17 +752,24 @@ export default function App() {
 
   const onDismissPrayerBlocking = useCallback(async () => {
     const todayKey = todayDateStr();
+    const dismissedType = prayerBlockingType;
     if (prayerBlockingType === "modehAni") {
       await AsyncStorage.setItem(`${MODEH_ANI_DONE_PREFIX}${todayKey}`, "true");
     } else if (prayerBlockingType === "shema") {
       await AsyncStorage.setItem(`${SHEMA_DONE_PREFIX}${todayKey}`, "true");
     }
     setPrayerBlockingType(null);
+    if (dismissedType) {
+      await cancelScheduledScreenTimeBlock(dismissedType);
+    }
     // Only release the screen-time block if Shabbat mode isn't keeping it on.
     if (getCurrentState().status !== ShabbatModeStatus.ACTIVE) {
       disableAllBlocking().catch(() => {});
     }
-  }, [prayerBlockingType]);
+    if (user) {
+      schedulePrayerScreenTimeBlocks(user).catch(() => {});
+    }
+  }, [prayerBlockingType, schedulePrayerScreenTimeBlocks, user]);
 
   useEffect(() => {
     checkPrayerBlocking().catch(() => {});
@@ -927,6 +982,43 @@ export default function App() {
   useEffect(() => {
     if (!shabbatTimes || !user) return;
     scheduleShabbatMode(shabbatTimes).catch(() => {});
+  }, [shabbatTimes, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    schedulePrayerScreenTimeBlocks(user).catch(() => {});
+  }, [schedulePrayerScreenTimeBlocks, user]);
+
+  useEffect(() => {
+    if (!user || !shabbatTimes) return;
+
+    if (user.wantsMorningReminders) {
+      const tefillinTime = addMinutesToTimeStr(user.wakeUpTime ?? "07:00", 15);
+      scheduleNextReminder({
+        type: ReminderType.TEFILLIN,
+        enabled: true,
+        time: tefillinTime,
+        title: "Tefillin reminder",
+        body: "Time to wrap tefillin!",
+        skipWeekdays: [6],
+      }, shabbatTimes).catch(() => {});
+    }
+
+    if (user.wantsShabbatReminders) {
+      const prepDate = new Date(shabbatTimes.shabbatStart.getTime() - 15 * 60000);
+      scheduleExactReminder({
+        type: ReminderType.SHABBAT_PREP,
+        enabled: true,
+        title: "Shabbat starts soon",
+        body: "Shabbat starts in about 15 minutes.",
+      }, prepDate).catch(() => {});
+      scheduleExactReminder({
+        type: ReminderType.SHABBAT_END,
+        enabled: true,
+        title: "Shabbat has ended",
+        body: "Shavua tov. Shabbat has ended.",
+      }, shabbatTimes.shabbatEnd).catch(() => {});
+    }
   }, [shabbatTimes, user]);
 
   useEffect(() => {
@@ -1354,9 +1446,11 @@ export default function App() {
     try {
       if (next) {
         const reminderDate = new Date(shabbatTimes.shabbatStart.getTime() - 15 * 60000);
-        await scheduleNextReminder({ type: ReminderType.SHABBAT_PREP, enabled: true, time: formatTime24(reminderDate), title: "Shabbat starts soon", body: "Shabbat starts in about 15 minutes." }, shabbatTimes);
+        await scheduleExactReminder({ type: ReminderType.SHABBAT_PREP, enabled: true, title: "Shabbat starts soon", body: "Shabbat starts in about 15 minutes." }, reminderDate);
+        await scheduleExactReminder({ type: ReminderType.SHABBAT_END, enabled: true, title: "Shabbat has ended", body: "Shavua tov. Shabbat has ended." }, shabbatTimes.shabbatEnd);
       } else {
         await cancelReminder(ReminderType.SHABBAT_PREP);
+        await cancelReminder(ReminderType.SHABBAT_END);
       }
       const updated = await updateUserProfile(user.uid, { wantsShabbatReminders: next });
       setUser(updated);
@@ -1414,6 +1508,7 @@ export default function App() {
       }
       if (!next) {
         await cancelReminder(ReminderType.MODEH_ANI);
+        await cancelScheduledScreenTimeBlock("modehAni");
       }
       const updated = await updateUserProfile(user.uid, { wantsModehAniReminder: next });
       setUser(updated);
@@ -1441,6 +1536,7 @@ export default function App() {
       }
       if (!next) {
         await cancelReminder(ReminderType.SHEMA);
+        await cancelScheduledScreenTimeBlock("shema");
       }
       const updated = await updateUserProfile(user.uid, { wantsShemaReminder: next });
       setUser(updated);

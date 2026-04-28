@@ -132,6 +132,36 @@ export const scheduleNextReminder = async (
   );
 };
 
+export const scheduleExactReminder = async (
+  config: Omit<ReminderConfig, "time">,
+  fireDate: Date
+): Promise<void> => {
+  if (!config.enabled) {
+    return;
+  }
+
+  if (fireDate.getTime() <= Date.now()) {
+    return;
+  }
+
+  const hasPermission = await requestNotificationPermission();
+  if (!hasPermission) {
+    throw {
+      code: ReminderErrorCode.PERMISSION_DENIED,
+      message: "Notification permission denied.",
+    } satisfies ReminderError;
+  }
+
+  const id = buildNotificationId(config.type);
+  await scheduleDailyNotification(
+    id,
+    config.title,
+    config.body,
+    fireDate.toISOString(),
+    config.metadata ?? {}
+  );
+};
+
 export const cancelReminder = async (type: ReminderType): Promise<void> => {
   const id = buildNotificationId(type);
   await cancelNotificationById(id);

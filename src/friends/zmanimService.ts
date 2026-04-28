@@ -41,7 +41,11 @@ export const fetchZmanim = async (
   if (!response.ok) {
     throw new Error(`HebCal Zmanim API error: ${response.status}`);
   }
-  const data = await response.json();
+  const data = (await response.json()) as {
+    times?: { sunrise?: string; sunset?: string };
+    sunrise?: string;
+    sunset?: string;
+  };
   const times = data.times ?? data;
 
   const sunriseStr = times.sunrise;
