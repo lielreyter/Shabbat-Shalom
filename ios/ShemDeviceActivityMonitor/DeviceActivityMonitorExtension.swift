@@ -13,6 +13,7 @@ import ManagedSettings
 private let appGroupIdentifier = "group.com.lielsimon.shem"
 private let activeReasonsKey = "activeBlockReasons"
 private let currentShieldReasonKey = "currentShieldReason"
+private let blockModeKey = "blockMode"
 
 private func sharedDefaults() -> UserDefaults? {
     UserDefaults(suiteName: appGroupIdentifier)
@@ -34,9 +35,55 @@ private func saveActiveReasons(_ reasons: Set<String>) {
     defaults?.synchronize()
 }
 
+private func selectionDataKey(for mode: String) -> String {
+    "familyActivitySelection.\(mode)"
+}
+
+private func loadSelection(mode: String) -> FamilyActivitySelection? {
+    guard let data = sharedDefaults()?.data(forKey: selectionDataKey(for: mode)) else {
+        return nil
+    }
+    return try? JSONDecoder().decode(FamilyActivitySelection.self, from: data)
+}
+
 private func enableFullBlocking() {
     let store = ManagedSettingsStore()
     store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
+}
+
+private func enableSelectionBlocking(mode: String) -> Bool {
+    guard let selection = loadSelection(mode: mode) else {
+        return false
+    }
+
+    let count = selection.applicationTokens.count +
+        selection.categoryTokens.count +
+        selection.webDomainTokens.count
+
+    guard count > 0 else {
+        return false
+    }
+
+    let store = ManagedSettingsStore()
+    store.shield.applications = selection.applicationTokens.isEmpty ?
+        nil :
+        selection.applicationTokens
+    store.shield.applicationCategories = selection.categoryTokens.isEmpty ?
+        nil :
+        .specific(selection.categoryTokens)
+    store.shield.webDomains = selection.webDomainTokens.isEmpty ?
+        nil :
+        selection.webDomainTokens
+    return true
+}
+
+private func enableConfiguredBlocking() {
+    let mode = sharedDefaults()?.string(forKey: blockModeKey) ?? "full"
+    if (mode == "custom" || mode == "medium"), enableSelectionBlocking(mode: mode) {
+        return
+    }
+
+    enableFullBlocking()
 }
 
 private func clearBlockingIfUnused() {
@@ -56,7 +103,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         var reasons = activeReasons()
         reasons.insert(reason(for: activity))
         saveActiveReasons(reasons)
-        enableFullBlocking()
+        enableConfiguredBlocking()
     }
 
     override func intervalDidEnd(for activity: DeviceActivityName) {

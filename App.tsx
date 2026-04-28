@@ -145,8 +145,11 @@ import {
   cancelScheduledScreenTimeBlock,
   enableFullAppBlocking,
   disableAllBlocking,
+  getFamilyActivitySelectionSummary,
+  presentFamilyActivityPicker,
   requestScreenTimePermission,
   scheduleScreenTimeBlock,
+  setScreenTimeBlockMode,
 } from "./src/ios/screenTimeService";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
 import { CameraRoll } from "@react-native-camera-roll/camera-roll";
@@ -195,7 +198,7 @@ function CameraIcon({ size = 22, color = "#FFF" }: { size?: number; color?: stri
 
 type TabKey = "home" | "social" | "parasha";
 type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat" | "groupCreate";
-type BlockLevel = "full" | "none";
+type BlockLevel = "full" | "custom" | "none";
 type RestrictionSetting = {
   id: string;
   label: string;
@@ -299,6 +302,7 @@ const defaultShabbatUiState: ShabbatUiState = {
 
 const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string }> = {
   full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!" },
+  custom: { title: "Custom Block", desc: "Pick at least one app, category, or website to block." },
   none: { title: "No Block", desc: "No apps blocked. Your streak will not grow." },
 };
 
@@ -465,6 +469,7 @@ export default function App() {
   const [restrictions, setRestrictions] = useState<RestrictionSetting[]>(defaultRestrictions);
   const [shabbatUiState, setShabbatUiState] = useState<ShabbatUiState>(defaultShabbatUiState);
   const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
+  const [customSelectionCount, setCustomSelectionCount] = useState(0);
   const [intentDraft, setIntentDraft] = useState("");
   const [savedIntentText, setSavedIntentText] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
@@ -796,9 +801,24 @@ export default function App() {
   }, []);
 
   const saveBlockLevel = useCallback(async (level: BlockLevel) => {
+    if (level === "custom") {
+      if (customSelectionCount < 1) {
+        const result = await presentFamilyActivityPicker("custom", "Pick Apps To Block");
+        if (result.cancelled || result.count < 1) {
+          Alert.alert(
+            "Selection Required",
+            "Pick at least one app, category, or website before using this block level."
+          );
+          return;
+        }
+        setCustomSelectionCount(result.count);
+      }
+    }
+
     setBlockLevel(level);
     await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
-  }, []);
+    await setScreenTimeBlockMode(level);
+  }, [customSelectionCount]);
 
   const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
     if (!user) return;
@@ -817,13 +837,26 @@ export default function App() {
       ]);
       if (rawR) { try { setRestrictions(JSON.parse(rawR)); } catch { /* use defaults */ } }
       if (rawU) { try { setShabbatUiState(JSON.parse(rawU)); } catch { /* use defaults */ } }
-      if (rawB && ["full", "none"].includes(rawB)) setBlockLevel(rawB as BlockLevel);
-      if (rawB === "medium" || rawB === "custom") setBlockLevel("full");
+      if (rawB && ["full", "custom", "none"].includes(rawB)) {
+        setBlockLevel(rawB as BlockLevel);
+        setScreenTimeBlockMode(rawB as BlockLevel).catch(() => {});
+      }
+      if (rawB === "medium") {
+        setBlockLevel("none");
+        AsyncStorage.setItem(BLOCK_LEVEL_KEY, "none").catch(() => {});
+        setScreenTimeBlockMode("none").catch(() => {});
+      }
       if (rawHO === "true") setHolidayOptIn(true);
       AsyncStorage.removeItem("tefillinBuddies:v1").catch(() => {});
       AsyncStorage.removeItem("customAppBlocks:v1").catch(() => {});
     };
     loadLocal().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getFamilyActivitySelectionSummary("custom")
+      .then((custom) => setCustomSelectionCount(custom.count))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -2357,23 +2390,45 @@ export default function App() {
       {/* Shabbat Block Level */}
       <View style={s.sectionCard}>
         <Text style={s.sectionTitle}>Shabbat Mode</Text>
-        <Text style={s.sectionDesc}>Choose your level of observance</Text>
+        <Text style={s.sectionDesc}>Choose your level of observance. Custom uses Apple's private Screen Time picker.</Text>
         <View style={s.blockGrid}>
-          {(["full", "none"] as BlockLevel[]).map((level) => {
+          {(["full", "custom", "none"] as BlockLevel[]).map((level) => {
             const info = BLOCK_INFO[level];
             const active = blockLevel === level;
+            const selectedCount = level === "custom" ? customSelectionCount : null;
             return (
               <Pressable
                 key={level}
-                style={[s.blockOption, active && s.blockOptionActive]}
+                style={[
+                  s.blockOption,
+                  level === "none" && s.blockOptionCentered,
+                  active && s.blockOptionActive,
+                ]}
                 onPress={() => saveBlockLevel(level)}
               >
                 <Text style={[s.blockTitle, active && s.blockTitleActive]}>{info.title}</Text>
                 <Text style={[s.blockDesc, active && s.blockDescActive]} numberOfLines={2}>{info.desc}</Text>
+                {selectedCount !== null && (
+                  <Text style={[s.blockDesc, active && s.blockDescActive, { marginTop: 6 }]}>
+                    {selectedCount > 0 ? `${selectedCount} selected` : "Setup required"}
+                  </Text>
+                )}
               </Pressable>
             );
           })}
         </View>
+
+        <Pressable
+          style={s.outlineBtn}
+          onPress={async () => {
+            const result = await presentFamilyActivityPicker("custom", "Pick Apps To Block");
+            if (!result.cancelled) {
+              setCustomSelectionCount(result.count);
+            }
+          }}
+        >
+          <Text style={s.outlineBtnText}>Setup Custom Block</Text>
+        </Pressable>
 
         {isModeActive && (
           <Pressable style={s.dangerBtn} onPress={() => setShowBreakConfirm(true)} disabled={actionLoading}>
@@ -4142,8 +4197,9 @@ const s = StyleSheet.create({
   liveBadgeText: { color: "#FFF", fontSize: 11, fontWeight: "800" },
 
   /* block level */
-  blockGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  blockGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 12 },
   blockOption: { width: "47%", borderRadius: 16, borderWidth: 2, borderColor: C.border, padding: 12, alignItems: "center" },
+  blockOptionCentered: { width: "47%", marginTop: 2 },
   blockOptionActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
   blockTitle: { fontSize: 13, fontWeight: "800", color: C.text, textAlign: "center" },
   blockTitleActive: { color: C.primaryDark },

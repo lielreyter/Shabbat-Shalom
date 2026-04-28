@@ -7,6 +7,10 @@ import {
 type ScreenTimeNativeModule = {
   requestAuthorization: () => Promise<boolean>;
   enableFullAppBlocking: () => Promise<void>;
+  enableBlockingMode: (
+    mode: "full" | "medium" | "custom" | "none"
+  ) => Promise<{ count: number }>;
+  setBlockMode: (mode: "full" | "medium" | "custom" | "none") => Promise<void>;
   disableAllBlocking: () => Promise<void>;
   scheduleBlock: (
     identifier: "modehAni" | "shema" | "shabbat",
@@ -16,6 +20,13 @@ type ScreenTimeNativeModule = {
   cancelScheduledBlock: (
     identifier: "modehAni" | "shema" | "shabbat"
   ) => Promise<void>;
+  presentFamilyActivityPicker: (
+    mode: "medium" | "custom",
+    title: string
+  ) => Promise<{ cancelled: boolean; count: number }>;
+  getFamilyActivitySelectionSummary: (
+    mode: "medium" | "custom"
+  ) => Promise<{ count: number }>;
 };
 
 const ScreenTimeModule =
@@ -76,6 +87,38 @@ export const enableFullAppBlocking = async (): Promise<void> => {
   }
 };
 
+export const enableBlockingMode = async (
+  mode: "full" | "medium" | "custom" | "none"
+): Promise<{ count: number }> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping enable.");
+    return { count: 0 };
+  }
+  try {
+    return await ensureModule().enableBlockingMode(mode);
+  } catch {
+    throw {
+      code: ShabbatModeErrorCode.BLOCKING_FAILED,
+      message: "Failed to enable selected Screen Time blocking.",
+    } satisfies ShabbatModeError;
+  }
+};
+
+export const setScreenTimeBlockMode = async (
+  mode: "full" | "medium" | "custom" | "none"
+): Promise<void> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    return;
+  }
+  try {
+    await ensureModule().setBlockMode(mode);
+  } catch {
+    // The JS setting is still saved; native will retry when blocking is enabled.
+  }
+};
+
 export const disableAllBlocking = async (): Promise<void> => {
   ensureIos();
   if (!ScreenTimeModule) {
@@ -132,5 +175,38 @@ export const cancelScheduledScreenTimeBlock = async (
       code: ShabbatModeErrorCode.BLOCKING_FAILED,
       message: "Failed to cancel Screen Time block.",
     } satisfies ShabbatModeError;
+  }
+};
+
+export const presentFamilyActivityPicker = async (
+  mode: "medium" | "custom",
+  title: string
+): Promise<{ cancelled: boolean; count: number }> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    console.warn("ScreenTimeService native module not available — skipping picker.");
+    return { cancelled: true, count: 0 };
+  }
+  try {
+    return await ensureModule().presentFamilyActivityPicker(mode, title);
+  } catch {
+    throw {
+      code: ShabbatModeErrorCode.BLOCKING_FAILED,
+      message: "Failed to open app picker.",
+    } satisfies ShabbatModeError;
+  }
+};
+
+export const getFamilyActivitySelectionSummary = async (
+  mode: "medium" | "custom"
+): Promise<{ count: number }> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    return { count: 0 };
+  }
+  try {
+    return await ensureModule().getFamilyActivitySelectionSummary(mode);
+  } catch {
+    return { count: 0 };
   }
 };
