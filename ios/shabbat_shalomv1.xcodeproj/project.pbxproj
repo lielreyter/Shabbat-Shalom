@@ -17,6 +17,11 @@
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		8E6348562FA064C100CE431D /* DeviceActivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8E6348552FA064C100CE431D /* DeviceActivity.framework */; };
 		8E63485E2FA064C100CE431D /* ShemDeviceActivityMonitor.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8E6348542FA064C100CE431D /* ShemDeviceActivityMonitor.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8E6348742FA0726200CE431D /* ManagedSettings.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8E6348732FA0726200CE431D /* ManagedSettings.framework */; };
+		8E6348762FA0726200CE431D /* ManagedSettingsUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8E6348752FA0726200CE431D /* ManagedSettingsUI.framework */; };
+		8E63487E2FA0726200CE431D /* ShemShieldConfiguration.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8E6348722FA0726200CE431D /* ShemShieldConfiguration.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8E6348882FA0727D00CE431D /* ManagedSettings.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8E6348732FA0726200CE431D /* ManagedSettings.framework */; };
+		8E6348902FA0727D00CE431D /* ShemShieldAction.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8E6348872FA0727D00CE431D /* ShemShieldAction.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD43298790028F7F7DB0D0B0 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +33,20 @@
 			remoteGlobalIDString = 8E6348532FA064C100CE431D;
 			remoteInfo = ShemDeviceActivityMonitor;
 		};
+		8E63487C2FA0726200CE431D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8E6348712FA0726200CE431D;
+			remoteInfo = ShemShieldConfiguration;
+		};
+		8E63488E2FA0727D00CE431D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8E6348862FA0727D00CE431D;
+			remoteInfo = ShemShieldAction;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -38,6 +57,8 @@
 			dstSubfolderSpec = 13;
 			files = (
 				8E63485E2FA064C100CE431D /* ShemDeviceActivityMonitor.appex in Embed Foundation Extensions */,
+				8E6348902FA0727D00CE431D /* ShemShieldAction.appex in Embed Foundation Extensions */,
+				8E63487E2FA0726200CE431D /* ShemShieldConfiguration.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -59,6 +80,10 @@
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = shabbat_shalomv1/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8E6348542FA064C100CE431D /* ShemDeviceActivityMonitor.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShemDeviceActivityMonitor.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E6348552FA064C100CE431D /* DeviceActivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DeviceActivity.framework; path = System/Library/Frameworks/DeviceActivity.framework; sourceTree = SDKROOT; };
+		8E6348722FA0726200CE431D /* ShemShieldConfiguration.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShemShieldConfiguration.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		8E6348732FA0726200CE431D /* ManagedSettings.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ManagedSettings.framework; path = System/Library/Frameworks/ManagedSettings.framework; sourceTree = SDKROOT; };
+		8E6348752FA0726200CE431D /* ManagedSettingsUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ManagedSettingsUI.framework; path = System/Library/Frameworks/ManagedSettingsUI.framework; sourceTree = SDKROOT; };
+		8E6348872FA0727D00CE431D /* ShemShieldAction.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShemShieldAction.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E6F552D2F93116B007641AC /* shabbat_shalomv1.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = shabbat_shalomv1.entitlements; path = shabbat_shalomv1/shabbat_shalomv1.entitlements; sourceTree = "<group>"; };
 		AF08447494A54CF0B62B6A84 /* ScreenTimeServiceBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ScreenTimeServiceBridge.m; path = shabbat_shalomv1/ScreenTimeServiceBridge.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -72,10 +97,26 @@
 			);
 			target = 8E6348532FA064C100CE431D /* ShemDeviceActivityMonitor */;
 		};
+		8E6348812FA0726200CE431D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8E6348712FA0726200CE431D /* ShemShieldConfiguration */;
+		};
+		8E6348912FA0727D00CE431D /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 8E6348862FA0727D00CE431D /* ShemShieldAction */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8E6348572FA064C100CE431D /* ShemDeviceActivityMonitor */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (8E6348622FA064C100CE431D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = ShemDeviceActivityMonitor; sourceTree = "<group>"; };
+		8E6348772FA0726200CE431D /* ShemShieldConfiguration */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (8E6348812FA0726200CE431D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = ShemShieldConfiguration; sourceTree = "<group>"; };
+		8E6348892FA0727D00CE431D /* ShemShieldAction */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (8E6348912FA0727D00CE431D /* PBXFileSystemSynchronizedBuildFileExceptionSet */, ); explicitFileTypes = {}; explicitFolders = (); path = ShemShieldAction; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -92,6 +133,23 @@
 			buildActionMask = 2147483647;
 			files = (
 				8E6348562FA064C100CE431D /* DeviceActivity.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E63486F2FA0726200CE431D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8E6348742FA0726200CE431D /* ManagedSettings.framework in Frameworks */,
+				8E6348762FA0726200CE431D /* ManagedSettingsUI.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E6348842FA0727D00CE431D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8E6348882FA0727D00CE431D /* ManagedSettings.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +179,8 @@
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				5DCACB8F33CDC322A6C60F78 /* libPods-shabbat_shalomv1.a */,
 				8E6348552FA064C100CE431D /* DeviceActivity.framework */,
+				8E6348732FA0726200CE431D /* ManagedSettings.framework */,
+				8E6348752FA0726200CE431D /* ManagedSettingsUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -138,6 +198,8 @@
 				13B07FAE1A68108700A75B9A /* shabbat_shalomv1 */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				8E6348572FA064C100CE431D /* ShemDeviceActivityMonitor */,
+				8E6348772FA0726200CE431D /* ShemShieldConfiguration */,
+				8E6348892FA0727D00CE431D /* ShemShieldAction */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
@@ -152,6 +214,8 @@
 			children = (
 				13B07F961A680F5B00A75B9A /* shabbat_shalomv1.app */,
 				8E6348542FA064C100CE431D /* ShemDeviceActivityMonitor.appex */,
+				8E6348722FA0726200CE431D /* ShemShieldConfiguration.appex */,
+				8E6348872FA0727D00CE431D /* ShemShieldAction.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -186,6 +250,8 @@
 			);
 			dependencies = (
 				8E63485D2FA064C100CE431D /* PBXTargetDependency */,
+				8E63487D2FA0726200CE431D /* PBXTargetDependency */,
+				8E63488F2FA0727D00CE431D /* PBXTargetDependency */,
 			);
 			name = shabbat_shalomv1;
 			productName = shabbat_shalomv1;
@@ -214,6 +280,50 @@
 			productReference = 8E6348542FA064C100CE431D /* ShemDeviceActivityMonitor.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		8E6348712FA0726200CE431D /* ShemShieldConfiguration */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8E6348822FA0726200CE431D /* Build configuration list for PBXNativeTarget "ShemShieldConfiguration" */;
+			buildPhases = (
+				8E63486E2FA0726200CE431D /* Sources */,
+				8E63486F2FA0726200CE431D /* Frameworks */,
+				8E6348702FA0726200CE431D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				8E6348772FA0726200CE431D /* ShemShieldConfiguration */,
+			);
+			name = ShemShieldConfiguration;
+			packageProductDependencies = (
+			);
+			productName = ShemShieldConfiguration;
+			productReference = 8E6348722FA0726200CE431D /* ShemShieldConfiguration.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		8E6348862FA0727D00CE431D /* ShemShieldAction */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8E6348922FA0727D00CE431D /* Build configuration list for PBXNativeTarget "ShemShieldAction" */;
+			buildPhases = (
+				8E6348832FA0727D00CE431D /* Sources */,
+				8E6348842FA0727D00CE431D /* Frameworks */,
+				8E6348852FA0727D00CE431D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				8E6348892FA0727D00CE431D /* ShemShieldAction */,
+			);
+			name = ShemShieldAction;
+			packageProductDependencies = (
+			);
+			productName = ShemShieldAction;
+			productReference = 8E6348872FA0727D00CE431D /* ShemShieldAction.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -228,6 +338,12 @@
 						LastSwiftMigration = 1120;
 					};
 					8E6348532FA064C100CE431D = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					8E6348712FA0726200CE431D = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					8E6348862FA0727D00CE431D = {
 						CreatedOnToolsVersion = 26.3;
 					};
 				};
@@ -247,6 +363,8 @@
 			targets = (
 				13B07F861A680F5B00A75B9A /* shabbat_shalomv1 */,
 				8E6348532FA064C100CE431D /* ShemDeviceActivityMonitor */,
+				8E6348712FA0726200CE431D /* ShemShieldConfiguration */,
+				8E6348862FA0727D00CE431D /* ShemShieldAction */,
 			);
 		};
 /* End PBXProject section */
@@ -264,6 +382,20 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		8E6348522FA064C100CE431D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E6348702FA0726200CE431D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E6348852FA0727D00CE431D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -389,6 +521,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8E63486E2FA0726200CE431D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8E6348832FA0727D00CE431D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -396,6 +542,16 @@
 			isa = PBXTargetDependency;
 			target = 8E6348532FA064C100CE431D /* ShemDeviceActivityMonitor */;
 			targetProxy = 8E63485C2FA064C100CE431D /* PBXContainerItemProxy */;
+		};
+		8E63487D2FA0726200CE431D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8E6348712FA0726200CE431D /* ShemShieldConfiguration */;
+			targetProxy = 8E63487C2FA0726200CE431D /* PBXContainerItemProxy */;
+		};
+		8E63488F2FA0727D00CE431D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8E6348862FA0727D00CE431D /* ShemShieldAction */;
+			targetProxy = 8E63488E2FA0727D00CE431D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -701,6 +857,182 @@
 			};
 			name = Release;
 		};
+		8E63487F2FA0726200CE431D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = ShemShieldConfiguration/ShemShieldConfiguration.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShemShieldConfiguration/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShemShieldConfiguration;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem.ShemShieldConfiguration;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8E6348802FA0726200CE431D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = ShemShieldConfiguration/ShemShieldConfiguration.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShemShieldConfiguration/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShemShieldConfiguration;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem.ShemShieldConfiguration;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		8E6348932FA0727D00CE431D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = ShemShieldAction/ShemShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShemShieldAction/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShemShieldAction;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem.ShemShieldAction;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8E6348942FA0727D00CE431D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = ShemShieldAction/ShemShieldAction.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 55ANQG7WDQ;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShemShieldAction/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShemShieldAction;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem.ShemShieldAction;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -727,6 +1059,24 @@
 			buildConfigurations = (
 				8E6348602FA064C100CE431D /* Debug */,
 				8E6348612FA064C100CE431D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8E6348822FA0726200CE431D /* Build configuration list for PBXNativeTarget "ShemShieldConfiguration" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8E63487F2FA0726200CE431D /* Debug */,
+				8E6348802FA0726200CE431D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8E6348922FA0727D00CE431D /* Build configuration list for PBXNativeTarget "ShemShieldAction" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8E6348932FA0727D00CE431D /* Debug */,
+				8E6348942FA0727D00CE431D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

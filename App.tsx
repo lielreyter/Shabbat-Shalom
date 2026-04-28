@@ -360,6 +360,11 @@ const endOfLocalDay = (date: Date): Date =>
     0
   );
 
+const minutesFromHHMM = (time: string): number => {
+  const [hStr, mStr] = to24h(time).split(":");
+  return Number(hStr) * 60 + Number(mStr);
+};
+
 const formatDay = (date: Date): string => {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return days[date.getDay()] ?? "";
@@ -722,29 +727,33 @@ export default function App() {
     const shabbatActive = getCurrentState().status === ShabbatModeStatus.ACTIVE;
 
     const now = new Date();
-    const currentHHMM = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const todayKey = todayDateStr();
+    const duePrayers: { type: "modehAni" | "shema"; dueMinutes: number }[] = [];
 
     if (user.wantsModehAniReminder && user.wakeUpTime) {
-      const wakeTime24 = to24h(user.wakeUpTime);
+      const wakeMinutes = minutesFromHHMM(user.wakeUpTime);
       const doneKey = `${MODEH_ANI_DONE_PREFIX}${todayKey}`;
       const done = await AsyncStorage.getItem(doneKey);
-      if (!done && currentHHMM >= wakeTime24) {
-        setPrayerBlockingType("modehAni");
-        if (!shabbatActive) enableFullAppBlocking().catch(() => {});
-        return;
+      if (!done && currentMinutes >= wakeMinutes) {
+        duePrayers.push({ type: "modehAni", dueMinutes: wakeMinutes });
       }
     }
 
     if (user.wantsShemaReminder && user.bedTime) {
-      const bedTime24 = to24h(user.bedTime);
+      const bedMinutes = minutesFromHHMM(user.bedTime);
       const doneKey = `${SHEMA_DONE_PREFIX}${todayKey}`;
       const done = await AsyncStorage.getItem(doneKey);
-      if (!done && currentHHMM >= bedTime24) {
-        setPrayerBlockingType("shema");
-        if (!shabbatActive) enableFullAppBlocking().catch(() => {});
-        return;
+      if (!done && currentMinutes >= bedMinutes) {
+        duePrayers.push({ type: "shema", dueMinutes: bedMinutes });
       }
+    }
+
+    if (duePrayers.length > 0) {
+      const nextPrayer = duePrayers.sort((a, b) => b.dueMinutes - a.dueMinutes)[0];
+      setPrayerBlockingType(nextPrayer.type);
+      if (!shabbatActive) enableFullAppBlocking().catch(() => {});
+      return;
     }
 
     setPrayerBlockingType(null);
@@ -1505,6 +1514,7 @@ export default function App() {
           );
           return;
         }
+        await AsyncStorage.removeItem(`${MODEH_ANI_DONE_PREFIX}${todayDateStr()}`);
       }
       if (!next) {
         await cancelReminder(ReminderType.MODEH_ANI);
@@ -1512,12 +1522,16 @@ export default function App() {
       }
       const updated = await updateUserProfile(user.uid, { wantsModehAniReminder: next });
       setUser(updated);
+      if (next) {
+        await schedulePrayerScreenTimeBlocks(updated);
+        checkPrayerBlocking().catch(() => {});
+      }
     } catch (error) {
       Alert.alert("Reminder", errorMessage(error, "Failed to update."));
     } finally {
       setActionLoading(false);
     }
-  }, [user]);
+  }, [checkPrayerBlocking, schedulePrayerScreenTimeBlocks, user]);
 
   const onToggleShema = useCallback(async () => {
     if (!user) return;
@@ -1533,6 +1547,7 @@ export default function App() {
           );
           return;
         }
+        await AsyncStorage.removeItem(`${SHEMA_DONE_PREFIX}${todayDateStr()}`);
       }
       if (!next) {
         await cancelReminder(ReminderType.SHEMA);
@@ -1540,32 +1555,46 @@ export default function App() {
       }
       const updated = await updateUserProfile(user.uid, { wantsShemaReminder: next });
       setUser(updated);
+      if (next) {
+        await schedulePrayerScreenTimeBlocks(updated);
+        checkPrayerBlocking().catch(() => {});
+      }
     } catch (error) {
       Alert.alert("Reminder", errorMessage(error, "Failed to update."));
     } finally {
       setActionLoading(false);
     }
-  }, [user]);
+  }, [checkPrayerBlocking, schedulePrayerScreenTimeBlocks, user]);
 
   const onSetWakeTime = useCallback(async (time: string) => {
     if (!user) return;
     try {
+      await AsyncStorage.removeItem(`${MODEH_ANI_DONE_PREFIX}${todayDateStr()}`);
       const updated = await updateUserProfile(user.uid, { wakeUpTime: time });
       setUser(updated);
       if (shabbatTimes && updated.wantsMorningReminders) {
         const tefillinTime = addMinutesToTimeStr(time, 15);
         await scheduleNextReminder({ type: ReminderType.TEFILLIN, enabled: true, time: tefillinTime, title: "Tefillin reminder", body: "Time to wrap tefillin!", skipWeekdays: [6] }, shabbatTimes);
       }
+      if (updated.wantsModehAniReminder) {
+        await schedulePrayerScreenTimeBlocks(updated);
+        checkPrayerBlocking().catch(() => {});
+      }
     } catch { /* keep going */ }
-  }, [shabbatTimes, user]);
+  }, [checkPrayerBlocking, schedulePrayerScreenTimeBlocks, shabbatTimes, user]);
 
   const onSetBedTime = useCallback(async (time: string) => {
     if (!user) return;
     try {
+      await AsyncStorage.removeItem(`${SHEMA_DONE_PREFIX}${todayDateStr()}`);
       const updated = await updateUserProfile(user.uid, { bedTime: time });
       setUser(updated);
+      if (updated.wantsShemaReminder) {
+        await schedulePrayerScreenTimeBlocks(updated);
+        checkPrayerBlocking().catch(() => {});
+      }
     } catch { /* keep going */ }
-  }, [user]);
+  }, [checkPrayerBlocking, schedulePrayerScreenTimeBlocks, user]);
 
   /* ── intent callbacks ── */
   const onSubmitIntent = useCallback(async () => {

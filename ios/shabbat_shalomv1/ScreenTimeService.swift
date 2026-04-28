@@ -5,6 +5,8 @@ import ManagedSettings
 import React
 
 private let appGroupIdentifier = "group.com.lielsimon.shem"
+private let activeReasonsKey = "activeBlockReasons"
+private let currentShieldReasonKey = "currentShieldReason"
 
 private extension DeviceActivityName {
   static let shemModehAni = Self("shem.modehAni")
@@ -49,8 +51,42 @@ private func sharedDefaults() -> UserDefaults? {
 
 private func setSharedValue(_ value: Any?, forKey key: String) {
   let defaults = sharedDefaults()
-  defaults?.set(value, forKey: key)
+  if let value {
+    defaults?.set(value, forKey: key)
+  } else {
+    defaults?.removeObject(forKey: key)
+  }
   defaults?.synchronize()
+}
+
+private func setActiveShieldReason(_ reason: String?) {
+  guard let reason else {
+    setSharedValue(nil, forKey: currentShieldReasonKey)
+    setSharedValue([], forKey: activeReasonsKey)
+    return
+  }
+
+  setSharedValue(reason, forKey: currentShieldReasonKey)
+  setSharedValue([reason], forKey: activeReasonsKey)
+}
+
+private func currentScheduledReason() -> String {
+  let defaults = sharedDefaults()
+  let now = Date()
+  for identifier in ["modehAni", "shema", "shabbat"] {
+    guard let startIso = defaults?.string(forKey: "block.\(identifier).startIso"),
+          let endIso = defaults?.string(forKey: "block.\(identifier).endIso"),
+          let startDate = parseIsoDate(startIso),
+          let endDate = parseIsoDate(endIso) else {
+      continue
+    }
+
+    if now >= startDate && now <= endDate {
+      return identifier
+    }
+  }
+
+  return "manual"
 }
 
 @objc(ScreenTimeService)
@@ -96,6 +132,7 @@ class ScreenTimeService: NSObject {
 
     let store = ManagedSettingsStore()
     store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
+    setActiveShieldReason(currentScheduledReason())
     resolve(nil)
   }
 
@@ -111,6 +148,7 @@ class ScreenTimeService: NSObject {
 
     let store = ManagedSettingsStore()
     store.clearAllSettings()
+    setActiveShieldReason(nil)
     resolve(nil)
   }
 
@@ -149,6 +187,7 @@ class ScreenTimeService: NSObject {
       try DeviceActivityCenter().startMonitoring(activityName, during: schedule)
       setSharedValue(startIso, forKey: "block.\(identifier).startIso")
       setSharedValue(endIso, forKey: "block.\(identifier).endIso")
+      setSharedValue(identifier, forKey: "block.\(identifier).reason")
       resolve(nil)
     } catch {
       reject("screen_time_schedule_failed",
@@ -172,6 +211,7 @@ class ScreenTimeService: NSObject {
     DeviceActivityCenter().stopMonitoring([activityName])
     setSharedValue(nil, forKey: "block.\(identifier).startIso")
     setSharedValue(nil, forKey: "block.\(identifier).endIso")
+    setSharedValue(nil, forKey: "block.\(identifier).reason")
     resolve(nil)
   }
 }

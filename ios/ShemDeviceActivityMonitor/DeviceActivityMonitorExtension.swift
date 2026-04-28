@@ -12,6 +12,7 @@ import ManagedSettings
 
 private let appGroupIdentifier = "group.com.lielsimon.shem"
 private let activeReasonsKey = "activeBlockReasons"
+private let currentShieldReasonKey = "currentShieldReason"
 
 private func sharedDefaults() -> UserDefaults? {
     UserDefaults(suiteName: appGroupIdentifier)
@@ -29,6 +30,7 @@ private func activeReasons() -> Set<String> {
 private func saveActiveReasons(_ reasons: Set<String>) {
     let defaults = sharedDefaults()
     defaults?.set(Array(reasons), forKey: activeReasonsKey)
+    defaults?.set(reasons.sorted().last, forKey: currentShieldReasonKey)
     defaults?.synchronize()
 }
 
@@ -42,6 +44,7 @@ private func clearBlockingIfUnused() {
         return
     }
 
+    sharedDefaults()?.removeObject(forKey: currentShieldReasonKey)
     let store = ManagedSettingsStore()
     store.clearAllSettings()
 }
