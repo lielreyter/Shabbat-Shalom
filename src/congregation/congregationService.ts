@@ -19,36 +19,6 @@ import { UserProfile } from "../types/UserProfile";
 
 const CONGREGATIONS_COLLECTION = "congregations";
 
-const DEFAULT_CONGREGATIONS: Omit<
-  Congregation,
-  "leaderUid" | "createdAtIso" | "memberUids" | "pendingUids" | "joinPolicy"
->[] = [
-  {
-    id: "default-jerusalem-central",
-    name: "Jerusalem Central Kehilla",
-    city: "Jerusalem",
-    latitude: 31.7683,
-    longitude: 35.2137,
-    timezone: "Asia/Jerusalem",
-  },
-  {
-    id: "default-tel-aviv-shalom",
-    name: "Tel Aviv Shalom Minyan",
-    city: "Tel Aviv",
-    latitude: 32.0853,
-    longitude: 34.7818,
-    timezone: "Asia/Jerusalem",
-  },
-  {
-    id: "default-haifa-carmel",
-    name: "Haifa Carmel Community",
-    city: "Haifa",
-    latitude: 32.794,
-    longitude: 34.9896,
-    timezone: "Asia/Jerusalem",
-  },
-];
-
 const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
 
 const haversineDistanceMiles = (
@@ -112,34 +82,31 @@ const normalizeCongregation = (
   createdAtIso: data.createdAtIso ?? new Date(0).toISOString(),
 });
 
-export const bootstrapDefaultCongregations = async (): Promise<void> => {
-  await Promise.all(
-    DEFAULT_CONGREGATIONS.map(async (defaultCongregation) => {
-      const ref = congregationDoc(defaultCongregation.id);
-      const snapshot = await getDoc(ref);
-      if (!snapshot.exists()) {
-        await setDoc(ref, {
-          ...defaultCongregation,
-          leaderUid: "system",
-          joinPolicy: "OPEN",
-          memberUids: [],
-          pendingUids: [],
-          createdAtIso: new Date(0).toISOString(),
-        });
-      }
-    })
-  );
+export const listCongregations = async (): Promise<Congregation[]> => {
+  const snapshot = await getDocs(congregationsCollection());
+  return snapshot.docs
+    .filter((docSnapshot) => !docSnapshot.id.startsWith("default-"))
+    .map((docSnapshot) =>
+      normalizeCongregation(
+        docSnapshot.id,
+        docSnapshot.data() as Partial<Congregation>
+      )
+    );
 };
 
-export const listCongregations = async (): Promise<Congregation[]> => {
-  await bootstrapDefaultCongregations();
-  const snapshot = await getDocs(congregationsCollection());
-  return snapshot.docs.map((docSnapshot) =>
-    normalizeCongregation(
-      docSnapshot.id,
-      docSnapshot.data() as Partial<Congregation>
-    )
-  );
+export const searchCongregations = async (
+  searchText: string
+): Promise<Congregation[]> => {
+  const normalized = normalizeMatchText(searchText);
+  if (!normalized) return [];
+  const congregations = await listCongregations();
+  return congregations
+    .filter((c) => {
+      const name = normalizeMatchText(c.name);
+      const city = normalizeMatchText(c.city);
+      return name.includes(normalized) || city.includes(normalized);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 };
 
 const deduplicateCongregations = (

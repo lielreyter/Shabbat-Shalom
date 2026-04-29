@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  deleteDoc,
   setDoc,
   updateDoc,
   serverTimestamp,
@@ -62,6 +63,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     wantsChatNotifications: data.wantsChatNotifications ?? true,
     intentVisibility: data.intentVisibility ?? "private",
     friendCode: data.friendCode ?? uid.slice(0, 8).toUpperCase(),
+    friendRequestStatus: data.friendRequestStatus ?? "request",
     friendUids: Array.isArray(data.friendUids) ? data.friendUids : [],
     pendingFriendUids: Array.isArray(data.pendingFriendUids) ? data.pendingFriendUids : [],
     latitude: typeof data.latitude === "number" ? data.latitude : null,
@@ -81,6 +83,10 @@ export const getUserProfile = async (
     return null;
   }
   return hydrateUserProfile(uid, snapshot.data() as UserProfile);
+};
+
+export const deleteUserProfile = async (uid: string): Promise<void> => {
+  await deleteDoc(userDocRef(uid));
 };
 
 export const createUserProfile = async ({
@@ -124,6 +130,7 @@ export const createUserProfile = async ({
     wantsChatNotifications: true,
     intentVisibility: "private",
     streakVisibility: "public",
+    friendRequestStatus: "request",
     friendUids: [],
     pendingFriendUids: [],
     latitude: null,
@@ -191,6 +198,9 @@ export const getOrCreateUserProfileOnLogin = async ({
   }
   if (typeof existing.wantsChatNotifications !== "boolean") {
     updates.wantsChatNotifications = true;
+  }
+  if (!existing.friendRequestStatus) {
+    updates.friendRequestStatus = "request";
   }
 
   await updateDoc(userDocRef(uid), updates);

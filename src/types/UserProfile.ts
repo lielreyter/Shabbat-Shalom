@@ -40,6 +40,7 @@ export interface UserProfile {
   intentVisibility: "public" | "friends" | "private";
 
   friendCode: string;
+  friendRequestStatus: "open" | "request" | "closed";
   friendUids: string[];
   pendingFriendUids: string[];
 

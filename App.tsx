@@ -34,6 +34,7 @@ import {
   updateUserProfile,
   saveIntentEntry,
   getIntentHistory,
+  deleteUserProfile,
 } from "./src/firebase/firestore";
 import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
@@ -54,7 +55,7 @@ import {
   IntentFlowResult,
   setIntentFlowHandler,
 } from "./src/shabbatMode/shabbatIntentFlow";
-import { scheduleShabbatMode } from "./src/shabbatMode/shabbatModeScheduler";
+import { cancelScheduledShabbatMode, scheduleShabbatMode } from "./src/shabbatMode/shabbatModeScheduler";
 import { getCurrentState, getCurrentWeekId } from "./src/shabbatMode/shabbatModeState";
 import { ShabbatModeStatus } from "./src/shabbatMode/shabbatModeTypes";
 import {
@@ -85,9 +86,8 @@ import {
   kickMember,
   leaveCongregationAsUser,
   listCongregationMembers,
-  listNearbyCongregations,
   rejectJoinRequest,
-  searchCongregationsByCity as searchCongregationsByCityName,
+  searchCongregations,
   setCongregationJoinPolicy,
   transferLeadership,
 } from "./src/congregation/congregationService";
@@ -301,9 +301,9 @@ const defaultShabbatUiState: ShabbatUiState = {
 };
 
 const BLOCK_INFO: Record<BlockLevel, { title: string; desc: string }> = {
-  full: { title: "Full Block", desc: "Block all apps during Shabbat and grow your streak!" },
-  custom: { title: "Custom Block", desc: "Pick at least one app, category, or website to block." },
-  none: { title: "No Block", desc: "No apps blocked. Your streak will not grow." },
+  full: { title: "Full Block", desc: "Block all apps during Shabbat." },
+  custom: { title: "Custom Block", desc: "Block selected apps." },
+  none: { title: "No Block", desc: "No apps blocked." },
 };
 
 /* ─── helpers ────────────────────────────────────────────────── */
@@ -328,8 +328,9 @@ const addMinutesToTimeStr = (time: string, mins: number): string => {
   const normalized = to24h(time);
   const [hStr, mStr] = normalized.split(":");
   const total = Number(hStr) * 60 + Number(mStr) + mins;
-  const h = Math.floor(total / 60) % 24;
-  const m = total % 60;
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const h = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
 };
 
@@ -485,6 +486,7 @@ export default function App() {
   /* ── tefillin daily ── */
   const [_tefillinConfirmedToday, setTefillinConfirmedToday] = useState(false);
   const [soloTefillinPromptVisible, setSoloTefillinPromptVisible] = useState(false);
+  const [tefillinDeclinedThisSession, setTefillinDeclinedThisSession] = useState(false);
   const [appForegroundTick, setAppForegroundTick] = useState(0);
 
   /* ── daily info ── */
@@ -497,6 +499,7 @@ export default function App() {
 
   /* ── break shabbat confirmation ── */
   const [showBreakConfirm, setShowBreakConfirm] = useState(false);
+  const [shabbatBrokenLocally, setShabbatBrokenLocally] = useState(false);
 
   /* ── congregation settings ── */
   const [congregationSettingsVisible, setCongregationSettingsVisible] = useState(false);
@@ -518,8 +521,8 @@ export default function App() {
   const [pendingMembers, setPendingMembers] = useState<UserProfile[]>([]);
   const [joinCongregationVisible, setJoinCongregationVisible] = useState(false);
   const [congregationCitySearch, setCongregationCitySearch] = useState("");
-  const [citySuggestions, setCitySuggestions] = useState<GeocodingResult[]>([]);
   const citySearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [createCongregationVisible, setCreateCongregationVisible] = useState(false);
 
   /* ── friends ── */
   const [friends, setFriends] = useState<UserProfile[]>([]);
@@ -696,8 +699,8 @@ export default function App() {
     ]);
     const confirmed = answeredDay === promptDay;
     setTefillinConfirmedToday(confirmed);
-    setSoloTefillinPromptVisible(!confirmed && ignored !== "true");
-  }, [getSoloTefillinPromptDay, hasTefillinBuddies, user]);
+    setSoloTefillinPromptVisible(!confirmed && ignored !== "true" && !tefillinDeclinedThisSession);
+  }, [getSoloTefillinPromptDay, hasTefillinBuddies, tefillinDeclinedThisSession, user]);
 
   const schedulePrayerScreenTimeBlocks = useCallback(async (profile: UserProfile) => {
     const todayKey = todayDateStr();
@@ -712,7 +715,8 @@ export default function App() {
 
     if (profile.wantsShemaReminder && profile.bedTime) {
       const doneToday = await AsyncStorage.getItem(`${SHEMA_DONE_PREFIX}${todayKey}`);
-      const startDate = nextLocalDateForTime(profile.bedTime, doneToday === "true");
+      const shemaBlockTime = addMinutesToTimeStr(profile.bedTime, -15);
+      const startDate = nextLocalDateForTime(shemaBlockTime, doneToday === "true");
       await scheduleScreenTimeBlock("shema", startDate, endOfLocalDay(startDate));
     } else {
       await cancelScheduledScreenTimeBlock("shema");
@@ -746,7 +750,7 @@ export default function App() {
     }
 
     if (user.wantsShemaReminder && user.bedTime) {
-      const bedMinutes = minutesFromHHMM(user.bedTime);
+      const bedMinutes = minutesFromHHMM(addMinutesToTimeStr(user.bedTime, -15));
       const doneKey = `${SHEMA_DONE_PREFIX}${todayKey}`;
       const done = await AsyncStorage.getItem(doneKey);
       if (!done && currentMinutes >= bedMinutes) {
@@ -801,6 +805,14 @@ export default function App() {
   }, []);
 
   const saveBlockLevel = useCallback(async (level: BlockLevel) => {
+    if (level !== "none" && !intentHistory[currentWeekDate]?.trim()) {
+      Alert.alert(
+        "Intention Required",
+        "Save your weekly Shabbat intention before turning on blocking."
+      );
+      return;
+    }
+
     if (level === "custom") {
       if (customSelectionCount < 1) {
         const result = await presentFamilyActivityPicker("custom", "Pick Apps To Block");
@@ -818,7 +830,7 @@ export default function App() {
     setBlockLevel(level);
     await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
     await setScreenTimeBlockMode(level);
-  }, [customSelectionCount]);
+  }, [currentWeekDate, customSelectionCount, intentHistory]);
 
   const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
     if (!user) return;
@@ -968,8 +980,6 @@ export default function App() {
   /* ── load location & congregations ── */
   const loadLocationAndCongregations = useCallback(async () => {
     if (!user) return;
-    setNearbyLoading(true);
-    setNearbyError(null);
     try {
       const location = await getCurrentLocation();
       setCurrentLocation(location);
@@ -985,20 +995,15 @@ export default function App() {
         }).then((updated) => setUser(updated)).catch(() => {});
       }
 
-      const nearby = await listNearbyCongregations(location, 8, 50);
-      setNearbyCongregations(nearby);
     } catch (error) {
-      setNearbyError(errorMessage(error, "Could not load nearby congregations."));
-      setNearbyCongregations([]);
-    } finally {
-      setNearbyLoading(false);
+      console.warn(errorMessage(error, "Could not load location."));
     }
-  }, [user]);
+  }, [user?.latitude, user?.longitude, user?.uid]);
 
   useEffect(() => {
     if (!user) return;
     loadLocationAndCongregations().catch(() => {});
-  }, [loadLocationAndCongregations, user]);
+  }, [loadLocationAndCongregations, user?.uid]);
 
   useEffect(() => {
     if (!user?.congregationId) {
@@ -1023,8 +1028,13 @@ export default function App() {
 
   useEffect(() => {
     if (!shabbatTimes || !user) return;
-    scheduleShabbatMode(shabbatTimes).catch(() => {});
-  }, [shabbatTimes, user]);
+    const hasWeeklyIntention = Boolean(intentHistory[currentWeekDate]?.trim());
+    if (blockLevel !== "none" && hasWeeklyIntention) {
+      scheduleShabbatMode(shabbatTimes).catch(() => {});
+      return;
+    }
+    cancelScheduledShabbatMode().catch(() => {});
+  }, [blockLevel, currentWeekDate, intentHistory, shabbatTimes, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -1349,6 +1359,43 @@ export default function App() {
     }
   }, [pendingEmailVerification]);
 
+  const onDeleteAccount = useCallback(() => {
+    if (!user) return;
+    Alert.alert(
+      "Delete Account",
+      "This permanently deletes your Shem account on this device and removes your profile. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              if (user.congregationId) {
+                await leaveCongregationAsUser(user.congregationId, user.uid).catch(() => {});
+              }
+              await deleteUserProfile(user.uid).catch(() => {});
+              await deleteCurrentUser();
+              setUser(null);
+              setSettingsVisible(false);
+            } catch (error) {
+              Alert.alert(
+                "Delete Account",
+                errorMessage(
+                  error,
+                  "Could not delete account. Sign out, sign back in, then try again."
+                )
+              );
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [user]);
+
   const onPressResendVerification = useCallback(async () => {
     setAuthError(null);
     setActionLoading(true);
@@ -1421,6 +1468,35 @@ export default function App() {
       setActionLoading(false);
     }
   }, [applyRestrictionWeekOutcome, breakShabbat, user, weekId]);
+
+  const onMinimalShabbatBreak = useCallback(() => {
+    if (!user) return;
+    Alert.alert(
+      "Break Shabbat?",
+      `Your intention this week:\n\n${savedIntentText || "No intention saved."}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Break Shabbat",
+          style: "destructive",
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              await disableAllBlocking();
+              const profile = await recordBrokenShabbatWeek(user.uid, weekId);
+              setUser(profile);
+              setShabbatBrokenLocally(true);
+              await applyRestrictionWeekOutcome(false);
+            } catch (error) {
+              Alert.alert("Break Shabbat", errorMessage(error, "Unknown error."));
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [applyRestrictionWeekOutcome, savedIntentText, user, weekId]);
 
   const onCancelBreak = useCallback(() => {
     setShowBreakConfirm(false);
@@ -1682,6 +1758,7 @@ export default function App() {
   }, [getSoloTefillinPromptDay, user]);
 
   const onDeclineTefillinPrompt = useCallback(() => {
+    setTefillinDeclinedThisSession(true);
     setSoloTefillinPromptVisible(false);
   }, []);
 
@@ -1787,6 +1864,7 @@ export default function App() {
       setNewCongregationCity("");
       setNewCongGeo(null);
       setNewCongCitySuggestions([]);
+      setCreateCongregationVisible(false);
       setJoinCongregationVisible(false);
     } catch (error) {
       const msg = errorMessage(error, "Failed to create.");
@@ -1863,48 +1941,27 @@ export default function App() {
     );
   }, [congregationMembers, currentCongregation, refreshCongregationData, user]);
 
-  /* ── city search for congregation ── */
+  /* ── congregation name search for joining ── */
   const onCitySearchChange = useCallback((text: string) => {
     setCongregationCitySearch(text);
     if (citySearchTimer.current) clearTimeout(citySearchTimer.current);
     if (text.trim().length < 2) {
-      setCitySuggestions([]);
+      setNearbyCongregations([]);
       return;
     }
     citySearchTimer.current = setTimeout(async () => {
-      const results = await geocodeCitySuggestions(text, 5);
-      setCitySuggestions(results);
       try {
+        setNearbyLoading(true);
         setNearbyError(null);
-        const byName = await searchCongregationsByCityName(text.trim());
-        setNearbyCongregations(byName.map((c) => ({ ...c, distanceMiles: 0 })));
+        const results = await searchCongregations(text.trim());
+        setNearbyCongregations(results.map((c) => ({ ...c, distanceMiles: 0 })));
       } catch (error) {
-        setNearbyError(errorMessage(error, "City search failed."));
+        setNearbyError(errorMessage(error, "Congregation search failed."));
+      } finally {
+        setNearbyLoading(false);
       }
     }, 400);
   }, []);
-
-  const searchCongregationsNearGeo = useCallback(async (geo: GeocodingResult) => {
-    setNearbyLoading(true);
-    setNearbyError(null);
-    setCitySuggestions([]);
-    try {
-      const fakeLocation: LocationResult = {
-        city: geo.displayName.split(",")[0]?.trim() ?? geo.displayName,
-        latitude: geo.latitude,
-        longitude: geo.longitude,
-        timezone: currentLocation?.timezone ?? "UTC",
-        source: "manual",
-        fetchedAt: new Date(),
-      };
-      const nearby = await listNearbyCongregations(fakeLocation, 8, 50);
-      setNearbyCongregations(nearby);
-    } catch (error) {
-      setNearbyError(errorMessage(error, "Search failed."));
-    } finally {
-      setNearbyLoading(false);
-    }
-  }, [currentLocation?.timezone]);
 
   /* ── city autocomplete for "Create New" congregation ── */
   const onNewCongCityChange = useCallback((text: string) => {
@@ -1970,12 +2027,21 @@ export default function App() {
     if (!user) return;
     try {
       await sendFriendRequest(user.uid, toUid);
-      Alert.alert("Request sent!", "They'll see your friend request.");
+      const updated = await getUserProfile(user.uid);
+      if (updated) setUser(updated);
+      Alert.alert("Friend Request", "Friend request updated.");
       setFriendCodeResult(null);
       setFriendCodeQuery("");
     } catch (error) {
       Alert.alert("Friend request", errorMessage(error, "Could not send request."));
     }
+  }, [user]);
+
+  const friendActionState = useCallback((profile: UserProfile): "self" | "friend" | "pending" | "open" | "request" | "closed" => {
+    if (!user || profile.uid === user.uid) return "self";
+    if (user.friendUids.includes(profile.uid)) return "friend";
+    if (profile.pendingFriendUids?.includes(user.uid)) return "pending";
+    return profile.friendRequestStatus ?? "request";
   }, [user]);
 
   const onAcceptFriendRequest = useCallback(async (friendUid: string) => {
@@ -2216,7 +2282,13 @@ export default function App() {
     if (!activeBuddyChat || !user) return;
     try {
       await saveMessageToChat(activeBuddyChat.id, msg.id, user.uid);
-      Alert.alert("Saved", "Message saved to chat — it won't auto-delete.");
+      setBuddyChatMessages((prev) =>
+        prev.map((item) =>
+          item.id === msg.id
+            ? { ...item, savedByUids: [...new Set([...(item.savedByUids ?? []), user.uid])] }
+            : item
+        )
+      );
     } catch {
       Alert.alert("Error", "Could not save message.");
     }
@@ -2390,7 +2462,7 @@ export default function App() {
       {/* Shabbat Block Level */}
       <View style={s.sectionCard}>
         <Text style={s.sectionTitle}>Shabbat Mode</Text>
-        <Text style={s.sectionDesc}>Choose your level of observance. Custom uses Apple's private Screen Time picker.</Text>
+        <Text style={s.sectionDesc}>Choose your level of observance. Custom opens Apple's Screen Time picker if setup is needed.</Text>
         <View style={s.blockGrid}>
           {(["full", "custom", "none"] as BlockLevel[]).map((level) => {
             const info = BLOCK_INFO[level];
@@ -2399,15 +2471,11 @@ export default function App() {
             return (
               <Pressable
                 key={level}
-                style={[
-                  s.blockOption,
-                  level === "none" && s.blockOptionCentered,
-                  active && s.blockOptionActive,
-                ]}
+                style={[s.blockOption, active && s.blockOptionActive]}
                 onPress={() => saveBlockLevel(level)}
               >
                 <Text style={[s.blockTitle, active && s.blockTitleActive]}>{info.title}</Text>
-                <Text style={[s.blockDesc, active && s.blockDescActive]} numberOfLines={2}>{info.desc}</Text>
+                <Text style={[s.blockDesc, active && s.blockDescActive]}>{info.desc}</Text>
                 {selectedCount !== null && (
                   <Text style={[s.blockDesc, active && s.blockDescActive, { marginTop: 6 }]}>
                     {selectedCount > 0 ? `${selectedCount} selected` : "Setup required"}
@@ -2416,19 +2484,8 @@ export default function App() {
               </Pressable>
             );
           })}
+          <View style={[s.blockOption, s.blockOptionPlaceholder]} />
         </View>
-
-        <Pressable
-          style={s.outlineBtn}
-          onPress={async () => {
-            const result = await presentFamilyActivityPicker("custom", "Pick Apps To Block");
-            if (!result.cancelled) {
-              setCustomSelectionCount(result.count);
-            }
-          }}
-        >
-          <Text style={s.outlineBtnText}>Setup Custom Block</Text>
-        </Pressable>
 
         {isModeActive && (
           <Pressable style={s.dangerBtn} onPress={() => setShowBreakConfirm(true)} disabled={actionLoading}>
@@ -2510,7 +2567,7 @@ export default function App() {
                 <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
               </Pressable>
             </View>
-            <Text style={s.toggleHint}>Blocks your apps at bedtime until you read the prayer</Text>
+            <Text style={s.toggleHint}>Blocks your apps 15 minutes before bedtime until you read the prayer</Text>
           </View>
           <Switch
             value={Boolean(user?.wantsShemaReminder)}
@@ -2766,7 +2823,14 @@ export default function App() {
                   {congregationMembers
                     .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
                     .map((member, idx) => (
-                      <LeaderboardRow key={member.uid} profile={member} rank={idx + 1} isCurrentUser={member.uid === user?.uid} congregationName={currentCongregation?.name ?? null} />
+                      <LeaderboardRow
+                        key={member.uid}
+                        profile={member}
+                        rank={idx + 1}
+                        isCurrentUser={member.uid === user?.uid}
+                        congregationName={currentCongregation?.name ?? null}
+                        onAvatarPress={() => setViewingFriend(member)}
+                      />
                     ))}
                 </View>
               )}
@@ -3008,8 +3072,8 @@ export default function App() {
                       backgroundColor: hasSent ? C.successLight : C.surface,
                       paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12,
                     }}>
-                      <Text style={{ fontSize: 11 }}>{hasSent ? "✓" : "○"}</Text>
-                      <Text style={{ fontSize: 12, color: hasSent ? C.success : C.textSecondary, fontWeight: "600" }}>{name.split(" ")[0]}</Text>
+                    <Text style={{ fontSize: 11 }}>{hasSent ? "✓" : "○"}</Text>
+                    <Text style={{ fontSize: 12, color: hasSent ? C.success : C.textSecondary, fontWeight: "600" }}>{name.split(" ")[0]}</Text>
                     </View>
                   );
                 })}
@@ -3058,11 +3122,24 @@ export default function App() {
                 >
                   {!isMine && <Text style={s.chatSender}>{item.senderName}</Text>}
                   {item.type === "image" && item.imageUrl ? (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
-                      resizeMode="cover"
-                    />
+                    item.isStreakEligible ? (
+                      <View style={s.snapImageFrame}>
+                        <Image
+                          source={{ uri: item.imageUrl }}
+                          style={s.snapImage}
+                          resizeMode="cover"
+                        />
+                        <View style={s.snapBadge}>
+                          <Text style={s.snapBadgeText}>Tefillin Snap</Text>
+                        </View>
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: item.imageUrl }}
+                        style={{ width: 200, height: 200, borderRadius: 12, marginVertical: 4 }}
+                        resizeMode="cover"
+                      />
+                    )
                   ) : (
                     <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
                   )}
@@ -3275,7 +3352,7 @@ export default function App() {
             <>
               <View style={s.authLogoArea}>
                 <Text style={s.authLogo}>✡️</Text>
-                <Text style={s.authTitle}>Shabbat Shalom</Text>
+                <Text style={s.authTitle}>Shem</Text>
                 <Text style={s.authSubtitle}>Keep Shabbat with intention</Text>
               </View>
               <View style={s.authForm}>
@@ -3421,6 +3498,35 @@ export default function App() {
           <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={[s.authInput, s.fullWidth]} placeholderTextColor={C.textLight} />
           <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onSaveProfile} disabled={actionLoading}>
             <Text style={s.primaryBtnText}>Save and continue</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (
+    isShabbatNow &&
+    blockLevel !== "none" &&
+    savedIntentText.trim().length > 0 &&
+    !shabbatBrokenLocally
+  ) {
+    return (
+      <SafeAreaView style={s.shabbatOnlyScreen}>
+        <StatusBar barStyle="dark-content" />
+        <View style={s.shabbatOnlyContent}>
+          <Text style={s.shabbatOnlyTitle}>Shabbat</Text>
+          <Text style={s.shabbatOnlyTime}>
+            Shabbat ends at {shabbatTimes ? formatTime(shabbatTimes.shabbatEnd) : "..."}
+          </Text>
+          <Text style={s.shabbatOnlyIntent}>{savedIntentText}</Text>
+        </View>
+        <View style={s.shabbatOnlyActions}>
+          <Pressable
+            style={[s.dangerBtn, actionLoading && s.disabled]}
+            onPress={onMinimalShabbatBreak}
+            disabled={actionLoading}
+          >
+            <Text style={s.dangerBtnText}>Break Shabbat</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -3669,44 +3775,77 @@ export default function App() {
                 )}
 
                 <View style={{ gap: 10, marginTop: 20 }}>
-                  <Pressable
-                    style={s.primaryBtn}
-                    onPress={() => {
-                      const f = viewingFriend;
-                      setViewingFriend(null);
-                      if (tefillinBuddyUids.includes(f.uid)) {
-                        openBuddyChat(f);
-                      } else {
-                        openDmWith(f);
-                      }
-                    }}
-                  >
-                    <Text style={s.primaryBtnText}>Message</Text>
-                  </Pressable>
-                  {tefillinBuddyUids.includes(viewingFriend.uid) ? (
-                    <Pressable
-                      style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
-                      onPress={() => { onRemoveTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
-                      disabled={buddyActionLoading}
-                    >
-                      <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Tefillin Buddy</Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      style={s.primaryBtn}
-                      onPress={() => { onAddTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
-                      disabled={buddyActionLoading}
-                    >
-                      <Text style={s.primaryBtnText}>Add Tefillin Buddy</Text>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
-                    onPress={() => onUnfriend(viewingFriend.uid)}
-                    disabled={actionLoading}
-                  >
-                    <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Friend</Text>
-                  </Pressable>
+                  {(() => {
+                    const actionState = friendActionState(viewingFriend);
+                    const isFriend = actionState === "friend";
+                    return (
+                      <>
+                        {isFriend && (
+                          <Pressable
+                            style={s.primaryBtn}
+                            onPress={() => {
+                              const f = viewingFriend;
+                              setViewingFriend(null);
+                              if (tefillinBuddyUids.includes(f.uid)) {
+                                openBuddyChat(f);
+                              } else {
+                                openDmWith(f);
+                              }
+                            }}
+                          >
+                            <Text style={s.primaryBtnText}>Message</Text>
+                          </Pressable>
+                        )}
+                        {actionState === "open" || actionState === "request" ? (
+                          <Pressable
+                            style={s.primaryBtn}
+                            onPress={() => onSendFriendRequest(viewingFriend.uid)}
+                            disabled={actionLoading}
+                          >
+                            <Text style={s.primaryBtnText}>
+                              {actionState === "open" ? "Add Friend" : "Send Friend Request"}
+                            </Text>
+                          </Pressable>
+                        ) : actionState === "pending" ? (
+                          <View style={s.highlightBox}>
+                            <Text style={s.highlightText}>Friend request sent</Text>
+                          </View>
+                        ) : actionState === "closed" ? (
+                          <View style={s.highlightBox}>
+                            <Text style={s.highlightText}>This user is not accepting friend requests at the moment.</Text>
+                          </View>
+                        ) : null}
+                        {isFriend && (
+                          <>
+                            {tefillinBuddyUids.includes(viewingFriend.uid) ? (
+                              <Pressable
+                                style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                                onPress={() => { onRemoveTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                                disabled={buddyActionLoading}
+                              >
+                                <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Tefillin Buddy</Text>
+                              </Pressable>
+                            ) : (
+                              <Pressable
+                                style={s.primaryBtn}
+                                onPress={() => { onAddTefillinBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                                disabled={buddyActionLoading}
+                              >
+                                <Text style={s.primaryBtnText}>Add Tefillin Buddy</Text>
+                              </Pressable>
+                            )}
+                            <Pressable
+                              style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                              onPress={() => onUnfriend(viewingFriend.uid)}
+                              disabled={actionLoading}
+                            >
+                              <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Friend</Text>
+                            </Pressable>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </View>
 
                 <Pressable style={[s.outlineBtn, { marginTop: 12 }]} onPress={() => setViewingFriend(null)}>
@@ -3729,7 +3868,7 @@ export default function App() {
               {groupChatMembers.map((member) => {
                 const isMe = member.uid === user?.uid;
                 return (
-                  <View key={member.uid} style={[s.buddyAddRow, { paddingVertical: 10 }]}>
+                  <Pressable key={member.uid} style={[s.buddyAddRow, { paddingVertical: 10 }]} onPress={() => !isMe && setViewingFriend(member)}>
                     <View style={s.friendAvatar}>
                       <Text style={s.friendAvatarText}>{(member.displayName ?? "?")[0]?.toUpperCase()}</Text>
                     </View>
@@ -3744,7 +3883,7 @@ export default function App() {
                         <Text style={[s.rejectBtnText, { fontSize: 11 }]}>Remove</Text>
                       </Pressable>
                     )}
-                  </View>
+                  </Pressable>
                 );
               })}
 
@@ -3871,8 +4010,47 @@ export default function App() {
                 />
               </View>
 
+              <Text style={[s.sectionTitle, { marginTop: 20 }]}>Friend Requests</Text>
+              <Text style={s.sectionDesc}>Choose how people who can see your profile may add you.</Text>
+              <View style={s.policyRow}>
+                {(["open", "request", "closed"] as const).map((status) => (
+                  <Pressable
+                    key={status}
+                    style={[s.policyPill, (user?.friendRequestStatus ?? "request") === status && s.policyPillActive]}
+                    onPress={async () => {
+                      if (!user) return;
+                      const updated = await updateUserProfile(user.uid, { friendRequestStatus: status });
+                      setUser(updated);
+                    }}
+                  >
+                    <Text style={[s.policyPillText, (user?.friendRequestStatus ?? "request") === status && s.policyPillTextActive]}>
+                      {status === "open" ? "Open" : status === "request" ? "Request" : "Closed"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              {pendingRequests.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  {pendingRequests.map((req) => (
+                    <View key={req.uid} style={s.friendRow}>
+                      <Pressable onPress={() => setViewingFriend(req)}>
+                        <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(req.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                      </Pressable>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.friendName}>{req.displayName ?? "Unknown"}</Text>
+                      </View>
+                      <Pressable style={s.acceptBtn} onPress={() => onAcceptFriendRequest(req.uid)}><Text style={s.acceptBtnText}>Accept</Text></Pressable>
+                      <Pressable style={s.rejectBtn} onPress={() => onRejectFriendRequest(req.uid)}><Text style={s.rejectBtnText}>Decline</Text></Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
+
               <Pressable style={[s.dangerBtn, { marginTop: 24 }]} onPress={() => { setSettingsVisible(false); onPressSignOut(); }}>
                 <Text style={s.dangerBtnText}>Sign Out</Text>
+              </Pressable>
+              <Pressable style={[s.dangerBtn, { marginTop: 10, backgroundColor: "#FECACA" }]} onPress={onDeleteAccount} disabled={actionLoading}>
+                <Text style={s.dangerBtnText}>Delete Account</Text>
               </Pressable>
             </ScrollView>
 
@@ -3920,7 +4098,7 @@ export default function App() {
 
               <Text style={[s.sectionTitle, { marginTop: 16 }]}>Members ({congregationMembers.length})</Text>
               {congregationMembers.map((m) => (
-                <View key={m.uid} style={s.friendRow}>
+                <Pressable key={m.uid} style={s.friendRow} onPress={() => m.uid !== user?.uid && setViewingFriend(m)}>
                   <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(m.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.friendName}>{m.displayName ?? "Unknown"}{m.uid === currentCongregation?.leaderUid ? " ⭐" : ""}</Text>
@@ -3935,7 +4113,7 @@ export default function App() {
                       </Pressable>
                     </View>
                   )}
-                </View>
+                </Pressable>
               ))}
 
               <Pressable style={[s.dangerBtn, { marginTop: 20 }]} onPress={() => { setCongregationSettingsVisible(false); Alert.alert("Leave Congregation", "Are you sure?", [{ text: "Cancel", style: "cancel" }, { text: "Leave", style: "destructive", onPress: onLeaveCongregation }]); }}>
@@ -3994,8 +4172,7 @@ export default function App() {
             )}
 
             {friendCodeResult && (() => {
-              const alreadyFriend = user.friendUids.includes(friendCodeResult.uid);
-              const alreadyPending = friendCodeResult.pendingFriendUids?.includes(user.uid);
+              const requestState = friendActionState(friendCodeResult);
               return (
                 <View style={{ alignItems: "center", marginTop: 16, padding: 16, backgroundColor: C.card, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: C.border }}>
                   <View style={[s.friendAvatar, { width: 56, height: 56, borderRadius: 28 }]}>
@@ -4006,17 +4183,21 @@ export default function App() {
                     <Text style={{ fontSize: 12, color: C.textLight, marginTop: 2 }}>Member of a congregation</Text>
                   )}
                   <View style={{ marginTop: 12 }}>
-                    {alreadyFriend ? (
+                    {requestState === "friend" ? (
                       <View style={[s.acceptBtn, { paddingHorizontal: 20, paddingVertical: 8 }]}>
                         <Text style={[s.acceptBtnText, { fontSize: 14 }]}>Already Friends</Text>
                       </View>
-                    ) : alreadyPending ? (
+                    ) : requestState === "pending" ? (
                       <View style={[s.acceptBtn, { paddingHorizontal: 20, paddingVertical: 8 }]}>
                         <Text style={[s.acceptBtnText, { fontSize: 14 }]}>Request Sent</Text>
                       </View>
+                    ) : requestState === "closed" ? (
+                      <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: "center" }}>
+                        This user is not accepting friend requests at the moment.
+                      </Text>
                     ) : (
                       <Pressable style={[s.primaryBtn, { paddingHorizontal: 24 }]} onPress={() => onSendFriendRequest(friendCodeResult.uid)}>
-                        <Text style={s.primaryBtnText}>Send Friend Request</Text>
+                        <Text style={s.primaryBtnText}>{requestState === "open" ? "Add Friend" : "Send Friend Request"}</Text>
                       </Pressable>
                     )}
                   </View>
@@ -4033,66 +4214,75 @@ export default function App() {
 
       {/* Join/Create Congregation Modal */}
       <Modal visible={joinCongregationVisible} transparent animationType="slide">
-        <View style={s.modalOverlay}>
+        <KeyboardAvoidingView
+          style={s.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={24}
+        >
           <View style={[s.modalCard, { maxHeight: "85%" }]}>
             <Text style={s.modalTitle}>Congregation</Text>
 
-            <TextInput placeholder="Search by city..." value={congregationCitySearch} onChangeText={onCitySearchChange} style={s.authInput} placeholderTextColor={C.textLight} />
+            {!createCongregationVisible ? (
+              <>
+                <TextInput placeholder="Search congregation name..." value={congregationCitySearch} onChangeText={onCitySearchChange} style={s.authInput} placeholderTextColor={C.textLight} />
 
-            {citySuggestions.length > 0 && (
-              <View style={s.suggestionsBox}>
-                {citySuggestions.map((sug, idx) => (
-                  <Pressable key={`${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => { setCongregationCitySearch(sug.displayName.split(",")[0]?.trim() ?? sug.displayName); searchCongregationsNearGeo(sug); }}>
-                    <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
+                {nearbyLoading && <ActivityIndicator color={C.primary} style={{ marginTop: 12 }} />}
+                {nearbyError && <Text style={s.errorText}>{nearbyError}</Text>}
 
-            {nearbyLoading && <ActivityIndicator color={C.primary} style={{ marginTop: 12 }} />}
-            {nearbyError && <Text style={s.errorText}>{nearbyError}</Text>}
-
-            <ScrollView style={{ maxHeight: 240, marginTop: 8 }}>
-              {nearbyCongregations.map((cong) => (
-                <Pressable key={cong.id} style={s.congListItem} onPress={() => onJoinCongregation(cong.id)}>
-                  <Text style={s.congListName}>{cong.name}</Text>
-                  <Text style={s.congListCity}>{cong.city}</Text>
-                </Pressable>
-              ))}
-              {nearbyCongregations.length === 0 && !nearbyLoading && (
-                <Text style={[s.emptyText, { marginTop: 12 }]}>No congregations found nearby. Create one below!</Text>
-              )}
-            </ScrollView>
-
-            <View style={s.createCongSection}>
-              <Text style={s.sectionTitle}>Create New</Text>
-              <TextInput placeholder="Congregation name" value={newCongregationName} onChangeText={setNewCongregationName} style={s.authInput} placeholderTextColor={C.textLight} />
-              <TextInput
-                placeholder="Search city..."
-                value={newCongregationCity}
-                onChangeText={onNewCongCityChange}
-                style={[s.authInput, { marginTop: 8 }]}
-                placeholderTextColor={C.textLight}
-              />
-              {newCongCitySuggestions.length > 0 && (
-                <View style={s.suggestionsBox}>
-                  {newCongCitySuggestions.map((sug, idx) => (
-                    <Pressable key={`newcong-${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => onSelectNewCongCity(sug)}>
-                      <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
+                <ScrollView style={{ maxHeight: 260, marginTop: 8 }} keyboardShouldPersistTaps="handled">
+                  {nearbyCongregations.map((cong) => (
+                    <Pressable key={cong.id} style={s.congListItem} onPress={() => onJoinCongregation(cong.id)}>
+                      <Text style={s.congListName}>{cong.name}</Text>
+                      <Text style={s.congListCity}>
+                        {cong.city} · {cong.memberUids.length} members · {cong.joinPolicy.toLowerCase()}
+                      </Text>
                     </Pressable>
                   ))}
-                </View>
-              )}
-              <Pressable style={[s.primaryBtn, actionLoading && s.disabled]} onPress={onCreateCongregation} disabled={actionLoading}>
-                <Text style={s.primaryBtnText}>Create and Join</Text>
-              </Pressable>
-            </View>
+                  {congregationCitySearch.trim().length >= 2 && nearbyCongregations.length === 0 && !nearbyLoading && (
+                    <Text style={[s.emptyText, { marginTop: 12 }]}>No created congregations found.</Text>
+                  )}
+                </ScrollView>
 
-            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => setJoinCongregationVisible(false)}>
+                <Pressable style={s.outlineBtn} onPress={() => setCreateCongregationVisible(true)}>
+                  <Text style={s.outlineBtnText}>Create New Congregation</Text>
+                </Pressable>
+              </>
+            ) : (
+              <ScrollView style={{ maxHeight: 430 }} keyboardShouldPersistTaps="handled">
+                <View style={s.createCongSection}>
+                  <Text style={s.sectionTitle}>Create New</Text>
+                  <TextInput placeholder="Congregation name" value={newCongregationName} onChangeText={setNewCongregationName} style={s.authInput} placeholderTextColor={C.textLight} />
+                  <TextInput
+                    placeholder="Search city..."
+                    value={newCongregationCity}
+                    onChangeText={onNewCongCityChange}
+                    style={[s.authInput, { marginTop: 8 }]}
+                    placeholderTextColor={C.textLight}
+                  />
+                  {newCongCitySuggestions.length > 0 && (
+                    <View style={s.suggestionsBox}>
+                      {newCongCitySuggestions.map((sug, idx) => (
+                        <Pressable key={`newcong-${sug.latitude}-${sug.longitude}-${idx}`} style={s.suggestionItem} onPress={() => onSelectNewCongCity(sug)}>
+                          <Text style={s.sectionDesc} numberOfLines={1}>{sug.displayName}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                  <Pressable style={[s.primaryBtn, actionLoading && s.disabled]} onPress={onCreateCongregation} disabled={actionLoading}>
+                    <Text style={s.primaryBtnText}>Create and Join</Text>
+                  </Pressable>
+                  <Pressable style={s.ghostBtn} onPress={() => setCreateCongregationVisible(false)}>
+                    <Text style={s.ghostBtnText}>Back to Search</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            )}
+
+            <Pressable style={[s.ghostBtn, { alignSelf: "center", marginTop: 12 }]} onPress={() => { setCreateCongregationVisible(false); setJoinCongregationVisible(false); }}>
               <Text style={s.ghostBtnText}>Close</Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -4140,6 +4330,12 @@ const s = StyleSheet.create({
   body: { flex: 1 },
   fullWidth: { width: "100%" },
   disabled: { opacity: 0.5 },
+  shabbatOnlyScreen: { flex: 1, backgroundColor: "#FFFFFF", paddingHorizontal: 24, paddingVertical: 24 },
+  shabbatOnlyContent: { flex: 1, justifyContent: "center", alignItems: "center" },
+  shabbatOnlyTitle: { fontSize: 34, fontWeight: "900", color: C.text, marginBottom: 10 },
+  shabbatOnlyTime: { fontSize: 18, fontWeight: "700", color: C.textSecondary, textAlign: "center" },
+  shabbatOnlyIntent: { fontSize: 15, color: C.textSecondary, textAlign: "center", lineHeight: 22, marginTop: 24 },
+  shabbatOnlyActions: { paddingBottom: 18 },
 
   /* header */
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, backgroundColor: C.bg },
@@ -4197,9 +4393,9 @@ const s = StyleSheet.create({
   liveBadgeText: { color: "#FFF", fontSize: 11, fontWeight: "800" },
 
   /* block level */
-  blockGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 12 },
+  blockGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
   blockOption: { width: "47%", borderRadius: 16, borderWidth: 2, borderColor: C.border, padding: 12, alignItems: "center" },
-  blockOptionCentered: { width: "47%", marginTop: 2 },
+  blockOptionPlaceholder: { opacity: 0.35 },
   blockOptionActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
   blockTitle: { fontSize: 13, fontWeight: "800", color: C.text, textAlign: "center" },
   blockTitleActive: { color: C.primaryDark },
@@ -4387,6 +4583,10 @@ const s = StyleSheet.create({
   chatSendBtn: { backgroundColor: C.primary, borderRadius: 20, paddingHorizontal: 20, justifyContent: "center" },
   buddyChatIconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center" as const, justifyContent: "center" as const },
   chatSendBtnText: { color: "#FFF", fontWeight: "700", fontSize: 14 },
+  snapImageFrame: { width: 200, height: 240, borderRadius: 20, overflow: "hidden", marginVertical: 4, backgroundColor: C.text, borderWidth: 3, borderColor: C.primary },
+  snapImage: { width: "100%", height: "100%" },
+  snapBadge: { position: "absolute", left: 10, bottom: 10, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  snapBadgeText: { color: "#FFF", fontSize: 11, fontWeight: "800" },
 
   /* parasha */
   parashaHeader: { fontSize: 16, fontWeight: "700", color: C.textSecondary, marginTop: 8, marginBottom: 8 },

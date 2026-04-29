@@ -1,8 +1,6 @@
 import "react-native-get-random-values";
 import { v4 as uuidv4 } from "uuid";
 import { appleAuth } from "@invertase/react-native-apple-authentication";
-import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { DEV_MODE } from "../config/devMode";
 
 export enum AuthErrorCode {
@@ -50,11 +48,9 @@ export const setAppleAuthStubConfig = (next: Partial<AppleAuthStubConfig>): void
   stubConfig = { ...stubConfig, ...next };
 };
 
-const createNonce = (): { rawNonce: string; hashedNonce: string } => {
-  // Nonce + SHA256 is required for Apple Sign-In to prevent replay attacks.
+const createNonce = (): string => {
   const rawNonce = uuidv4();
-  const hashedNonce = bytesToHex(sha256(utf8ToBytes(rawNonce)));
-  return { rawNonce, hashedNonce };
+  return rawNonce;
 };
 
 const mapAppleError = (error: unknown): AuthError => {
@@ -91,7 +87,7 @@ export const signInWithApple = async (): Promise<AppleAuthResult> => {
       throw new AuthErrorImpl(AuthErrorCode.NETWORK, "Network error (stub).");
     }
 
-    const { rawNonce } = createNonce();
+    const rawNonce = createNonce();
     console.log("DEV MODE STUB — Apple Sign-In simulated.");
     return {
       idToken: `dev-token-${uuidv4()}`,
@@ -110,11 +106,11 @@ export const signInWithApple = async (): Promise<AppleAuthResult> => {
   }
 
   try {
-    const { rawNonce, hashedNonce } = createNonce();
+    const rawNonce = createNonce();
     const response = await appleAuth.performRequest({
       requestedOperation: appleAuth.Operation.LOGIN,
       requestedScopes: [appleAuth.Scope.FULL_NAME, appleAuth.Scope.EMAIL],
-      nonce: hashedNonce,
+      nonce: rawNonce,
     });
 
     const idToken = response.identityToken;
@@ -134,7 +130,7 @@ export const signInWithApple = async (): Promise<AppleAuthResult> => {
 
     return {
       idToken,
-      rawNonce,
+      rawNonce: response.nonce ?? rawNonce,
       fullName,
       email: response.email ?? null,
     };

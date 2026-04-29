@@ -114,6 +114,23 @@ export const sendFriendRequest = async (
     throw new Error("Friend request already sent.");
   }
 
+  const friendRequestStatus = toData.friendRequestStatus ?? "request";
+  if (friendRequestStatus === "closed") {
+    throw new Error("This user is not accepting friend requests at the moment.");
+  }
+
+  if (friendRequestStatus === "open") {
+    const fromRef = doc(firestore, "users", fromUid);
+    await updateDoc(toRef, {
+      friendUids: arrayUnion(fromUid),
+      pendingFriendUids: arrayRemove(fromUid),
+    });
+    await updateDoc(fromRef, {
+      friendUids: arrayUnion(toUid),
+    });
+    return;
+  }
+
   await updateDoc(toRef, {
     pendingFriendUids: arrayUnion(fromUid),
   });
