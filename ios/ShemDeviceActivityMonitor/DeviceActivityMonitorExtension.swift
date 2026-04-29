@@ -31,7 +31,11 @@ private func activeReasons() -> Set<String> {
 private func saveActiveReasons(_ reasons: Set<String>) {
     let defaults = sharedDefaults()
     defaults?.set(Array(reasons), forKey: activeReasonsKey)
-    defaults?.set(reasons.sorted().last, forKey: currentShieldReasonKey)
+    if reasons.contains("shabbat") || reasons.contains("shem.shabbat") {
+        defaults?.set("shabbat", forKey: currentShieldReasonKey)
+    } else {
+        defaults?.set(reasons.sorted().last, forKey: currentShieldReasonKey)
+    }
     defaults?.synchronize()
 }
 
@@ -48,6 +52,8 @@ private func loadSelection(mode: String) -> FamilyActivitySelection? {
 
 private func enableFullBlocking() {
     let store = ManagedSettingsStore()
+    store.shield.applications = nil
+    store.shield.webDomains = nil
     store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
 }
 
@@ -86,6 +92,49 @@ private func enableConfiguredBlocking() {
     enableFullBlocking()
 }
 
+private func enableBlocking(for activity: DeviceActivityName) {
+    let reasons = activeReasons()
+    if reasons.contains("shabbat") || reasons.contains("shem.shabbat") {
+        enableConfiguredBlocking()
+        return
+    }
+
+    switch activity.rawValue {
+    case "modehAni", "shem.modehAni", "shema", "shem.shema":
+        enableFullBlocking()
+    case "personal", "shem.personal":
+        if !enableSelectionBlocking(mode: "personal") {
+            enableFullBlocking()
+        }
+    default:
+        enableConfiguredBlocking()
+    }
+}
+
+private func enableBlocking(for reasons: Set<String>) {
+    if reasons.contains("shabbat") || reasons.contains("shem.shabbat") {
+        enableConfiguredBlocking()
+        return
+    }
+
+    if reasons.contains("modehAni") ||
+        reasons.contains("shem.modehAni") ||
+        reasons.contains("shema") ||
+        reasons.contains("shem.shema") {
+        enableFullBlocking()
+        return
+    }
+
+    if reasons.contains("personal") || reasons.contains("shem.personal") {
+        if !enableSelectionBlocking(mode: "personal") {
+            enableFullBlocking()
+        }
+        return
+    }
+
+    enableConfiguredBlocking()
+}
+
 private func clearBlockingIfUnused() {
     guard activeReasons().isEmpty else {
         return
@@ -103,7 +152,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         var reasons = activeReasons()
         reasons.insert(reason(for: activity))
         saveActiveReasons(reasons)
-        enableConfiguredBlocking()
+        enableBlocking(for: activity)
     }
 
     override func intervalDidEnd(for activity: DeviceActivityName) {
@@ -112,7 +161,11 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         var reasons = activeReasons()
         reasons.remove(reason(for: activity))
         saveActiveReasons(reasons)
-        clearBlockingIfUnused()
+        if reasons.isEmpty {
+            clearBlockingIfUnused()
+        } else {
+            enableBlocking(for: reasons)
+        }
     }
 
     override func eventDidReachThreshold(_ event: DeviceActivityEvent.Name, activity: DeviceActivityName) {

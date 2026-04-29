@@ -332,6 +332,16 @@ export const saveMessageToChat = async (
   });
 };
 
+export const unsaveMessageFromChat = async (
+  chatId: string,
+  messageId: string,
+  uid: string
+): Promise<void> => {
+  await updateDoc(doc(firestore, "buddyChats", chatId, "messages", messageId), {
+    savedByUids: arrayRemove(uid),
+  });
+};
+
 export const purgeExpiredMessages = async (chatId: string): Promise<number> => {
   const cutoff = Timestamp.fromDate(new Date(Date.now() - MESSAGE_TTL_MS));
   const q = query(

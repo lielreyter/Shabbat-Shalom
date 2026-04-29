@@ -51,6 +51,10 @@ const addDays = (dateStr: string, days: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
+const isSaturdayDate = (dateStr: string): boolean => {
+  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
+};
+
 /**
  * Returns the start-of-day and end-of-day as JS Dates for a given
  * "YYYY-MM-DD" in the given IANA timezone.
@@ -184,6 +188,13 @@ export const evaluateChatStreak = async (
 
   while (isDateComplete(evalDate, latestTz) && iterations < maxIterations) {
     iterations++;
+
+    if (isSaturdayDate(evalDate)) {
+      lastStreakDate = evalDate;
+      changed = true;
+      evalDate = addDays(evalDate, 1);
+      continue;
+    }
 
     let allSent = true;
     for (const member of memberProfiles) {

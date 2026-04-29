@@ -29,6 +29,16 @@ const userDocRef = (uid: string) => doc(firestore, "users", uid);
 
 const normalizeWeekId = (weekId: string): string => weekId.trim();
 
+const addDaysToDateString = (dateStr: string, days: number): string => {
+  const date = new Date(`${dateStr}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const isSaturdayDateString = (dateStr: string): boolean => {
+  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
+};
+
 const ensureTimestamp = (value: unknown): Timestamp => {
   return value instanceof Timestamp ? value : Timestamp.now();
 };
@@ -239,12 +249,26 @@ export const checkAndBreakStaleStreaks = async (
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toISOString().slice(0, 10);
 
-  if (
-    profile.tefillinCurrentStreak > 0 &&
-    profile.lastTefillinDate !== todayStr &&
-    profile.lastTefillinDate !== yesterdayStr
-  ) {
-    updates.tefillinCurrentStreak = 0;
+  if (profile.tefillinCurrentStreak > 0) {
+    if (!profile.lastTefillinDate) {
+      updates.tefillinCurrentStreak = 0;
+    } else if (profile.lastTefillinDate !== todayStr && profile.lastTefillinDate !== yesterdayStr) {
+      const finalAutoDate = isSaturdayDateString(todayStr) ? todayStr : yesterdayStr;
+      let cursor = addDaysToDateString(profile.lastTefillinDate, 1);
+      let missedNonShabbatDay = false;
+
+      while (cursor <= finalAutoDate) {
+        if (!isSaturdayDateString(cursor)) {
+          missedNonShabbatDay = true;
+          break;
+        }
+        cursor = addDaysToDateString(cursor, 1);
+      }
+
+      if (missedNonShabbatDay) {
+        updates.tefillinCurrentStreak = 0;
+      }
+    }
   }
 
   if (profile.currentStreak > 0 && profile.lastStreakWeekId) {

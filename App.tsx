@@ -131,6 +131,7 @@ import {
   removeGroupMember,
   getTodayStreakStatus,
   saveMessageToChat,
+  unsaveMessageFromChat,
   purgeExpiredMessages,
 } from "./src/friends/buddyChatService";
 import { BuddyChat, BuddyMessage } from "./src/friends/buddyChatTypes";
@@ -143,6 +144,7 @@ import {
 } from "./src/notifications/pushRegistration";
 import {
   cancelScheduledScreenTimeBlock,
+  enablePersonalBlocking,
   enableFullAppBlocking,
   disableAllBlocking,
   getFamilyActivitySelectionSummary,
@@ -150,9 +152,9 @@ import {
   requestScreenTimePermission,
   scheduleScreenTimeBlock,
   setScreenTimeBlockMode,
+  setScreenTimeShieldReason,
 } from "./src/ios/screenTimeService";
 import { launchCamera, launchImageLibrary } from "react-native-image-picker";
-import { CameraRoll } from "@react-native-camera-roll/camera-roll";
 
 /* ─── theme ──────────────────────────────────────────────────── */
 
@@ -196,7 +198,7 @@ function CameraIcon({ size = 22, color = "#FFF" }: { size?: number; color?: stri
 
 /* ─── types ──────────────────────────────────────────────────── */
 
-type TabKey = "home" | "social" | "parasha";
+type TabKey = "parasha" | "block" | "home" | "social" | "buddies";
 type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat" | "groupCreate";
 type BlockLevel = "full" | "custom" | "none";
 type RestrictionSetting = {
@@ -471,6 +473,10 @@ export default function App() {
   const [shabbatUiState, setShabbatUiState] = useState<ShabbatUiState>(defaultShabbatUiState);
   const [blockLevel, setBlockLevel] = useState<BlockLevel>("none");
   const [customSelectionCount, setCustomSelectionCount] = useState(0);
+  const [personalBlockSelectionCount, setPersonalBlockSelectionCount] = useState(0);
+  const [personalBlockMinutes, setPersonalBlockMinutes] = useState(30);
+  const [personalBlockDurationInput, setPersonalBlockDurationInput] = useState("30");
+  const [personalBlockEndsAt, setPersonalBlockEndsAt] = useState<Date | null>(null);
   const [intentDraft, setIntentDraft] = useState("");
   const [savedIntentText, setSavedIntentText] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
@@ -503,7 +509,6 @@ export default function App() {
 
   /* ── congregation settings ── */
   const [congregationSettingsVisible, setCongregationSettingsVisible] = useState(false);
-  const [showCongregationLeaderboard, setShowCongregationLeaderboard] = useState(false);
 
   /* ── congregation ── */
   const [nearbyCongregations, setNearbyCongregations] = useState<NearbyCongregation[]>([]);
@@ -552,6 +557,7 @@ export default function App() {
   const [buddyChatMessages, setBuddyChatMessages] = useState<BuddyMessage[]>([]);
   const [buddyChatInput, setBuddyChatInput] = useState("");
   const [buddyChatImageLoading, setBuddyChatImageLoading] = useState(false);
+  const [viewingBuddyImage, setViewingBuddyImage] = useState<BuddyMessage | null>(null);
   const [sunBlockedMessage, setSunBlockedMessage] = useState<string | null>(null);
   const [showBuddyQuotes, setShowBuddyQuotes] = useState(false);
   const [buddyChatViewportHeight, setBuddyChatViewportHeight] = useState(0);
@@ -614,6 +620,7 @@ export default function App() {
   }, [blockLevel]);
 
   const isStreakEligible = effectiveBlockLevel !== "none";
+  const shabbatBlockIsActive = isShabbatNow && blockLevel !== "none" && savedIntentText.trim().length > 0 && !shabbatBrokenLocally;
   const tefillinBuddyUids = useMemo(() => user?.tefillinBuddyUids ?? [], [user?.tefillinBuddyUids]);
   const hasTefillinBuddies = tefillinBuddyUids.length > 0;
 
@@ -733,7 +740,11 @@ export default function App() {
     // If Shabbat mode is currently active it already blocks all apps —
     // don't layer the prayer blocker on top (and don't risk toggling
     // the shared screen-time blocker out from under it).
-    const shabbatActive = getCurrentState().status === ShabbatModeStatus.ACTIVE;
+    const shabbatActive = getCurrentState().status === ShabbatModeStatus.ACTIVE || shabbatBlockIsActive;
+    if (shabbatActive) {
+      setPrayerBlockingType(null);
+      return;
+    }
 
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -761,12 +772,13 @@ export default function App() {
     if (duePrayers.length > 0) {
       const nextPrayer = duePrayers.sort((a, b) => b.dueMinutes - a.dueMinutes)[0];
       setPrayerBlockingType(nextPrayer.type);
-      if (!shabbatActive) enableFullAppBlocking().catch(() => {});
+      setScreenTimeShieldReason(nextPrayer.type).catch(() => {});
+      enableFullAppBlocking().catch(() => {});
       return;
     }
 
     setPrayerBlockingType(null);
-  }, [user]);
+  }, [shabbatBlockIsActive, user]);
 
   const onDismissPrayerBlocking = useCallback(async () => {
     const todayKey = todayDateStr();
@@ -832,6 +844,84 @@ export default function App() {
     await setScreenTimeBlockMode(level);
   }, [currentWeekDate, customSelectionCount, intentHistory]);
 
+  const onCustomizeShabbatBlock = useCallback(async () => {
+    try {
+      const result = await presentFamilyActivityPicker("custom", "Choose Apps for Shabbat");
+      if (result.cancelled) return;
+      if (result.count <= 0) {
+        Alert.alert(
+          "Selection Required",
+          "Pick at least one app, category, or website before using Custom Block."
+        );
+        return;
+      }
+      setCustomSelectionCount(result.count);
+      if (blockLevel === "custom") {
+        await setScreenTimeBlockMode("custom");
+      }
+    } catch (error) {
+      Alert.alert("Custom Block", errorMessage(error, "Could not open app picker."));
+    }
+  }, [blockLevel]);
+
+  const onSetupPersonalBlock = useCallback(async () => {
+    try {
+      const result = await presentFamilyActivityPicker("personal", "Choose Apps to Block");
+      if (!result.cancelled) {
+        setPersonalBlockSelectionCount(result.count);
+        if (personalBlockEndsAt && personalBlockEndsAt.getTime() > Date.now() && result.count > 0) {
+          await setScreenTimeShieldReason("personal");
+          await enablePersonalBlocking();
+        }
+      }
+    } catch (error) {
+      Alert.alert("Block Setup", errorMessage(error, "Could not open app picker."));
+    }
+  }, [personalBlockEndsAt]);
+
+  const onStartPersonalBlock = useCallback(async () => {
+    if (shabbatBlockIsActive) {
+      Alert.alert("Shabbat Block Active", "You cannot start another block while Shabbat blocking is active.");
+      return;
+    }
+
+    try {
+      let count = personalBlockSelectionCount;
+      if (count <= 0) {
+        const result = await presentFamilyActivityPicker("personal", "Choose Apps to Block");
+        if (result.cancelled || result.count <= 0) {
+          Alert.alert("Selection Required", "Pick at least one app, category, or website to block.");
+          return;
+        }
+        count = result.count;
+        setPersonalBlockSelectionCount(result.count);
+      }
+
+      const parsedMinutes = Math.max(1, Math.min(24 * 60, Number(personalBlockDurationInput) || personalBlockMinutes));
+      setPersonalBlockMinutes(parsedMinutes);
+      setPersonalBlockDurationInput(String(parsedMinutes));
+      const endDate = new Date(Date.now() + parsedMinutes * 60000);
+      await setScreenTimeShieldReason("personal");
+      await enablePersonalBlocking();
+      await scheduleScreenTimeBlock("personal", new Date(Date.now() + 1000), endDate);
+      setPersonalBlockEndsAt(endDate);
+    } catch (error) {
+      Alert.alert("Block", errorMessage(error, "Could not start block."));
+    }
+  }, [personalBlockDurationInput, personalBlockMinutes, personalBlockSelectionCount, shabbatBlockIsActive]);
+
+  const onStopPersonalBlock = useCallback(async () => {
+    try {
+      await cancelScheduledScreenTimeBlock("personal");
+      if (!shabbatBlockIsActive) {
+        await disableAllBlocking();
+      }
+      setPersonalBlockEndsAt(null);
+    } catch (error) {
+      Alert.alert("Block", errorMessage(error, "Could not stop block."));
+    }
+  }, [shabbatBlockIsActive]);
+
   const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
     if (!user) return;
     setIntentHistory((prev) => ({ ...prev, [weekDate]: text }));
@@ -866,8 +956,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    getFamilyActivitySelectionSummary("custom")
-      .then((custom) => setCustomSelectionCount(custom.count))
+    Promise.all([
+      getFamilyActivitySelectionSummary("custom"),
+      getFamilyActivitySelectionSummary("personal"),
+    ])
+      .then(([custom, personal]) => {
+        setCustomSelectionCount(custom.count);
+        setPersonalBlockSelectionCount(personal.count);
+      })
       .catch(() => {});
   }, []);
 
@@ -2129,6 +2225,7 @@ export default function App() {
   }, [chatInput, user]);
 
   const openDmWith = useCallback((friend: UserProfile) => {
+    setActiveTab("social");
     setChattingWith(friend);
     setDmInput("");
     setSocialSubTab("dm");
@@ -2156,6 +2253,7 @@ export default function App() {
       setActiveBuddyChat(chat);
       setChattingWith(buddy);
       setBuddyChatInput("");
+      setActiveTab("buddies");
       setSocialSubTab("buddyChat");
       purgeExpiredMessages(chat.id).catch(() => {});
     } else {
@@ -2184,6 +2282,10 @@ export default function App() {
 
   const onBuddyChatCamera = useCallback(async () => {
     if (!user || !activeBuddyChat) return;
+    if (isShabbatNow) {
+      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
+      return;
+    }
     if (sunBlockedMessage) {
       Alert.alert("Tefillin Photo", sunBlockedMessage);
       return;
@@ -2202,10 +2304,14 @@ export default function App() {
     } catch {
       Alert.alert("Camera", "Camera is not available on this device.");
     }
-  }, [user, activeBuddyChat, sunBlockedMessage]);
+  }, [user, activeBuddyChat, isShabbatNow, sunBlockedMessage]);
 
   const onBuddyChatGallery = useCallback(async () => {
     if (!user || !activeBuddyChat) return;
+    if (isShabbatNow) {
+      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
+      return;
+    }
     try {
       const result = await launchImageLibrary({
         mediaType: "photo" as const,
@@ -2216,7 +2322,7 @@ export default function App() {
     } catch {
       Alert.alert("Gallery", "Could not open photo library.");
     }
-  }, [user, activeBuddyChat]);
+  }, [user, activeBuddyChat, isShabbatNow]);
 
   const onSendBuddyQuote = useCallback(async (quote: string) => {
     if (!user || !activeBuddyChat) return;
@@ -2237,6 +2343,10 @@ export default function App() {
 
   const handleBuddyImageSend = useCallback(async (imageUri: string, fromCamera: boolean) => {
     if (!user || !activeBuddyChat) return;
+    if (isShabbatNow) {
+      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
+      return;
+    }
     setBuddyChatImageLoading(true);
     queueBuddyChatSnapToBottom();
     try {
@@ -2267,7 +2377,7 @@ export default function App() {
     } finally {
       setBuddyChatImageLoading(false);
     }
-  }, [user, activeBuddyChat, currentLocation, queueBuddyChatSnapToBottom]);
+  }, [user, activeBuddyChat, currentLocation, isShabbatNow, queueBuddyChatSnapToBottom]);
 
   const onMarkBuddyMessageOpened = useCallback(async (msg: BuddyMessage) => {
     if (!activeBuddyChat || msg.opened || msg.senderUid === user?.uid) return;
@@ -2294,14 +2404,38 @@ export default function App() {
     }
   }, [activeBuddyChat, user]);
 
-  const onSaveImageToCameraRoll = useCallback(async (imageUrl: string) => {
+  const onToggleMessageSavedInChat = useCallback(async (msg: BuddyMessage) => {
+    if (!activeBuddyChat || !user) return;
+    const isSaved = msg.savedByUids?.includes(user.uid);
     try {
-      await CameraRoll.save(imageUrl, { type: "photo" });
-      Alert.alert("Saved", "Image saved to your camera roll.");
+      if (isSaved) {
+        await unsaveMessageFromChat(activeBuddyChat.id, msg.id, user.uid);
+      } else {
+        await saveMessageToChat(activeBuddyChat.id, msg.id, user.uid);
+      }
+      setBuddyChatMessages((prev) =>
+        prev.map((item) => {
+          if (item.id !== msg.id) return item;
+          const savedByUids = isSaved
+            ? (item.savedByUids ?? []).filter((uid) => uid !== user.uid)
+            : [...new Set([...(item.savedByUids ?? []), user.uid])];
+          return { ...item, savedByUids };
+        })
+      );
+      setViewingBuddyImage((prev) => {
+        if (!prev || prev.id !== msg.id) return prev;
+        const savedByUids = isSaved
+          ? (prev.savedByUids ?? []).filter((uid) => uid !== user.uid)
+          : [...new Set([...(prev.savedByUids ?? []), user.uid])];
+        return { ...prev, savedByUids };
+      });
+      if (isSaved) {
+        purgeExpiredMessages(activeBuddyChat.id).catch(() => {});
+      }
     } catch {
-      Alert.alert("Error", "Could not save image to camera roll. Make sure the app has photo library permissions.");
+      Alert.alert("Saved Image", isSaved ? "Could not unsave image." : "Could not save image.");
     }
-  }, []);
+  }, [activeBuddyChat, user]);
 
   /* ── group buddy chat callbacks ── */
   const openGroupChat = useCallback((chat: BuddyChat) => {
@@ -2309,6 +2443,7 @@ export default function App() {
     setActiveBuddyChat(chat);
     setChattingWith(null);
     setBuddyChatInput("");
+    setActiveTab("buddies");
     setSocialSubTab("buddyChat");
     purgeExpiredMessages(chat.id).catch(() => {});
   }, [queueBuddyChatSnapToBottom]);
@@ -2487,6 +2622,14 @@ export default function App() {
           <View style={[s.blockOption, s.blockOptionPlaceholder]} />
         </View>
 
+        {blockLevel === "custom" && (
+          <Pressable style={s.outlineBtn} onPress={onCustomizeShabbatBlock}>
+            <Text style={s.outlineBtnText}>
+              Customize Shabbat Block{customSelectionCount > 0 ? ` (${customSelectionCount} selected)` : ""}
+            </Text>
+          </Pressable>
+        )}
+
         {isModeActive && (
           <Pressable style={s.dangerBtn} onPress={() => setShowBreakConfirm(true)} disabled={actionLoading}>
             <Text style={s.dangerBtnText}>Break Shabbat</Text>
@@ -2659,6 +2802,193 @@ export default function App() {
     </KeyboardAvoidingView>
   );
 
+  const renderBlockTab = () => (
+    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>Custom Block</Text>
+        <Text style={s.sectionDesc}>
+          Start a separate app block for your own focus time. This does not affect Shabbat, prayer, or tefillin streaks.
+        </Text>
+        {shabbatBlockIsActive ? (
+          <View style={s.highlightBox}>
+            <Text style={s.highlightText}>Shabbat blocking is active, so no other blocks can be started right now.</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={[s.toggleLabel, { marginTop: 14 }]}>Duration</Text>
+            <View style={s.durationPills}>
+              {[15, 30, 60, 120].map((minutes) => (
+                <Pressable
+                  key={minutes}
+                  style={[s.timePill, personalBlockMinutes === minutes && s.timePillActive]}
+                  onPress={() => {
+                    setPersonalBlockMinutes(minutes);
+                    setPersonalBlockDurationInput(String(minutes));
+                  }}
+                >
+                  <Text style={[s.timePillText, personalBlockMinutes === minutes && s.timePillTextActive]}>
+                    {minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={s.customDurationRow}>
+              <TextInput
+                value={personalBlockDurationInput}
+                onChangeText={(text) => setPersonalBlockDurationInput(text.replace(/[^0-9]/g, ""))}
+                keyboardType="number-pad"
+                style={[s.authInput, s.customDurationInput]}
+                placeholder="Minutes"
+                placeholderTextColor={C.textLight}
+              />
+              <Text style={s.sectionDesc}>minutes</Text>
+            </View>
+            <Text style={[s.sectionDesc, { marginTop: 10 }]}>
+              {personalBlockSelectionCount > 0
+                ? `${personalBlockSelectionCount} apps, categories, or websites selected`
+                : "No apps selected yet"}
+            </Text>
+            <Pressable style={s.outlineBtn} onPress={onSetupPersonalBlock}>
+              <Text style={s.outlineBtnText}>Customize Apps</Text>
+            </Pressable>
+            {personalBlockEndsAt && personalBlockEndsAt.getTime() > Date.now() ? (
+              <>
+                <Text style={[s.sectionDesc, { textAlign: "center", marginTop: 10 }]}>
+                  Active until {formatTime(personalBlockEndsAt)}
+                </Text>
+                <Pressable style={s.dangerBtn} onPress={onStopPersonalBlock}>
+                  <Text style={s.dangerBtnText}>Stop Block</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable style={s.primaryBtn} onPress={onStartPersonalBlock}>
+                <Text style={s.primaryBtnText}>Start Block</Text>
+              </Pressable>
+            )}
+          </>
+        )}
+      </View>
+    </ScrollView>
+  );
+
+  const renderTefillinBuddiesTab = () => {
+    if (socialSubTab === "buddyChat" || socialSubTab === "groupCreate") {
+      return renderSocialTab();
+    }
+
+    return (
+      <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+        <View style={s.buddiesSection}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={s.buddiesSectionTitle}>Tefillin Buddies</Text>
+              <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
+                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+              </Pressable>
+            </View>
+            {friends.length >= 2 && (
+              <Pressable
+                style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                onPress={() => {
+                  setGroupCreateSelectedUids([]);
+                  setGroupCreateName("");
+                  setSocialSubTab("groupCreate");
+                }}
+              >
+                <Text style={[s.buddySnapBtnText, { color: "#FFF" }]}>+ Group</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {isShabbatNow && (
+            <View style={s.highlightBox}>
+              <Text style={s.highlightText}>It is Shabbat, so tefillin photos are disabled and streaks stay unchanged.</Text>
+            </View>
+          )}
+
+          {allBuddyChatsOrdered.length > 0 ? (
+            <View style={s.buddyStreakList}>
+              {allBuddyChatsOrdered.map((chat) => {
+                if (chat.type === "pair") {
+                  const buddyUid = chat.memberUids.find((uid) => uid !== user?.uid);
+                  const buddy = friends.find((f) => f.uid === buddyUid);
+                  if (!buddy) return null;
+                  const lastDate = buddy.lastTefillinDate;
+                  const isToday = lastDate === todayDateStr();
+                  return (
+                    <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
+                      <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
+                        <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
+                          <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                          {isToday && <View style={s.buddyAvatarDot} />}
+                        </View>
+                      </Pressable>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
+                        <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
+                      </View>
+                      <Pressable style={[s.buddySnapBtn, { backgroundColor: isShabbatNow ? C.border : C.primary }]} onPress={() => openBuddyChat(buddy)}>
+                        <CameraIcon size={22} color="#FFF" />
+                      </Pressable>
+                    </Pressable>
+                  );
+                }
+                const memberNames = chat.memberUids
+                  .filter((uid) => uid !== user?.uid)
+                  .map((uid) => friends.find((f) => f.uid === uid)?.displayName ?? "Unknown")
+                  .join(", ");
+                return (
+                  <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openGroupChat(chat)}>
+                    <View style={[s.buddyAvatarLarge, { backgroundColor: C.streakBg }]}>
+                      <Text style={[s.buddyAvatarLargeText, { color: C.streak }]}>{chat.memberUids.length}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.buddyNameLarge}>{chat.name ?? "Group"}</Text>
+                      <Text style={{ fontSize: 12, color: C.textSecondary }} numberOfLines={1}>{memberNames}</Text>
+                      <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
+                    </View>
+                    <Pressable style={[s.buddySnapBtn, { backgroundColor: isShabbatNow ? C.border : C.primary }]} onPress={() => openGroupChat(chat)}>
+                      <CameraIcon size={22} color="#FFF" />
+                    </Pressable>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={s.buddyEmptyState}>
+              <Text style={{ fontSize: 36, marginBottom: 8 }}>🤝</Text>
+              <Text style={s.buddyEmptyTitle}>No buddies yet</Text>
+              <Text style={s.buddyEmptyDesc}>Add a friend as a Tefillin Buddy below to start your streak together.</Text>
+            </View>
+          )}
+
+          {friends.length > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={s.buddyAddHeader}>Add a Tefillin Buddy</Text>
+              {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).map((friend) => (
+                <View key={friend.uid} style={s.buddyAddRow}>
+                  <Pressable onPress={() => setViewingFriend(friend)} hitSlop={4}>
+                    <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
+                  </Pressable>
+                  <Pressable style={{ flex: 1 }} onPress={() => openDmWith(friend)}>
+                    <Text style={s.friendName}>{friend.displayName ?? "Unknown"}</Text>
+                  </Pressable>
+                  <Pressable style={s.acceptBtn} onPress={() => onAddTefillinBuddy(friend.uid)} disabled={buddyActionLoading}>
+                    <Text style={s.acceptBtnText}>+ Add</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {friends.filter((f) => !tefillinBuddyUids.includes(f.uid)).length === 0 && (
+                <Text style={[s.emptyText, { paddingVertical: 8 }]}>All your friends are already buddies!</Text>
+              )}
+            </View>
+          )}
+        </View>
+        <View style={{ height: 24 }} />
+      </ScrollView>
+    );
+  };
+
   /* ═══════════════════════════════════════════════════════════ */
   /*                    RENDER: SOCIAL TAB                      */
   /* ═══════════════════════════════════════════════════════════ */
@@ -2787,12 +3117,11 @@ export default function App() {
             </View>
           )}
 
-          {/* Leaderboard header */}
-          <View style={s.leaderboardHeader}>
-            <Text style={s.leaderboardHeaderText}>Leaderboard</Text>
-          </View>
-
           {/* Friends Leaderboard */}
+          <View style={[s.leaderboardHeader, s.friendLeaderboardHeader]}>
+            <Text style={s.leaderboardHeaderText}>Friend Leaderboard</Text>
+            <Text style={s.leaderboardHeaderSubtext}>People you added as friends</Text>
+          </View>
           <View style={s.leaderboardCard}>
             {friends.length === 0 ? (
               <Text style={s.emptyText}>Add friends to see the leaderboard!</Text>
@@ -2813,27 +3142,26 @@ export default function App() {
           {/* Congregation Members */}
           {congregationMembers.length > 0 && (
             <>
-              <Pressable style={s.leaderboardHeader} onPress={() => setShowCongregationLeaderboard((v) => !v)}>
+              <View style={[s.leaderboardHeader, s.congregationLeaderboardHeader]}>
                 <Text style={s.leaderboardHeaderText}>
-                  {currentCongregation?.name ?? "Congregation"} {showCongregationLeaderboard ? "▲" : "▼"}
+                  Congregation Leaderboard
                 </Text>
-              </Pressable>
-              {showCongregationLeaderboard && (
-                <View style={s.leaderboardCard}>
-                  {congregationMembers
-                    .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
-                    .map((member, idx) => (
-                      <LeaderboardRow
-                        key={member.uid}
-                        profile={member}
-                        rank={idx + 1}
-                        isCurrentUser={member.uid === user?.uid}
-                        congregationName={currentCongregation?.name ?? null}
-                        onAvatarPress={() => setViewingFriend(member)}
-                      />
-                    ))}
-                </View>
-              )}
+                <Text style={s.leaderboardHeaderSubtext}>{currentCongregation?.name ?? "Your congregation"}</Text>
+              </View>
+              <View style={s.leaderboardCard}>
+                {congregationMembers
+                  .sort((a, b) => (b.currentStreak ?? 0) - (a.currentStreak ?? 0))
+                  .map((member, idx) => (
+                    <LeaderboardRow
+                      key={member.uid}
+                      profile={member}
+                      rank={idx + 1}
+                      isCurrentUser={member.uid === user?.uid}
+                      congregationName={currentCongregation?.name ?? null}
+                      onAvatarPress={() => setViewingFriend(member)}
+                    />
+                  ))}
+              </View>
             </>
           )}
 
@@ -2849,7 +3177,7 @@ export default function App() {
             )}
           </View>
 
-          {/* ── Tefillin Buddies Section (unified pair + group) ── */}
+          {false && (
           <View style={s.buddiesSection}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -2964,6 +3292,7 @@ export default function App() {
               </View>
             )}
           </View>
+          )}
 
           <View style={{ height: 24 }} />
         </ScrollView>
@@ -3052,10 +3381,12 @@ export default function App() {
       {/* Buddy Chat View (pair + group) */}
       {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
-          {sunBlockedMessage && (
+          {(sunBlockedMessage || isShabbatNow) && (
             <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{ fontSize: 16 }}>🌙</Text>
-              <Text style={{ color: "#92400E", fontSize: 13, flex: 1 }}>{sunBlockedMessage}</Text>
+              <Text style={{ color: "#92400E", fontSize: 13, flex: 1 }}>
+                {isShabbatNow ? "Tefillin photos are disabled on Shabbat." : sunBlockedMessage}
+              </Text>
             </View>
           )}
           {activeBuddyChat.type === "group" && groupDailyStatus && (
@@ -3099,8 +3430,12 @@ export default function App() {
               const isMine = item.senderUid === user?.uid;
               const isSaved = user ? item.savedByUids?.includes(user.uid) : false;
               const onPressMessage = () => {
-                if (!isMine && item.type === "image" && !item.opened) {
-                  onMarkBuddyMessageOpened(item);
+                if (item.type === "image" && item.imageUrl) {
+                  if (!isMine && !item.opened) {
+                    onMarkBuddyMessageOpened(item);
+                  }
+                  setViewingBuddyImage(item);
+                  return;
                 }
                 if (!isSaved) {
                   onSaveMessageToChat(item);
@@ -3108,11 +3443,7 @@ export default function App() {
               };
               const onLongPressImage = () => {
                 if (item.type !== "image" || !item.imageUrl) return;
-                const imageUrl = item.imageUrl;
-                Alert.alert("Image Options", undefined, [
-                  { text: "Save to Camera Roll", onPress: () => onSaveImageToCameraRoll(imageUrl) },
-                  { text: "Cancel", style: "cancel" },
-                ]);
+                onToggleMessageSavedInChat(item);
               };
               return (
                 <Pressable
@@ -3172,7 +3503,7 @@ export default function App() {
           />
           <View style={s.chatInputRow}>
             <Pressable
-              style={[s.buddyChatIconBtn, { backgroundColor: sunBlockedMessage ? C.border : C.primary }]}
+              style={[s.buddyChatIconBtn, { backgroundColor: (sunBlockedMessage || isShabbatNow) ? C.border : C.primary }]}
               onPress={onBuddyChatCamera}
               disabled={buddyChatImageLoading}
             >
@@ -3504,12 +3835,7 @@ export default function App() {
     );
   }
 
-  if (
-    isShabbatNow &&
-    blockLevel !== "none" &&
-    savedIntentText.trim().length > 0 &&
-    !shabbatBrokenLocally
-  ) {
+  if (shabbatBlockIsActive) {
     return (
       <SafeAreaView style={s.shabbatOnlyScreen}>
         <StatusBar barStyle="dark-content" />
@@ -3517,6 +3843,9 @@ export default function App() {
           <Text style={s.shabbatOnlyTitle}>Shabbat</Text>
           <Text style={s.shabbatOnlyTime}>
             Shabbat ends at {shabbatTimes ? formatTime(shabbatTimes.shabbatEnd) : "..."}
+          </Text>
+          <Text style={s.shabbatOnlyMessage}>
+            It is Shabbat. Shem is keeping the rest of your phone quiet. Open Shem only if you want to break Shabbat.
           </Text>
           <Text style={s.shabbatOnlyIntent}>{savedIntentText}</Text>
         </View>
@@ -3544,11 +3873,20 @@ export default function App() {
       {/* Header */}
       <View style={s.header}>
         <Text style={s.headerTitle}>
-          {activeTab === "home" ? "Home" : activeTab === "social" ? "Social" : "Torah"}
+          {activeTab === "home"
+            ? "Home"
+            : activeTab === "block"
+              ? "Block"
+              : activeTab === "social"
+                ? "Social"
+                : activeTab === "buddies"
+                  ? "Tefillin Buddies"
+                  : "Torah"}
         </Text>
         <Pressable style={s.profileBtn} onPress={() => setSettingsVisible(true)}>
           <View style={s.profileBtnCircle}>
             <Text style={s.profileBtnText}>{(user?.displayName ?? "?")[0]?.toUpperCase()}</Text>
+            {(user?.pendingFriendUids?.length ?? 0) > 0 && <View style={s.profileBadge} />}
           </View>
         </Pressable>
       </View>
@@ -3556,15 +3894,19 @@ export default function App() {
       {/* Body */}
       <Animated.View style={[s.body, { opacity: tabContentAnim, transform: [{ translateY: tabContentAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}>
         {activeTab === "home" && renderHomeTab()}
+        {activeTab === "block" && renderBlockTab()}
         {activeTab === "social" && renderSocialTab()}
+        {activeTab === "buddies" && renderTefillinBuddiesTab()}
         {activeTab === "parasha" && renderParashaTab()}
       </Animated.View>
 
       {/* Tab Bar — Torah / Home / Social */}
       <View style={s.tabBar}>
         <TabItem label="Torah" active={activeTab === "parasha"} onPress={() => setActiveTab("parasha")} />
+        <TabItem label="Block" active={activeTab === "block"} onPress={() => setActiveTab("block")} />
         <TabItem label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
-        <TabItem label="Social" active={activeTab === "social"} onPress={() => setActiveTab("social")} />
+        <TabItem label="Social" active={activeTab === "social"} onPress={() => { setSocialSubTab("friends"); setActiveTab("social"); }} />
+        <TabItem label="Buddies" active={activeTab === "buddies"} onPress={() => { setSocialSubTab("friends"); setActiveTab("buddies"); }} />
       </View>
 
       {/* ── Modals ── */}
@@ -3920,6 +4262,26 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Buddy Image Viewer */}
+      <Modal visible={viewingBuddyImage !== null} animationType="fade" transparent>
+        <View style={s.imageViewerOverlay}>
+          {viewingBuddyImage?.imageUrl && (
+            <Pressable style={s.imageViewerCloseArea} onPress={() => setViewingBuddyImage(null)}>
+              <ScrollView
+                style={s.imageViewerScroll}
+                contentContainerStyle={s.imageViewerScrollContent}
+                maximumZoomScale={4}
+                minimumZoomScale={1}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+              >
+                <Image source={{ uri: viewingBuddyImage.imageUrl }} style={s.imageViewerImage} resizeMode="contain" />
+              </ScrollView>
+            </Pressable>
+          )}
+        </View>
+      </Modal>
+
       {/* Prayer Blocking Overlay — blocks all app usage until user reads the prayer */}
       <Modal visible={prayerBlockingType !== null} animationType="fade">
         <View style={s.prayerBlockingContainer}>
@@ -3928,6 +4290,7 @@ export default function App() {
             <>
               <Text style={s.prayerBlockingLabel}>Good Morning</Text>
               <Text style={s.prayerBlockingTitle}>Modeh Ani</Text>
+              <Text style={s.prayerBlockingInstruction}>Open Shem and recite the Modeh Ani.</Text>
               <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.modehAni.hebrew}</Text>
               <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.modehAni.english}</Text>
             </>
@@ -3936,6 +4299,7 @@ export default function App() {
             <>
               <Text style={s.prayerBlockingLabel}>Good Night</Text>
               <Text style={s.prayerBlockingTitle}>Shema</Text>
+              <Text style={s.prayerBlockingInstruction}>Open Shem and recite the Shema.</Text>
               <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.shema.hebrew}</Text>
               <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.shema.english}</Text>
             </>
@@ -4334,6 +4698,7 @@ const s = StyleSheet.create({
   shabbatOnlyContent: { flex: 1, justifyContent: "center", alignItems: "center" },
   shabbatOnlyTitle: { fontSize: 34, fontWeight: "900", color: C.text, marginBottom: 10 },
   shabbatOnlyTime: { fontSize: 18, fontWeight: "700", color: C.textSecondary, textAlign: "center" },
+  shabbatOnlyMessage: { fontSize: 15, color: C.textSecondary, textAlign: "center", lineHeight: 22, marginTop: 18 },
   shabbatOnlyIntent: { fontSize: 15, color: C.textSecondary, textAlign: "center", lineHeight: 22, marginTop: 24 },
   shabbatOnlyActions: { paddingBottom: 18 },
 
@@ -4345,6 +4710,7 @@ const s = StyleSheet.create({
   profileBtn: { padding: 4 },
   profileBtnCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.primary, alignItems: "center", justifyContent: "center" },
   profileBtnText: { fontSize: 16, fontWeight: "700", color: "#FFF" },
+  profileBadge: { position: "absolute", top: -2, right: -2, width: 11, height: 11, borderRadius: 6, backgroundColor: C.danger, borderWidth: 2, borderColor: C.bg },
 
   /* tab bar */
   tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingBottom: 4, paddingTop: 10 },
@@ -4424,6 +4790,9 @@ const s = StyleSheet.create({
   timeSection: { marginTop: 12 },
   timeSectionTitle: { fontSize: 13, fontWeight: "700", color: C.textSecondary, marginBottom: 8 },
   timePills: { gap: 6 },
+  durationPills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  customDurationRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
+  customDurationInput: { width: 110, marginTop: 0 },
   timePill: { borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: C.bg },
   timePillActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
   timePillText: { fontSize: 12, fontWeight: "600", color: C.textSecondary },
@@ -4476,7 +4845,15 @@ const s = StyleSheet.create({
     fontSize: 32,
     fontWeight: "900",
     color: "#FFFFFF",
-    marginBottom: 32,
+    marginBottom: 12,
+  },
+  prayerBlockingInstruction: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+    lineHeight: 24,
+    marginBottom: 28,
   },
   prayerBlockingHebrew: {
     fontSize: 22,
@@ -4537,6 +4914,9 @@ const s = StyleSheet.create({
   /* leaderboard */
   leaderboardHeader: { backgroundColor: C.surface, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10, marginTop: 12 },
   leaderboardHeaderText: { fontSize: 14, fontWeight: "800", color: C.textSecondary, textAlign: "center", textTransform: "uppercase", letterSpacing: 1 },
+  leaderboardHeaderSubtext: { fontSize: 12, fontWeight: "600", color: C.textLight, textAlign: "center", marginTop: 3 },
+  friendLeaderboardHeader: { backgroundColor: C.primaryLight },
+  congregationLeaderboardHeader: { backgroundColor: C.streakBg },
   leaderboardCard: { backgroundColor: C.card, borderRadius: 20, padding: 12, marginTop: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 6, elevation: 2 },
 
   
@@ -4587,6 +4967,11 @@ const s = StyleSheet.create({
   snapImage: { width: "100%", height: "100%" },
   snapBadge: { position: "absolute", left: 10, bottom: 10, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
   snapBadgeText: { color: "#FFF", fontSize: 11, fontWeight: "800" },
+  imageViewerOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)", alignItems: "center", justifyContent: "center" },
+  imageViewerCloseArea: { flex: 1, alignSelf: "stretch" },
+  imageViewerScroll: { flex: 1 },
+  imageViewerScrollContent: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+  imageViewerImage: { width: 260, height: 520 },
 
   /* parasha */
   parashaHeader: { fontSize: 16, fontWeight: "700", color: C.textSecondary, marginTop: 8, marginBottom: 8 },

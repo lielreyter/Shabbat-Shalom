@@ -149,6 +149,16 @@ private func applyConfiguredBlocking() throws {
   }
 
   let store = ManagedSettingsStore()
+  store.shield.applications = nil
+  store.shield.webDomains = nil
+  store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
+}
+
+@available(iOS 16.0, *)
+private func applyFullBlocking() {
+  let store = ManagedSettingsStore()
+  store.shield.applications = nil
+  store.shield.webDomains = nil
   store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
 }
 
@@ -266,10 +276,39 @@ class ScreenTimeService: NSObject {
       return
     }
 
-    do {
-      try applyConfiguredBlocking()
+    applyFullBlocking()
+    if sharedDefaults()?.string(forKey: currentShieldReasonKey) == nil {
       setActiveShieldReason(currentScheduledReason())
-      resolve(nil)
+    }
+    resolve(nil)
+  }
+
+  @objc(setShieldReason:resolver:rejecter:)
+  func setShieldReason(
+    _ reason: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    setActiveShieldReason(reason)
+    resolve(nil)
+  }
+
+  @objc(enablePersonalBlocking:rejecter:)
+  func enablePersonalBlocking(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard #available(iOS 16.0, *) else {
+      reject("screen_time_unavailable",
+             "Screen Time blocking requires iOS 16 or newer.",
+             nil)
+      return
+    }
+
+    do {
+      let count = try applySelectionBlocking(mode: "personal")
+      setActiveShieldReason("personal")
+      resolve(["count": count])
     } catch {
       reject("screen_time_selection_missing",
              error.localizedDescription,
@@ -307,8 +346,7 @@ class ScreenTimeService: NSObject {
         return
       }
 
-      let store = ManagedSettingsStore()
-      store.shield.applicationCategories = .all(except: Set<ApplicationToken>())
+      applyFullBlocking()
       setActiveShieldReason(currentScheduledReason())
       resolve(["count": -1])
     } catch {

@@ -16,6 +16,7 @@ private enum ShemShieldReason {
     case modehAni
     case shema
     case shabbat
+    case personal
     case generic
 }
 
@@ -30,6 +31,8 @@ private func currentReason() -> ShemShieldReason {
         return .shema
     case "shabbat", "shem.shabbat":
         return .shabbat
+    case "personal", "shem.personal":
+        return .personal
     default:
         return .generic
     }
@@ -45,19 +48,23 @@ private func shieldConfiguration() -> ShieldConfiguration {
     switch reason {
     case .modehAni:
         title = "Modeh Ani"
-        subtitle = "Shem is blocking your apps because you need to read Modeh Ani. Open Shem, read it, then tap \"I have read this.\""
+        subtitle = "Open Shem and recite the Modeh Ani. After you tap \"I have read this,\" your apps will unlock for the day."
         primaryButton = "Close"
     case .shema:
         title = "Shema"
-        subtitle = "Shem is blocking your apps because you need to read Shema. Open Shem, read it, then tap \"I have read this.\""
+        subtitle = "Open Shem and recite the Shema. After you tap \"I have read this,\" your apps will unlock for the night."
         primaryButton = "Close"
     case .shabbat:
         title = "Shabbat"
-        subtitle = "Shem is blocking this app because it is Shabbat. It will unlock automatically after Shabbat ends."
+        subtitle = "It is Shabbat. Open Shem only if you want to break Shabbat."
+        primaryButton = "Close"
+    case .personal:
+        title = "Blocked by Shem"
+        subtitle = "This app is blocked by Shem."
         primaryButton = "Close"
     case .generic:
         title = "Shem"
-        subtitle = "This app is currently blocked by your Shem settings."
+        subtitle = "This app is blocked by Shem."
         primaryButton = "Close"
     }
 

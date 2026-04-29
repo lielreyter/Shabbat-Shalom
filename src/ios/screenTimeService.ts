@@ -7,25 +7,27 @@ import {
 type ScreenTimeNativeModule = {
   requestAuthorization: () => Promise<boolean>;
   enableFullAppBlocking: () => Promise<void>;
+  enablePersonalBlocking: () => Promise<{ count: number }>;
+  setShieldReason: (reason: "modehAni" | "shema" | "shabbat" | "personal" | "manual") => Promise<void>;
   enableBlockingMode: (
     mode: "full" | "medium" | "custom" | "none"
   ) => Promise<{ count: number }>;
   setBlockMode: (mode: "full" | "medium" | "custom" | "none") => Promise<void>;
   disableAllBlocking: () => Promise<void>;
   scheduleBlock: (
-    identifier: "modehAni" | "shema" | "shabbat",
+    identifier: "modehAni" | "shema" | "shabbat" | "personal",
     startIso: string,
     endIso: string
   ) => Promise<void>;
   cancelScheduledBlock: (
-    identifier: "modehAni" | "shema" | "shabbat"
+    identifier: "modehAni" | "shema" | "shabbat" | "personal"
   ) => Promise<void>;
   presentFamilyActivityPicker: (
-    mode: "medium" | "custom",
+    mode: "medium" | "custom" | "personal",
     title: string
   ) => Promise<{ cancelled: boolean; count: number }>;
   getFamilyActivitySelectionSummary: (
-    mode: "medium" | "custom"
+    mode: "medium" | "custom" | "personal"
   ) => Promise<{ count: number }>;
 };
 
@@ -87,6 +89,35 @@ export const enableFullAppBlocking = async (): Promise<void> => {
   }
 };
 
+export const setScreenTimeShieldReason = async (
+  reason: "modehAni" | "shema" | "shabbat" | "personal" | "manual"
+): Promise<void> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    return;
+  }
+  try {
+    await ensureModule().setShieldReason(reason);
+  } catch {
+    // Best-effort copy update; blocking should still continue.
+  }
+};
+
+export const enablePersonalBlocking = async (): Promise<{ count: number }> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    return { count: 0 };
+  }
+  try {
+    return await ensureModule().enablePersonalBlocking();
+  } catch {
+    throw {
+      code: ShabbatModeErrorCode.BLOCKING_FAILED,
+      message: "Failed to enable selected Screen Time blocking.",
+    } satisfies ShabbatModeError;
+  }
+};
+
 export const enableBlockingMode = async (
   mode: "full" | "medium" | "custom" | "none"
 ): Promise<{ count: number }> => {
@@ -138,7 +169,7 @@ export const disableAllBlocking = async (): Promise<void> => {
 };
 
 export const scheduleScreenTimeBlock = async (
-  identifier: "modehAni" | "shema" | "shabbat",
+  identifier: "modehAni" | "shema" | "shabbat" | "personal",
   startDate: Date,
   endDate: Date
 ): Promise<void> => {
@@ -160,7 +191,7 @@ export const scheduleScreenTimeBlock = async (
 };
 
 export const cancelScheduledScreenTimeBlock = async (
-  identifier: "modehAni" | "shema" | "shabbat"
+  identifier: "modehAni" | "shema" | "shabbat" | "personal"
 ): Promise<void> => {
   ensureIos();
   if (!ScreenTimeModule) {
@@ -179,7 +210,7 @@ export const cancelScheduledScreenTimeBlock = async (
 };
 
 export const presentFamilyActivityPicker = async (
-  mode: "medium" | "custom",
+  mode: "medium" | "custom" | "personal",
   title: string
 ): Promise<{ cancelled: boolean; count: number }> => {
   ensureIos();
@@ -198,7 +229,7 @@ export const presentFamilyActivityPicker = async (
 };
 
 export const getFamilyActivitySelectionSummary = async (
-  mode: "medium" | "custom"
+  mode: "medium" | "custom" | "personal"
 ): Promise<{ count: number }> => {
   ensureIos();
   if (!ScreenTimeModule) {
