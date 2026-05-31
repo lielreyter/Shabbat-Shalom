@@ -26,6 +26,7 @@ const getTimeZone = (): string => {
 };
 
 const userDocRef = (uid: string) => doc(firestore, "users", uid);
+const DEFAULT_SHABBAT_INTENTION = "To connect with Hashem";
 
 const normalizeWeekId = (weekId: string): string => weekId.trim();
 
@@ -50,7 +51,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     lastLoginAt: ensureTimestamp(data.lastLoginAt),
     displayName: data.displayName ?? null,
     email: data.email ?? null,
-    shabbatIntentText: data.shabbatIntentText ?? null,
+    shabbatIntentText: data.shabbatIntentText ?? DEFAULT_SHABBAT_INTENTION,
     wantsMorningReminders: data.wantsMorningReminders ?? false,
     wantsShabbatReminders: data.wantsShabbatReminders ?? true,
     timeZone: data.timeZone ?? getTimeZone(),
@@ -117,7 +118,7 @@ export const createUserProfile = async ({
     displayNameLower: displayName?.toLowerCase() ?? null,
     friendCode,
     email,
-    shabbatIntentText: null,
+    shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
     wantsMorningReminders: false,
     wantsShabbatReminders: true,
     timeZone: getTimeZone(),

@@ -1,7 +1,7 @@
 # Module 4: Reminder Engine (iOS-only)
 
 This document defines the technical requirements, architecture, and
-implementation details for Module 4 of the "Shabbat Shalom" iOS app.
+implementation details for Module 4 of the "Kesher" iOS app.
 Scope is limited to deterministic local reminder scheduling and cancellation.
 
 Module 3 (Shabbat Mode Engine) is assumed to already exist and run.

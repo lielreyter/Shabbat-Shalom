@@ -27,8 +27,8 @@ const todayStr = (tzid?: string): string => {
   return new Date().toISOString().slice(0, 10);
 };
 
-const cacheKey = (lat: number, lon: number, date: string): string =>
-  `${ZMANIM_CACHE_PREFIX}${lat.toFixed(2)}_${lon.toFixed(2)}_${date}`;
+const cacheKey = (lat: number, lon: number, tzid: string, date: string): string =>
+  `${ZMANIM_CACHE_PREFIX}${lat.toFixed(2)}_${lon.toFixed(2)}_${tzid}_${date}`;
 
 export const fetchZmanim = async (
   lat: number,
@@ -67,7 +67,7 @@ export const getCachedZmanim = async (
   tzid: string
 ): Promise<ZmanimResult> => {
   const date = todayStr(tzid);
-  const key = cacheKey(lat, lon, date);
+  const key = cacheKey(lat, lon, tzid, date);
 
   const cached = await AsyncStorage.getItem(key);
   if (cached) {
@@ -93,9 +93,9 @@ export const getCachedZmanim = async (
   );
 
   // Clean up yesterday's cache entry
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const oldKey = cacheKey(lat, lon, yesterday.toISOString().slice(0, 10));
+  const yesterday = new Date(`${date}T12:00:00Z`);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const oldKey = cacheKey(lat, lon, tzid, yesterday.toISOString().slice(0, 10));
   AsyncStorage.removeItem(oldKey).catch(() => {});
 
   return result;

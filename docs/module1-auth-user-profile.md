@@ -1,7 +1,7 @@
 # Module 1: Authentication & User Profile (iOS-only)
 
 This document defines the technical requirements, architecture, and
-implementation details for Module 1 of the "Shabbat Shalom" iOS app.
+implementation details for Module 1 of the "Kesher" iOS app.
 Scope is limited to authentication and user profile management.
 
 ## Goals

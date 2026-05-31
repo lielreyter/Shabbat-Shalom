@@ -33,5 +33,20 @@ target 'shabbat_shalomv1' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # App Store Connect requires debug symbols for embedded frameworks.
+    # Ensure Hermes is archived with a dSYM in Release builds.
+    installer.pods_project.targets.each do |target|
+      next unless target.name.include?('hermes')
+
+      target.build_configurations.each do |build_configuration|
+        next unless build_configuration.name == 'Release'
+
+        build_configuration.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym'
+        build_configuration.build_settings['GCC_GENERATE_DEBUGGING_SYMBOLS'] = 'YES'
+        build_configuration.build_settings['COPY_PHASE_STRIP'] = 'NO'
+        build_configuration.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+      end
+    end
   end
 end

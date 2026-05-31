@@ -289,7 +289,7 @@ class ScreenTimeService: NSObject {
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: RCTPromiseRejectBlock
   ) {
-    setActiveShieldReason(reason)
+    setActiveShieldReason(reason == "personal" ? "shem.personal" : reason)
     resolve(nil)
   }
 
@@ -307,7 +307,7 @@ class ScreenTimeService: NSObject {
 
     do {
       let count = try applySelectionBlocking(mode: "personal")
-      setActiveShieldReason("personal")
+      setActiveShieldReason("shem.personal")
       resolve(["count": count])
     } catch {
       reject("screen_time_selection_missing",

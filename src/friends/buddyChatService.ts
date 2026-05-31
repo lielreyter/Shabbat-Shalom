@@ -230,17 +230,10 @@ export const sendBuddyMessage = async (
     ) {
       try {
         const inSunWindow = await isWithinSunWindow(senderLat, senderLon, senderTzid);
-        if (!inSunWindow) {
-          throw new Error(
-            "The sun is not visible — tefillin photos can only be sent between sunrise and sunset"
-          );
-        }
-        streakEligible = true;
-      } catch (e) {
-        if (e instanceof Error && e.message.includes("sun is not visible")) {
-          throw e;
-        }
-        // Zmanim fetch failed — allow photo but without streak eligibility
+        streakEligible = inSunWindow;
+      } catch {
+        // Zmanim fetch failed — allow photo but without streak eligibility.
+        // The camera button performs the user-facing daylight check.
         streakEligible = false;
       }
     }

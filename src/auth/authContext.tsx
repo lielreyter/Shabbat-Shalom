@@ -132,7 +132,7 @@ const SignInScreen: React.FC<{
 }> = ({ isAppleSupported, error, onSignIn }) => {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Shabbat Shalom</Text>
+      <Text style={styles.title}>Kesher</Text>
       <Text style={styles.subtitle}>Sign in to continue.</Text>
       {!isAppleSupported && (
         <Text style={styles.errorText}>

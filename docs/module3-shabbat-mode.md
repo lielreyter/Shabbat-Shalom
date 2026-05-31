@@ -1,7 +1,7 @@
 # Module 3: Shabbat Mode Engine (iOS-only)
 
 This document defines the technical requirements, architecture, and
-implementation details for Module 3 of the "Shabbat Shalom" iOS app.
+implementation details for Module 3 of the "Kesher" iOS app.
 Scope is limited to Shabbat Mode scheduling, enforcement, intent flow,
 and streak state transitions.
 

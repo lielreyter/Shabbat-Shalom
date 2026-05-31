@@ -31,6 +31,13 @@ import { Timestamp } from "firebase/firestore";
 let cachedUserProfile: UserProfile | null = null;
 let pendingSignup = false;
 
+const EMAIL_VERIFICATION_BYPASS_EMAILS = new Set(["liel.reyter@gmail.com"]);
+const DEFAULT_SHABBAT_INTENTION = "To connect with Hashem";
+const EMAIL_VERIFICATION_CONTINUE_URL = "https://keshersocial.com/verify-email";
+
+const shouldBypassEmailVerification = (email: string | null): boolean =>
+  email !== null && EMAIL_VERIFICATION_BYPASS_EMAILS.has(email.trim().toLowerCase());
+
 const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
   "auth/invalid-credential": "Incorrect email or password.",
   "auth/wrong-password": "Incorrect password. Please try again.",
@@ -121,7 +128,7 @@ const hydrateProfileWithFallback = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? firebaseUser.displayName ?? "Dev User",
       email: email ?? firebaseUser.email ?? null,
-      shabbatIntentText: null,
+      shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -203,7 +210,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         lastLoginAt: Timestamp.now(),
         displayName: "Dev User",
         email: null,
-        shabbatIntentText: null,
+        shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -313,7 +320,7 @@ export const registerWithEmailPassword = async ({
       lastLoginAt: Timestamp.now(),
       displayName: null,
       email: trimmedEmail,
-      shabbatIntentText: null,
+      shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -406,7 +413,7 @@ export const confirmPhoneSignUp = async ({
       lastLoginAt: Timestamp.now(),
       displayName: null,
       email: result.user.email ?? null,
-      shabbatIntentText: null,
+      shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -454,7 +461,10 @@ export const sendVerification = async (): Promise<void> => {
   if (user.emailVerified) {
     return;
   }
-  await sendEmailVerification(user);
+  await sendEmailVerification(user, {
+    url: EMAIL_VERIFICATION_CONTINUE_URL,
+    handleCodeInApp: false,
+  });
 };
 
 export const checkEmailVerified = async (): Promise<boolean> => {
@@ -557,7 +567,8 @@ export const subscribeToAuthState = (
 
     const isUnverifiedEmail =
       !firebaseUser.emailVerified &&
-      firebaseUser.providerData.some((p) => p.providerId === "password");
+      firebaseUser.providerData.some((p) => p.providerId === "password") &&
+      !shouldBypassEmailVerification(firebaseUser.email);
 
     if (isUnverifiedEmail || pendingSignup) {
       const stub: UserProfile = cachedUserProfile ?? {
@@ -566,7 +577,7 @@ export const subscribeToAuthState = (
         lastLoginAt: Timestamp.now(),
         displayName: firebaseUser.displayName ?? null,
         email: firebaseUser.email ?? null,
-        shabbatIntentText: null,
+        shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",

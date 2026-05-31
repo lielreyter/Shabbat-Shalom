@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1A2845" />
+  <title>Kesher — Intentional Jewish living</title>
+  <meta name="description" content="Kesher helps you bring more intention, focus, and consistency into your Jewish life — Shabbat times, tefillin streaks, prayer reminders, and community." />
+  <link rel="canonical" href="https://keshersocial.com/" />
+  <meta property="og:title" content="Kesher — Intentional Jewish living" />
+  <meta property="og:description" content="Shabbat times, tefillin streaks, prayer reminders, and Jewish community accountability." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://keshersocial.com/" />
+  <meta name="twitter:card" content="summary" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cream: #FAF6EE;
+      --cream-deep: #F2EBDD;
+      --navy: #1A2845;
+      --navy-soft: #2C3E66;
+      --gold: #C9A55C;
+      --gold-deep: #A8853F;
+      --ink: #2C2A26;
+      --ink-soft: #6B6863;
+      --line: rgba(26, 40, 69, 0.12);
+      --shadow: 0 30px 60px -20px rgba(26, 40, 69, 0.15);
+      --radius: 20px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: var(--cream);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-weight: 600;
+      color: var(--navy);
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+      margin: 0;
+    }
+
+    p { margin: 0; }
+
+    a { color: inherit; }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 28px;
+    }
+
+    /* ─── Navigation ─── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      background: rgba(250, 246, 238, 0.85);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--navy), var(--navy-soft));
+      color: var(--cream);
+      display: grid;
+      place-items: center;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      font-weight: 600;
+      box-shadow: 0 8px 22px -10px rgba(26, 40, 69, 0.6);
+    }
+    .brand-name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--navy);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--ink-soft);
+      font-size: 14.5px;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+    .nav-links a:hover { color: var(--navy); }
+    .nav-cta {
+      background: var(--navy);
+      color: var(--cream) !important;
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-weight: 500 !important;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .nav-cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px -10px rgba(26, 40, 69, 0.5);
+    }
+    @media (max-width: 640px) {
+      .nav-links a:not(.nav-cta) { display: none; }
+    }
+
+    /* ─── Hero ─── */
+    .hero {
+      position: relative;
+      padding: 110px 0 90px;
+      text-align: center;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(60% 60% at 20% 10%, rgba(201, 165, 92, 0.18), transparent 60%),
+        radial-gradient(50% 60% at 90% 30%, rgba(26, 40, 69, 0.10), transparent 60%);
+      pointer-events: none;
+    }
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 600;
+      margin-bottom: 28px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: rgba(201, 165, 92, 0.12);
+      border: 1px solid rgba(201, 165, 92, 0.35);
+    }
+    .hero h1 {
+      font-size: clamp(48px, 7vw, 84px);
+      margin-bottom: 24px;
+    }
+    .hero h1 em {
+      font-style: italic;
+      color: var(--gold-deep);
+      font-weight: 500;
+    }
+    .hero-sub {
+      font-size: 19px;
+      color: var(--ink-soft);
+      max-width: 620px;
+      margin: 0 auto 40px;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 28px;
+      border-radius: 999px;
+      font-weight: 500;
+      font-size: 15px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .btn-primary {
+      background: var(--navy);
+      color: var(--cream);
+      box-shadow: 0 16px 40px -16px rgba(26, 40, 69, 0.6);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 20px 48px -16px rgba(26, 40, 69, 0.7);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--navy);
+      border: 1.5px solid var(--line);
+    }
+    .btn-ghost:hover {
+      background: rgba(26, 40, 69, 0.04);
+      border-color: rgba(26, 40, 69, 0.3);
+    }
+
+    .hero-hebrew {
+      margin-top: 80px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 24px;
+    }
+    .hero-hebrew-line {
+      flex: 0 0 80px;
+      height: 1px;
+      background: linear-gradient(to right, transparent, var(--line), transparent);
+    }
+    .hero-hebrew-text {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 44px;
+      color: var(--navy);
+      letter-spacing: 0.1em;
+    }
+
+    /* ─── Sections ─── */
+    section { padding: 100px 0; }
+    .section-eyebrow {
+      font-size: 12.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold-deep);
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: clamp(36px, 4.5vw, 52px);
+      margin-bottom: 18px;
+      max-width: 720px;
+    }
+    .section-lead {
+      font-size: 18px;
+      color: var(--ink-soft);
+      max-width: 640px;
+      margin-bottom: 56px;
+    }
+
+    /* ─── Features ─── */
+    .features {
+      background: var(--cream-deep);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    @media (max-width: 900px) { .feature-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px) { .feature-grid { grid-template-columns: 1fr; } }
+    .feature {
+      background: var(--cream);
+      border-radius: var(--radius);
+      padding: 36px 30px;
+      border: 1px solid var(--line);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .feature:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow);
+    }
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--navy), var(--navy-soft));
+      display: grid;
+      place-items: center;
+      margin-bottom: 20px;
+      color: var(--gold);
+    }
+    .feature h3 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    .feature p {
+      color: var(--ink-soft);
+      font-size: 15px;
+    }
+
+    /* ─── Quote / About ─── */
+    .about {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: center;
+    }
+    @media (max-width: 900px) {
+      .about { grid-template-columns: 1fr; gap: 48px; }
+    }
+    .about-quote {
+      position: relative;
+      padding: 40px 36px;
+      background: var(--navy);
+      color: var(--cream);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .about-quote::before {
+      content: "“";
+      position: absolute;
+      top: -32px;
+      left: 24px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 140px;
+      color: var(--gold);
+      line-height: 1;
+    }
+    .about-quote p {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 24px;
+      line-height: 1.4;
+      font-style: italic;
+      color: var(--cream);
+    }
+    .about-quote cite {
+      display: block;
+      margin-top: 24px;
+      font-family: 'Inter', sans-serif;
+      font-style: normal;
+      font-size: 13.5px;
+      letter-spacing: 0.06em;
+      color: var(--gold);
+      text-transform: uppercase;
+    }
+    .about-body p {
+      font-size: 17px;
+      color: var(--ink-soft);
+      margin-bottom: 18px;
+    }
+    .about-body strong { color: var(--navy); font-weight: 600; }
+
+    /* ─── Waitlist ─── */
+    .waitlist {
+      background: linear-gradient(180deg, var(--cream) 0%, var(--cream-deep) 100%);
+      text-align: center;
+    }
+    .waitlist-card {
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--cream);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 56px 44px;
+      box-shadow: var(--shadow);
+    }
+    .waitlist-card h2 {
+      font-size: clamp(34px, 4vw, 48px);
+      margin-bottom: 14px;
+    }
+    .waitlist-card .section-lead {
+      margin: 0 auto 36px;
+      text-align: center;
+    }
+    .waitlist-form {
+      display: flex;
+      gap: 10px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    @media (max-width: 520px) {
+      .waitlist-form { flex-direction: column; }
+    }
+    .waitlist-form input {
+      flex: 1;
+      padding: 16px 20px;
+      border-radius: 999px;
+      border: 1.5px solid var(--line);
+      background: var(--cream);
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--ink);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .waitlist-form input:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 4px rgba(26, 40, 69, 0.08);
+    }
+    .waitlist-success {
+      display: none;
+      margin-top: 28px;
+      padding: 18px 22px;
+      background: rgba(201, 165, 92, 0.15);
+      border: 1px solid rgba(201, 165, 92, 0.4);
+      border-radius: 14px;
+      color: var(--gold-deep);
+      font-weight: 500;
+    }
+    .waitlist-success.show { display: block; animation: rise 0.5s ease; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .waitlist-note {
+      margin-top: 20px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    /* ─── Contact ─── */
+    .contact {
+      text-align: center;
+    }
+    .contact-card {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 48px 36px;
+      background: var(--cream-deep);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .contact-email {
+      display: inline-block;
+      margin-top: 18px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 28px;
+      color: var(--navy);
+      text-decoration: none;
+      border-bottom: 1.5px solid var(--gold);
+      padding-bottom: 4px;
+      transition: color 0.2s ease;
+    }
+    .contact-email:hover { color: var(--gold-deep); }
+    .contact-meta {
+      margin-top: 22px;
+      font-size: 14px;
+      color: var(--ink-soft);
+    }
+
+    /* ─── Footer ─── */
+    footer {
+      background: var(--navy);
+      color: rgba(250, 246, 238, 0.85);
+      padding: 56px 0 36px;
+      font-size: 14px;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .footer-brand .brand-name { color: var(--cream); }
+    .footer-brand .brand-mark {
+      background: rgba(250, 246, 238, 0.1);
+      color: var(--cream);
+    }
+    .footer-links {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+    }
+    .footer-links a {
+      color: rgba(250, 246, 238, 0.7);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+    .footer-links a:hover { color: var(--cream); }
+    .footer-meta {
+      width: 100%;
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(250, 246, 238, 0.12);
+      font-size: 12.5px;
+      color: rgba(250, 246, 238, 0.55);
+      text-align: center;
+    }
+
+    /* ─── Reveal animation ─── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .reveal.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="container nav-inner">
+      <a href="#top" class="brand">
+        <div class="brand-mark">ק</div>
+        <div class="brand-name">Kesher</div>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="#waitlist" class="nav-cta">Join Waitlist</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="container">
+      <div class="hero-eyebrow">A name. A practice. A life.</div>
+      <h1>Live with <em>intention</em>,<br/>one mitzvah at a time.</h1>
+      <p class="hero-sub">
+        Kesher helps you bring focus, consistency, and meaning into your Jewish life — Shabbat times, tefillin streaks, daily prayers, and a community that keeps you accountable.
+      </p>
+      <div class="hero-actions">
+        <a href="#waitlist" class="btn btn-primary">Join the Waitlist →</a>
+        <a href="#features" class="btn btn-ghost">See What's Inside</a>
+      </div>
+      <div class="hero-hebrew">
+        <div class="hero-hebrew-line"></div>
+        <div class="hero-hebrew-text">קֶשֶׁר</div>
+        <div class="hero-hebrew-line"></div>
+      </div>
+    </div>
+  </header>
+
+  <section class="features" id="features">
+    <div class="container">
+      <div class="section-eyebrow reveal">Built for Jewish living</div>
+      <h2 class="section-title reveal">Everything you need to stay rooted and consistent.</h2>
+      <p class="section-lead reveal">
+        From the first words of Modeh Ani in the morning to lighting candles before Shabbat, Kesher quietly guides you through your day.
+      </p>
+
+      <div class="feature-grid">
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </div>
+          <h3>Shabbat Times</h3>
+          <p>Accurate candle-lighting and havdalah times for your exact location, with a gentle reminder before Shabbat begins.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h3>Tefillin Streaks</h3>
+          <p>Track every morning you wrap. Add a buddy for daily photo accountability — no streak, no excuses.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h3>Prayer Reminders</h3>
+          <p>Modeh Ani when you wake. Shema before you sleep. Quiet, beautifully timed prompts that don't pull you away.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          </div>
+          <h3>Shabbat Mode</h3>
+          <p>Block distracting apps from Friday sundown to Saturday night. Your phone rests so you can too.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3>Congregations & Buddies</h3>
+          <p>Find your shul. Connect with friends. Share weekly intentions and lift each other up — in person and in chat.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </div>
+          <h3>Weekly Parasha</h3>
+          <p>The week's Torah portion at your fingertips, plus videos from rabbis your community trusts.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="about">
+    <div class="container about">
+      <div class="about-quote reveal">
+        <p>
+          The phone has become the modern golden calf — bright, loud, demanding worship. The first step toward a holier life is learning, simply, to put it down.
+        </p>
+        <cite>— As per Charlie Kirk's bestselling book, <em>Stop in the Name of God</em></cite>
+      </div>
+      <div class="about-body reveal">
+        <div class="section-eyebrow">Why Kesher</div>
+        <h2 class="section-title">Technology should serve your soul, not steal it.</h2>
+        <p>
+          <strong>Kesher</strong> — the Hebrew word for <em>connection</em> — was built for people who want their devices to support their spiritual life instead of distracting from it.
+        </p>
+        <p>
+          We believe a small reminder, in the right moment, can be the difference between a missed mitzvah and a meaningful day. So we made the smallest, gentlest, most beautiful nudge we could imagine — and we wrapped it in a streak, a buddy, and a community.
+        </p>
+        <p>
+          One day at a time. One prayer at a time. One Shabbat at a time.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="waitlist" id="waitlist">
+    <div class="container">
+      <div class="waitlist-card reveal">
+        <div class="section-eyebrow">Coming soon to the App Store</div>
+        <h2>Be first to wrap.</h2>
+        <p class="section-lead">
+          Join the waitlist and we'll let you know the moment Kesher is available on your device.
+        </p>
+        <form class="waitlist-form" id="waitlistForm" novalidate>
+          <input type="email" name="email" id="emailInput" placeholder="you@example.com" required autocomplete="email" />
+          <button type="submit" class="btn btn-primary">Join Waitlist</button>
+        </form>
+        <div class="waitlist-success" id="waitlistSuccess">
+          You're on the list. We'll be in touch before launch. 🕯️
+        </div>
+        <p class="waitlist-note">No spam. We'll only email you about Kesher.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="contact" id="contact">
+    <div class="container">
+      <div class="contact-card reveal">
+        <div class="section-eyebrow">Contact & Support</div>
+        <h2 class="section-title" style="margin-left:auto;margin-right:auto;">Questions? Feedback? Just say hello.</h2>
+        <p class="section-lead" style="margin-left:auto;margin-right:auto;text-align:center;">
+          We read every message. Reach out and we'll get back to you within a few days.
+        </p>
+        <a class="contact-email" href="mailto:support@keshersocial.com">support@keshersocial.com</a>
+        <p class="contact-meta">For account, privacy, or deletion requests, please email the same address.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <div class="brand-mark">ק</div>
+          <div class="brand-name">Kesher</div>
+        </div>
+        <div class="footer-links">
+          <a href="#features">Features</a>
+          <a href="#about">About</a>
+          <a href="#waitlist">Waitlist</a>
+          <a href="#contact">Contact</a>
+          <a href="./privacy.html">Privacy</a>
+        </div>
+      </div>
+      <div class="footer-meta">
+        © <span id="year"></span> Kesher. Built with kavanah. קֶשֶׁר · Connection. Practice. Community.
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const form = document.getElementById('waitlistForm');
+    const success = document.getElementById('waitlistSuccess');
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('emailInput').value.trim();
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+        document.getElementById('emailInput').focus();
+        return;
+      }
+      try {
+        const existing = JSON.parse(localStorage.getItem('kesher_waitlist') || '[]');
+        if (!existing.includes(email)) existing.push(email);
+        localStorage.setItem('kesher_waitlist', JSON.stringify(existing));
+      } catch (_) { /* ignore */ }
+      form.reset();
+      success.classList.add('show');
+    });
+
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('show');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+  </script>
+
+</body>
+</html>

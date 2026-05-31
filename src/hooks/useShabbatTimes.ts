@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AppState } from "react-native";
 import {
   ShabbatTimeError,
   ShabbatTimeErrorCode,
@@ -17,6 +18,19 @@ type UseShabbatTimesState = {
   loading: boolean;
   error: ShabbatTimeError | null;
   refresh: () => Promise<void>;
+};
+
+const filterUpcomingHolidays = (times: ShabbatTimes): ShabbatTimes => {
+  const now = Date.now();
+  const holidays = times.holidays?.filter((holiday) => {
+    const relevantUntil = holiday.havdalah ?? holiday.candleLighting;
+    return relevantUntil !== null && relevantUntil.getTime() >= now;
+  });
+
+  return {
+    ...times,
+    holidays: holidays && holidays.length > 0 ? holidays : undefined,
+  };
 };
 
 const toError = (error: unknown): ShabbatTimeError => {
@@ -45,7 +59,7 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
     setError(null);
     try {
       const location = await getCurrentLocation();
-      const times = await getShabbatTimes(location);
+      const times = filterUpcomingHolidays(await getShabbatTimes(location));
       await setCachedShabbatTimes(times);
       setShabbatTimes(times);
     } catch (err) {
@@ -60,7 +74,7 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
     const initialize = async () => {
       const cached = await getCachedShabbatTimes();
       if (cached && isMounted) {
-        setShabbatTimes(cached);
+        setShabbatTimes(filterUpcomingHolidays(cached));
       }
       if (!cached) {
         await refresh();
@@ -83,6 +97,15 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
     return () => {
       isMounted = false;
     };
+  }, [refresh]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        refresh().catch(() => {});
+      }
+    });
+    return () => subscription.remove();
   }, [refresh]);
 
   const wrappedRefresh = useCallback(async () => {

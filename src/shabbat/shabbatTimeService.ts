@@ -75,15 +75,22 @@ const extractHolidays = (items: HebcalItem[]): HolidayEvent[] => {
     return date && date.getDay() !== 6;
   });
 
-  return holidayItems.map((h, i) => ({
-    name: h.title ?? "Holiday",
-    candleLighting: nonFridayCandles[i]
-      ? parseDate(nonFridayCandles[i]?.date)
-      : null,
-    havdalah: nonSaturdayHavdalah[i]
-      ? parseDate(nonSaturdayHavdalah[i]?.date)
-      : null,
-  }));
+  const now = Date.now();
+
+  return holidayItems
+    .map((h, i) => ({
+      name: h.title ?? "Holiday",
+      candleLighting: nonFridayCandles[i]
+        ? parseDate(nonFridayCandles[i]?.date)
+        : null,
+      havdalah: nonSaturdayHavdalah[i]
+        ? parseDate(nonSaturdayHavdalah[i]?.date)
+        : null,
+    }))
+    .filter((holiday) => {
+      const relevantUntil = holiday.havdalah ?? holiday.candleLighting;
+      return relevantUntil !== null && relevantUntil.getTime() >= now;
+    });
 };
 
 const toShabbatTimes = (

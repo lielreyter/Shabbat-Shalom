@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isWeeklyVideoUploader() {
+      return isSignedIn() &&
+        request.auth.token.email == "liel.reyter@gmail.com";
+    }
+
+    match /weeklyVideos/global/{weekId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isWeeklyVideoUploader()
+        && request.resource.size < 500 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+
+    match /buddyChats/{chatId}/{fileName} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

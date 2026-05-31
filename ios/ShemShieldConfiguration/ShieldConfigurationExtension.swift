@@ -48,23 +48,23 @@ private func shieldConfiguration() -> ShieldConfiguration {
     switch reason {
     case .modehAni:
         title = "Modeh Ani"
-        subtitle = "Open Shem and recite the Modeh Ani. After you tap \"I have read this,\" your apps will unlock for the day."
+        subtitle = "Open Kesher and recite the Modeh Ani. After you tap \"I have read this,\" your apps will unlock for the day."
         primaryButton = "Close"
     case .shema:
         title = "Shema"
-        subtitle = "Open Shem and recite the Shema. After you tap \"I have read this,\" your apps will unlock for the night."
+        subtitle = "Open Kesher and recite the Shema. After you tap \"I have read this,\" your apps will unlock for the night."
         primaryButton = "Close"
     case .shabbat:
         title = "Shabbat"
-        subtitle = "It is Shabbat. Open Shem only if you want to break Shabbat."
+        subtitle = "It is Shabbat. Open Kesher only if you want to break Shabbat."
         primaryButton = "Close"
     case .personal:
-        title = "Blocked by Shem"
-        subtitle = "This app is blocked by Shem."
+        title = "Blocked by Kesher"
+        subtitle = "This app is blocked by Kesher."
         primaryButton = "Close"
     case .generic:
-        title = "Shem"
-        subtitle = "This app is blocked by Shem."
+        title = "Kesher"
+        subtitle = "This app is blocked by Kesher."
         primaryButton = "Close"
     }
 

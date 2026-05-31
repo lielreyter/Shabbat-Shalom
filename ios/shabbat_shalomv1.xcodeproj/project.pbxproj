@@ -243,6 +243,7 @@
 				8E63485F2FA064C100CE431D /* Embed Foundation Extensions */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
+				D4E3B8E72C01A9D900C00101 /* Generate Hermes dSYM */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
 				FB05D9F27CF0B5DD79A71B04 /* [CP-User] [RNFB] Core Configuration */,
 			);
@@ -440,6 +441,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-shabbat_shalomv1/Pods-shabbat_shalomv1-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		D4E3B8E72C01A9D900C00101 /* Generate Hermes dSYM */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Generate Hermes dSYM";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CONFIGURATION}\" != \"Release\" ]; then\n  exit 0\nfi\n\nset -e\n\nfor framework_name in hermes hermesvm; do\n  binary_path=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/${framework_name}.framework/${framework_name}\"\n  dsym_path=\"${DWARF_DSYM_FOLDER_PATH}/${framework_name}.framework.dSYM\"\n\n  if [ -f \"${binary_path}\" ] && [ ! -d \"${dsym_path}\" ]; then\n    echo \"Generating dSYM for ${framework_name}.framework\"\n    xcrun dsymutil \"${binary_path}\" -o \"${dsym_path}\" || true\n  fi\ndone\n";
 			showEnvVarsInLog = 0;
 		};
 		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {

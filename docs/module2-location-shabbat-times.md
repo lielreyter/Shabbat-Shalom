@@ -1,7 +1,7 @@
 # Module 2: Location & Shabbat Times (iOS-only)
 
 This document defines the technical requirements, architecture, and
-implementation details for Module 2 of the "Shabbat Shalom" iOS app.
+implementation details for Module 2 of the "Kesher" iOS app.
 Scope is limited to location, Shabbat time retrieval, caching, and data
 exposure for other modules.
 

@@ -5,7 +5,9 @@
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
+    "ios:release": "react-native run-ios --mode Release",
     "lint": "eslint .",
+    "seed:screenshots": "node scripts/seedScreenshotData.mjs",
     "start": "react-native start",
     "test": "jest"
   },

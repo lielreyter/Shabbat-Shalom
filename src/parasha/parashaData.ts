@@ -317,7 +317,10 @@ export const getParashaInfo = (
   if (!hebcalName) {
     return null;
   }
-  return PARASHA_MAP[hebcalName] ?? null;
+  const normalizedName = hebcalName.startsWith("Parashat ")
+    ? hebcalName
+    : `Parashat ${hebcalName}`;
+  return PARASHA_MAP[hebcalName] ?? PARASHA_MAP[normalizedName] ?? null;
 };
 
 export const getChabadParashaUrl = (): string => {
