@@ -353,74 +353,6 @@
     }
     .about-body strong { color: var(--navy); font-weight: 600; }
 
-    /* ─── Waitlist ─── */
-    .waitlist {
-      background: linear-gradient(180deg, var(--cream) 0%, var(--cream-deep) 100%);
-      text-align: center;
-    }
-    .waitlist-card {
-      max-width: 640px;
-      margin: 0 auto;
-      background: var(--cream);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 56px 44px;
-      box-shadow: var(--shadow);
-    }
-    .waitlist-card h2 {
-      font-size: clamp(34px, 4vw, 48px);
-      margin-bottom: 14px;
-    }
-    .waitlist-card .section-lead {
-      margin: 0 auto 36px;
-      text-align: center;
-    }
-    .waitlist-form {
-      display: flex;
-      gap: 10px;
-      max-width: 480px;
-      margin: 0 auto;
-    }
-    @media (max-width: 520px) {
-      .waitlist-form { flex-direction: column; }
-    }
-    .waitlist-form input {
-      flex: 1;
-      padding: 16px 20px;
-      border-radius: 999px;
-      border: 1.5px solid var(--line);
-      background: var(--cream);
-      font-family: inherit;
-      font-size: 15px;
-      color: var(--ink);
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-    .waitlist-form input:focus {
-      outline: none;
-      border-color: var(--navy);
-      box-shadow: 0 0 0 4px rgba(26, 40, 69, 0.08);
-    }
-    .waitlist-success {
-      display: none;
-      margin-top: 28px;
-      padding: 18px 22px;
-      background: rgba(201, 165, 92, 0.15);
-      border: 1px solid rgba(201, 165, 92, 0.4);
-      border-radius: 14px;
-      color: var(--gold-deep);
-      font-weight: 500;
-    }
-    .waitlist-success.show { display: block; animation: rise 0.5s ease; }
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .waitlist-note {
-      margin-top: 20px;
-      font-size: 13px;
-      color: var(--ink-soft);
-    }
-
     /* ─── Contact ─── */
     .contact {
       text-align: center;
@@ -519,8 +451,7 @@
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#about">About</a>
-        <a href="#contact">Contact</a>
-        <a href="#waitlist" class="nav-cta">Join Waitlist</a>
+        <a href="#contact" class="nav-cta">Contact</a>
       </div>
     </div>
   </nav>
@@ -533,8 +464,8 @@
         Kesher helps you bring focus, consistency, and meaning into your Jewish life — Shabbat times, tefillin streaks, daily prayers, and a community that keeps you accountable.
       </p>
       <div class="hero-actions">
-        <a href="#waitlist" class="btn btn-primary">Join the Waitlist →</a>
-        <a href="#features" class="btn btn-ghost">See What's Inside</a>
+        <a href="#features" class="btn btn-primary">See What's Inside →</a>
+        <a href="#contact" class="btn btn-ghost">Contact Support</a>
       </div>
       <div class="hero-hebrew">
         <div class="hero-hebrew-line"></div>
@@ -628,26 +559,6 @@
     </div>
   </section>
 
-  <section class="waitlist" id="waitlist">
-    <div class="container">
-      <div class="waitlist-card reveal">
-        <div class="section-eyebrow">Coming soon to the App Store</div>
-        <h2>Be first to wrap.</h2>
-        <p class="section-lead">
-          Join the waitlist and we'll let you know the moment Kesher is available on your device.
-        </p>
-        <form class="waitlist-form" id="waitlistForm" novalidate>
-          <input type="email" name="email" id="emailInput" placeholder="you@example.com" required autocomplete="email" />
-          <button type="submit" class="btn btn-primary">Join Waitlist</button>
-        </form>
-        <div class="waitlist-success" id="waitlistSuccess">
-          You're on the list. We'll be in touch before launch. 🕯️
-        </div>
-        <p class="waitlist-note">No spam. We'll only email you about Kesher.</p>
-      </div>
-    </div>
-  </section>
-
   <section class="contact" id="contact">
     <div class="container">
       <div class="contact-card reveal">
@@ -656,7 +567,7 @@
         <p class="section-lead" style="margin-left:auto;margin-right:auto;text-align:center;">
           We read every message. Reach out and we'll get back to you within a few days.
         </p>
-        <a class="contact-email" href="mailto:support@keshersocial.com">support@keshersocial.com</a>
+        <a class="contact-email" href="mailto:keshersupport@gmail.com">keshersupport@gmail.com</a>
         <p class="contact-meta">For account, privacy, or deletion requests, please email the same address.</p>
       </div>
     </div>
@@ -672,7 +583,6 @@
         <div class="footer-links">
           <a href="#features">Features</a>
           <a href="#about">About</a>
-          <a href="#waitlist">Waitlist</a>
           <a href="#contact">Contact</a>
           <a href="./privacy.html">Privacy</a>
         </div>
@@ -685,24 +595,6 @@
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
-
-    const form = document.getElementById('waitlistForm');
-    const success = document.getElementById('waitlistSuccess');
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const email = document.getElementById('emailInput').value.trim();
-      if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-        document.getElementById('emailInput').focus();
-        return;
-      }
-      try {
-        const existing = JSON.parse(localStorage.getItem('kesher_waitlist') || '[]');
-        if (!existing.includes(email)) existing.push(email);
-        localStorage.setItem('kesher_waitlist', JSON.stringify(existing));
-      } catch (_) { /* ignore */ }
-      form.reset();
-      success.classList.add('show');
-    });
 
     const io = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {

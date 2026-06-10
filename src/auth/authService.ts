@@ -1,6 +1,6 @@
 import {
-  ConfirmationResult,
   GoogleAuthProvider,
+  PhoneAuthProvider,
   createUserWithEmailAndPassword,
   deleteUser,
   OAuthProvider,
@@ -8,13 +8,14 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  signInWithPhoneNumber,
   signInAnonymously,
   signInWithCredential,
   signOut as firebaseSignOut,
+  updateProfile,
   Unsubscribe,
   User as FirebaseUser,
 } from "firebase/auth";
+import nativeAuth from "@react-native-firebase/auth";
 import { auth } from "../firebase/firebaseConfig";
 import Config from "react-native-config";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -31,9 +32,12 @@ import { Timestamp } from "firebase/firestore";
 let cachedUserProfile: UserProfile | null = null;
 let pendingSignup = false;
 
+export type PhoneAuthConfirmation = {
+  verificationId: string;
+};
+
 const EMAIL_VERIFICATION_BYPASS_EMAILS = new Set(["liel.reyter@gmail.com"]);
 const DEFAULT_SHABBAT_INTENTION = "To connect with Hashem";
-const EMAIL_VERIFICATION_CONTINUE_URL = "https://keshersocial.com/verify-email";
 
 const shouldBypassEmailVerification = (email: string | null): boolean =>
   email !== null && EMAIL_VERIFICATION_BYPASS_EMAILS.has(email.trim().toLowerCase());
@@ -49,10 +53,16 @@ const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
   "auth/invalid-email": "Please enter a valid email address.",
   "auth/too-many-requests": "Too many attempts. Please try again later.",
   "auth/network-request-failed": "Network error. Check your connection.",
-  "auth/invalid-phone-number": "Invalid phone number. Use format: +15551234567",
+  "auth/invalid-phone-number": "Invalid phone number. Check the country and local number.",
   "auth/missing-phone-number": "Please enter a phone number.",
   "auth/invalid-verification-code": "Invalid verification code.",
   "auth/code-expired": "Verification code has expired. Request a new one.",
+  "auth/missing-verification-code": "Please enter the verification code.",
+  "auth/quota-exceeded": "SMS limit reached. Please try again later.",
+  "auth/captcha-check-failed": "Verification failed. Please try again.",
+  "auth/argument-error": "Phone sign-in could not start. Check that the number is valid and try again.",
+  "auth/operation-not-supported-in-this-environment":
+    "Phone sign-in is unavailable in this build. Make sure @react-native-firebase/auth is installed and pods are updated.",
   "auth/operation-not-allowed":
     "This sign-in method is not enabled. Enable it in Firebase Console > Authentication > Sign-in method.",
   "permission-denied":
@@ -194,6 +204,10 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         rawNonce: appleResult.rawNonce,
       });
       result = await signInWithCredential(auth, credential);
+      const appleDisplayName = appleResult.fullName?.trim();
+      if (appleDisplayName && appleDisplayName !== result.user.displayName) {
+        await updateProfile(result.user, { displayName: appleDisplayName });
+      }
     }
     return hydrateProfileWithFallback({
       firebaseUser: result.user,
@@ -304,9 +318,13 @@ export const signInWithEmailPassword = async ({
 export const registerWithEmailPassword = async ({
   email,
   password,
+  displayName,
+  gender,
 }: {
   email: string;
   password: string;
+  displayName?: string | null;
+  gender?: string | null;
 }): Promise<UserProfile> => {
   const trimmedEmail = email.trim();
   if (!trimmedEmail || !password) {
@@ -318,14 +336,14 @@ export const registerWithEmailPassword = async ({
       uid: result.user.uid,
       createdAt: Timestamp.now(),
       lastLoginAt: Timestamp.now(),
-      displayName: null,
+      displayName: displayName ?? null,
       email: trimmedEmail,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       platform: "ios",
-      gender: null,
+      gender: gender ?? null,
       profileImageUrl: null,
       currentStreak: 0,
       longestStreak: 0,
@@ -362,13 +380,17 @@ export const registerWithEmailPassword = async ({
 
 export const startPhoneSignIn = async (
   phoneNumber: string
-): Promise<ConfirmationResult> => {
+): Promise<PhoneAuthConfirmation> => {
   const trimmedPhone = phoneNumber.trim();
   if (!trimmedPhone) {
     throw new Error("Phone number is required.");
   }
   try {
-    return await signInWithPhoneNumber(auth, trimmedPhone);
+    const confirmation = await nativeAuth().signInWithPhoneNumber(trimmedPhone);
+    if (!confirmation.verificationId) {
+      throw new Error("Phone verification could not start. Please try again.");
+    }
+    return { verificationId: confirmation.verificationId };
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
@@ -378,7 +400,7 @@ export const confirmPhoneSignIn = async ({
   confirmation,
   code,
 }: {
-  confirmation: ConfirmationResult;
+  confirmation: PhoneAuthConfirmation;
   code: string;
 }): Promise<UserProfile> => {
   const trimmedCode = code.trim();
@@ -386,8 +408,13 @@ export const confirmPhoneSignIn = async ({
     throw new Error("Verification code is required.");
   }
   try {
-    const result = await confirmation.confirm(trimmedCode);
-    return hydrateProfileWithFallback({ firebaseUser: result.user });
+    const credential = PhoneAuthProvider.credential(confirmation.verificationId, trimmedCode);
+    const result = await signInWithCredential(auth, credential);
+    return hydrateProfileWithFallback({
+      firebaseUser: result.user,
+      displayName: result.user.displayName,
+      email: result.user.email,
+    });
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
@@ -396,9 +423,13 @@ export const confirmPhoneSignIn = async ({
 export const confirmPhoneSignUp = async ({
   confirmation,
   code,
+  displayName,
+  gender,
 }: {
-  confirmation: ConfirmationResult;
+  confirmation: PhoneAuthConfirmation;
   code: string;
+  displayName?: string | null;
+  gender?: string | null;
 }): Promise<UserProfile> => {
   const trimmedCode = code.trim();
   if (!trimmedCode) {
@@ -406,19 +437,20 @@ export const confirmPhoneSignUp = async ({
   }
   try {
     pendingSignup = true;
-    const result = await confirmation.confirm(trimmedCode);
+    const credential = PhoneAuthProvider.credential(confirmation.verificationId, trimmedCode);
+    const result = await signInWithCredential(auth, credential);
     const stub: UserProfile = {
       uid: result.user.uid,
       createdAt: Timestamp.now(),
       lastLoginAt: Timestamp.now(),
-      displayName: null,
+      displayName: displayName ?? null,
       email: result.user.email ?? null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       platform: "ios",
-      gender: null,
+      gender: gender ?? null,
       profileImageUrl: null,
       currentStreak: 0,
       longestStreak: 0,
@@ -447,6 +479,22 @@ export const confirmPhoneSignUp = async ({
       fcmToken: null,
     };
     cachedUserProfile = stub;
+    if (displayName || gender) {
+      const profile = await getOrCreateUserProfileOnLogin({
+        uid: result.user.uid,
+        displayName: displayName ?? null,
+        email: result.user.email ?? null,
+      });
+      const updated = await import("../firebase/firestore").then((m) =>
+        m.updateUserProfile(profile.uid, {
+          displayName: displayName ?? profile.displayName,
+          gender: gender ?? profile.gender,
+        })
+      );
+      cachedUserProfile = updated;
+      pendingSignup = false;
+      return updated;
+    }
     return stub;
   } catch (error) {
     throw mapFirebaseAuthError(error);
@@ -461,10 +509,15 @@ export const sendVerification = async (): Promise<void> => {
   if (user.emailVerified) {
     return;
   }
-  await sendEmailVerification(user, {
-    url: EMAIL_VERIFICATION_CONTINUE_URL,
-    handleCodeInApp: false,
-  });
+  // Send with Firebase's default hosted verification page. Passing a custom
+  // continue URL whose domain is not in the Firebase "Authorized domains" list
+  // causes sendEmailVerification to fail with auth/unauthorized-continue-uri,
+  // which silently stops the email from ever being delivered.
+  try {
+    await sendEmailVerification(user);
+  } catch (error) {
+    throw mapFirebaseAuthError(error);
+  }
 };
 
 export const checkEmailVerified = async (): Promise<boolean> => {
@@ -482,6 +535,49 @@ export const isEmailProvider = (): boolean => {
     return false;
   }
   return user.providerData.some((p) => p.providerId === "password");
+};
+
+export const isAppleProvider = (): boolean => {
+  const user = auth.currentUser;
+  if (!user) {
+    return false;
+  }
+  return user.providerData.some((p) => p.providerId === "apple.com");
+};
+
+export const getAuthUserDisplayName = (): string | null => {
+  const name = auth.currentUser?.displayName?.trim();
+  return name || null;
+};
+
+export const getAuthUserEmail = (): string | null => {
+  const email = auth.currentUser?.email?.trim();
+  return email || null;
+};
+
+const fallbackDisplayNameFromEmail = (email: string | null | undefined): string | null => {
+  const localPart = email?.split("@")[0]?.trim();
+  return localPart || null;
+};
+
+export const resolveProfileDisplayName = ({
+  profileDisplayName,
+  inputDisplayName,
+  authDisplayName,
+  email,
+}: {
+  profileDisplayName?: string | null;
+  inputDisplayName?: string | null;
+  authDisplayName?: string | null;
+  email?: string | null;
+}): string => {
+  const candidates = [
+    inputDisplayName?.trim(),
+    profileDisplayName?.trim(),
+    authDisplayName?.trim(),
+    fallbackDisplayNameFromEmail(email),
+  ];
+  return candidates.find((value) => Boolean(value)) ?? "Friend";
 };
 
 export const isCurrentUserEmailVerified = (): boolean => {
@@ -553,15 +649,31 @@ export const subscribeToAuthState = (
 
     // Validate the user still exists on the server (catches users
     // deleted from Firebase Console while the local token is cached).
+    // Only force a sign-out for definitive account problems — a transient
+    // network error must NOT lock the user out of a session they already have.
     if (!pendingSignup) {
       try {
         await firebaseUser.reload();
-      } catch {
-        await firebaseSignOut(auth);
-        cachedUserProfile = null;
-        pendingSignup = false;
-        callback(null);
-        return;
+      } catch (reloadError) {
+        const code =
+          reloadError && typeof reloadError === "object" && "code" in reloadError
+            ? String((reloadError as { code?: string }).code)
+            : "";
+        const fatalCodes = [
+          "auth/user-token-expired",
+          "auth/user-disabled",
+          "auth/user-not-found",
+          "auth/invalid-user-token",
+          "auth/requires-recent-login",
+        ];
+        if (fatalCodes.includes(code)) {
+          await firebaseSignOut(auth);
+          cachedUserProfile = null;
+          pendingSignup = false;
+          callback(null);
+          return;
+        }
+        // Transient/offline error: keep the existing session alive.
       }
     }
 
@@ -628,4 +740,3 @@ export const subscribeToAuthState = (
 
 export type { AuthError };
 export { AuthErrorCode };
-export type { ConfirmationResult as PhoneAuthConfirmation };

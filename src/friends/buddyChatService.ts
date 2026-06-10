@@ -55,6 +55,9 @@ const hydrateBuddyChat = (id: string, data: Record<string, unknown>): BuddyChat 
   longestStreak: typeof data.longestStreak === "number" ? data.longestStreak : 0,
   lastStreakDate: typeof data.lastStreakDate === "string" ? data.lastStreakDate : null,
   streakBrokenAt: typeof data.streakBrokenAt === "string" ? data.streakBrokenAt : null,
+  lastImageUrl: typeof data.lastImageUrl === "string" ? data.lastImageUrl : null,
+  lastImageSenderUid: typeof data.lastImageSenderUid === "string" ? data.lastImageSenderUid : null,
+  lastImageAt: data.lastImageAt instanceof Timestamp ? data.lastImageAt : null,
 });
 
 const hydrateBuddyMessage = (id: string, data: Record<string, unknown>): BuddyMessage => ({
@@ -85,6 +88,9 @@ export const createBuddyChat = async (
     longestStreak: 0,
     lastStreakDate: null,
     streakBrokenAt: null,
+    lastImageUrl: null,
+    lastImageSenderUid: null,
+    lastImageAt: null,
   };
 
   const docRef = await addDoc(chatsCol, payload);
@@ -254,6 +260,13 @@ export const sendBuddyMessage = async (
   const docRef = await addDoc(messagesCol(chatId), payload);
   await updateDoc(chatDoc(chatId), {
     lastActivityAt: serverTimestamp(),
+    ...(type === "image"
+      ? {
+          lastImageUrl: content,
+          lastImageSenderUid: senderUid,
+          lastImageAt: serverTimestamp(),
+        }
+      : {}),
   });
   const snap = await getDoc(docRef);
   return hydrateBuddyMessage(snap.id, snap.data() as Record<string, unknown>);

@@ -9,7 +9,7 @@ const isPushAuthorized = (status: number): boolean =>
 export const registerForChatPushNotifications = async (
   user: UserProfile
 ): Promise<UserProfile | null> => {
-  if (!user.wantsChatNotifications) {
+  if (user.wantsChatNotifications === false) {
     return null;
   }
 
@@ -43,7 +43,7 @@ export const subscribeToChatPushTokenRefresh = (
   onProfileUpdated: (profile: UserProfile) => void
 ): (() => void) => {
   return messaging().onTokenRefresh((token) => {
-    if (!user.wantsChatNotifications) {
+    if (user.wantsChatNotifications === false) {
       return;
     }
     updateUserProfile(user.uid, { fcmToken: token })

@@ -40,7 +40,7 @@ After DNS and SSL are live:
 
 Create or forward:
 
-- `support@keshersocial.com`
+- `keshersupport@gmail.com`
 
 The website and privacy policy now use this address.
 
@@ -62,4 +62,4 @@ Check these URLs after deploy:
 - `https://keshersocial.com/privacy`
 - `https://keshersocial.com/favicon.svg`
 
-Also verify the footer email link opens a compose window to `support@keshersocial.com`.
+Also verify the footer email link opens a compose window to `keshersupport@gmail.com`.

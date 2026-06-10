@@ -96,3 +96,32 @@ export const subscribeToCongregationMessages = (
     callback(messages);
   });
 };
+
+export const subscribeToLatestCongregationMessage = (
+  congregationId: string,
+  callback: (message: CongregationMessage | null) => void
+): Unsubscribe => {
+  const q = query(
+    messagesCollection(congregationId),
+    orderBy("createdAt", "desc"),
+    firestoreLimit(1)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const doc = snapshot.docs[0];
+    if (!doc) {
+      callback(null);
+      return;
+    }
+
+    const data = doc.data();
+    const ts = data.createdAt;
+    callback({
+      id: doc.id,
+      senderUid: data.senderUid ?? "",
+      senderName: data.senderName ?? "Unknown",
+      text: data.text ?? "",
+      createdAt: ts instanceof Timestamp ? ts.toDate() : new Date(),
+    });
+  });
+};

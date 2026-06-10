@@ -11,6 +11,9 @@ export interface BuddyChat {
   longestStreak: number;
   lastStreakDate: string | null;
   streakBrokenAt: string | null;
+  lastImageUrl: string | null;
+  lastImageSenderUid: string | null;
+  lastImageAt: Timestamp | null;
 }
 
 export interface BuddyMessage {

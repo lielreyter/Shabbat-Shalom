@@ -169,6 +169,28 @@ export const updateUserProfile = async (
   return hydrateUserProfile(uid, snapshot.data() as UserProfile);
 };
 
+/**
+ * Records that the user personally wrapped tefillin on the given calendar day
+ * (YYYY-MM-DD), advancing their individual tefillin streak. Idempotent per day:
+ * if the day was already recorded it returns the profile unchanged. This is the
+ * single source of truth for the user's individual streak, used by both the
+ * solo "did you wrap?" prompt and by sending a tefillin buddy photo.
+ */
+export const recordTefillinDay = async (
+  uid: string,
+  dateStr: string
+): Promise<UserProfile | null> => {
+  const profile = await getUserProfile(uid);
+  if (!profile) return null;
+  if (profile.lastTefillinDate === dateStr) return profile;
+  const nextStreak = (profile.tefillinCurrentStreak ?? 0) + 1;
+  return updateUserProfile(uid, {
+    tefillinCurrentStreak: nextStreak,
+    tefillinLongestStreak: Math.max(profile.tefillinLongestStreak ?? 0, nextStreak),
+    lastTefillinDate: dateStr,
+  });
+};
+
 export const getOrCreateUserProfileOnLogin = async ({
   uid,
   displayName,

@@ -5,6 +5,7 @@ import {
   Alert,
   AppState,
   Animated,
+  Dimensions,
   Easing,
   FlatList,
   Image,
@@ -38,6 +39,7 @@ import {
   saveIntentEntry,
   getIntentHistory,
   deleteUserProfile,
+  recordTefillinDay,
 } from "./src/firebase/firestore";
 import { useShabbatTimes } from "./src/hooks/useShabbatTimes";
 import { useShabbatMode } from "./src/hooks/useShabbatMode";
@@ -67,8 +69,11 @@ import {
   confirmPhoneSignUp,
   createProfileAfterVerification,
   deleteCurrentUser,
+  isAppleProvider,
   isCurrentUserEmailVerified,
   isEmailProvider,
+  getAuthUserDisplayName,
+  resolveProfileDisplayName,
   registerWithEmailPassword,
   resetPassword,
   sendVerification,
@@ -111,15 +116,17 @@ import {
   removeTefillinBuddy,
   getTefillinBuddyProfiles,
 } from "./src/friends/buddyService";
-import { getParashaInfo, getChabadParashaUrl } from "./src/parasha/parashaData";
+import { getParashaInfo, getRabbiGordonParashaUrl } from "./src/parasha/parashaData";
 import {
   sendCongregationMessage,
   subscribeToCongregationMessages,
+  subscribeToLatestCongregationMessage,
   type CongregationMessage,
 } from "./src/congregation/congregationMessages";
 import {
   sendDirectMessage,
   subscribeToDirectMessages,
+  subscribeToLatestDirectMessage,
   type DirectMessage,
 } from "./src/friends/directMessages";
 import {
@@ -218,6 +225,12 @@ type TabKey = "parasha" | "block" | "home" | "social" | "buddies";
 type UserSex = "male" | "female" | "";
 type SocialSubTab = "friends" | "chat" | "dm" | "buddyChat" | "groupCreate";
 type BlockLevel = "full" | "custom" | "none";
+type PhoneCountry = {
+  iso: string;
+  name: string;
+  dialCode: string;
+  flag: string;
+};
 type RestrictionSetting = {
   id: string;
   label: string;
@@ -242,17 +255,52 @@ const INTENT_HISTORY_KEY = "intentHistory:v1";
 const TEFILLIN_DATE_KEY_PREFIX = "tefillinConfirmedDay:v2:";
 const TEFILLIN_IGNORE_KEY_PREFIX = "tefillinPromptIgnoredDay:v2:";
 const TEFILLIN_HANDLED_DAY_KEY_PREFIX = "tefillinPromptHandledDay:v1:";
+const DIRECT_CHAT_READ_KEY_PREFIX = "directChatRead:v1:";
+const CONGREGATION_CHAT_READ_KEY_PREFIX = "congregationChatRead:v1:";
 const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
 const PERSONAL_BLOCK_ENDS_AT_KEY = "personalBlockEndsAt:v1";
 const PERSONAL_BLOCK_SUCCESS_COUNT_KEY = "personalBlockSuccessCount:v1";
 const PERSONAL_BLOCK_BROKEN_COUNT_KEY = "personalBlockBrokenCount:v1";
 const MODEH_ANI_DONE_PREFIX = "modehAniDone:v1:";
 const SHEMA_DONE_PREFIX = "shemaDone:v1:";
+// How long (in minutes) after a prayer's scheduled time the in-app blocking
+// overlay stays "due". Bounding this keeps a morning prayer from surfacing in
+// the evening (and vice-versa), so toggling one prayer can't trigger the other.
+const MODEH_ANI_WINDOW_MIN = 240; // morning: 4 hours after wake-up
+const SHEMA_WINDOW_MIN = 300; // night: 5 hours after (bed time − 15 min)
 const FOCUS_DIAL_MAX_MINUTES = 180;
 const FOCUS_DIAL_STEP_MINUTES = 5;
 const FOCUS_DIAL_SIZE = 230;
 const FOCUS_DIAL_KNOB_SIZE = 30;
 const FOCUS_DIAL_RADIUS = FOCUS_DIAL_SIZE / 2 - 9;
+
+const PHONE_COUNTRIES: PhoneCountry[] = [
+  { iso: "US", name: "United States", dialCode: "+1", flag: "US" },
+  { iso: "CA", name: "Canada", dialCode: "+1", flag: "CA" },
+  { iso: "IL", name: "Israel", dialCode: "+972", flag: "IL" },
+  { iso: "GB", name: "United Kingdom", dialCode: "+44", flag: "GB" },
+  { iso: "FR", name: "France", dialCode: "+33", flag: "FR" },
+  { iso: "AU", name: "Australia", dialCode: "+61", flag: "AU" },
+  { iso: "MX", name: "Mexico", dialCode: "+52", flag: "MX" },
+  { iso: "BR", name: "Brazil", dialCode: "+55", flag: "BR" },
+  { iso: "AR", name: "Argentina", dialCode: "+54", flag: "AR" },
+  { iso: "ZA", name: "South Africa", dialCode: "+27", flag: "ZA" },
+  { iso: "DE", name: "Germany", dialCode: "+49", flag: "DE" },
+  { iso: "ES", name: "Spain", dialCode: "+34", flag: "ES" },
+  { iso: "IT", name: "Italy", dialCode: "+39", flag: "IT" },
+  { iso: "NL", name: "Netherlands", dialCode: "+31", flag: "NL" },
+];
+
+const DEFAULT_PHONE_COUNTRY = PHONE_COUNTRIES[0];
+
+const formatPhoneForFirebase = (country: PhoneCountry, localPhone: string): string => {
+  const trimmed = localPhone.trim();
+  if (trimmed.startsWith("+")) {
+    return `+${trimmed.replace(/[^\d]/g, "")}`;
+  }
+  const digits = trimmed.replace(/\D/g, "").replace(/^0+/, "");
+  return `${country.dialCode}${digits}`;
+};
 
 
 const generateTimes = (startH: number, endH: number): string[] => {
@@ -320,11 +368,23 @@ const PRIVACY_POLICY_SECTIONS: { title: string; body: string }[] = [
 const PRAYER_TEXTS = {
   modehAni: {
     hebrew: "מוֹדֶה אֲנִי לְפָנֶיךָ מֶלֶךְ חַי וְקַיָּם, שֶׁהֶחֱזַרְתָּ בִּי נִשְׁמָתִי בְּחֶמְלָה, רַבָּה אֱמוּנָתֶךָ.",
+    transliteration:
+      "Modeh ani lefanecha, Melech chai v'kayam, shehechezarta bi nishmati b'chemlah, rabbah emunatecha.",
     english: "I gratefully thank You, living and eternal King, for You have returned my soul within me with compassion — abundant is Your faithfulness.",
   },
   shema: {
     hebrew: "שְׁמַע יִשְׂרָאֵל יְהוָה אֱלֹהֵינוּ יְהוָה אֶחָד.\nבָּרוּךְ שֵׁם כְּבוֹד מַלְכוּתוֹ לְעוֹלָם וָעֶד.",
+    transliteration:
+      "Shema Yisrael, Adonai Eloheinu, Adonai Echad.\nBaruch shem kevod malchuto l'olam va'ed.",
     english: "Hear, O Israel: The Lord is our God, the Lord is One.\nBlessed is the name of His glorious kingdom forever and ever.",
+  },
+  veahavta: {
+    hebrew:
+      "וְאָהַבְתָּ אֵת יְהוָה אֱלֹהֶיךָ, בְּכָל לְבָבְךָ וּבְכָל נַפְשְׁךָ וּבְכָל מְאֹדֶךָ.\nוְהָיוּ הַדְּבָרִים הָאֵלֶּה אֲשֶׁר אָנֹכִי מְצַוְּךָ הַיּוֹם עַל לְבָבֶךָ.",
+    transliteration:
+      "V'ahavta et Adonai Elohecha, b'chol l'vavcha uv'chol nafsh'cha uv'chol m'odecha.\nV'hayu had'varim ha'eileh asher anochi m'tzav'cha hayom al l'vavecha.",
+    english:
+      "You shall love the Lord your God with all your heart, with all your soul, and with all your might.\nThese words that I command you today shall be upon your heart.",
   },
 };
 
@@ -347,6 +407,23 @@ const RABBI_QUOTES: string[] = [
   "Tefillin: binding the mind and heart to God. Keep wrapping, keep connecting.",
   "Deed, not creed, is what matters most. — Rabbi Abraham Joshua Heschel",
   "When you put on tefillin, you are crowning God as King over your thoughts, emotions, and actions.",
+];
+
+// Shown full-screen while a personal focus block is active. A calm, randomly
+// chosen reminder about patience and self-mastery.
+const FOCUS_QUOTES: string[] = [
+  "Patience is a tree whose root is bitter, but its fruit is very sweet.",
+  "Who is mighty? One who conquers their own impulse. — Pirkei Avot 4:1",
+  "The reward is according to the effort. — Pirkei Avot 5:23",
+  "Stillness is not doing nothing. It is letting the noise settle so you can hear what matters.",
+  "Every moment you wait is a moment you choose yourself over the urge.",
+  "A small act of restraint today builds a stronger you tomorrow.",
+  "Be strong as a leopard, light as an eagle, swift as a deer to do the will of Heaven. — Pirkei Avot 5:20",
+  "The river cuts through rock not because of its power, but its persistence.",
+  "Silence the noise, and your own thoughts become a teacher.",
+  "You are not missing out. You are choosing in.",
+  "Discipline is choosing between what you want now and what you want most.",
+  "The phone can wait. This moment cannot be lived twice.",
 ];
 
 const defaultRestrictions: RestrictionSetting[] = [];
@@ -475,6 +552,10 @@ const localDateStr = (): string => {
 const tefillinDateKey = (uid: string): string => `${TEFILLIN_DATE_KEY_PREFIX}${uid}`;
 const tefillinIgnoreKey = (uid: string): string => `${TEFILLIN_IGNORE_KEY_PREFIX}${uid}`;
 const tefillinHandledDayKey = (uid: string): string => `${TEFILLIN_HANDLED_DAY_KEY_PREFIX}${uid}`;
+const directChatReadKey = (uid: string, friendUid: string): string =>
+  `${DIRECT_CHAT_READ_KEY_PREFIX}${uid}:${[uid, friendUid].sort().join("_")}`;
+const congregationChatReadKey = (uid: string, congregationId: string): string =>
+  `${CONGREGATION_CHAT_READ_KEY_PREFIX}${uid}:${congregationId}`;
 
 const formatCountdown = (milliseconds: number): string => {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -533,9 +614,83 @@ const getPastShabbatDates = (count: number): string[] => {
   return dates;
 };
 
+/* ─── splash ──────────────────────────────────────────────────── */
+
+function AppSplash({ onDone }: { onDone: () => void }) {
+  const { width, height } = Dimensions.get("window");
+  const translateX = useRef(new Animated.Value(-width / 2 - 60)).current;
+  const translateY = useRef(new Animated.Value(-height / 2 - 60)).current;
+  const scale = useRef(new Animated.Value(0.35)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const overlayOpacity = useRef(new Animated.Value(1)).current;
+  const labelOpacity = useRef(new Animated.Value(0)).current;
+  const labelShift = useRef(new Animated.Value(12)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      // 1. Bounce in from the top-left corner to the center.
+      Animated.parallel([
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 6, tension: 55 }),
+        Animated.spring(translateY, { toValue: 0, useNativeDriver: true, friction: 6, tension: 55 }),
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5, tension: 55 }),
+      ]),
+      // 2. Spin + pulse flourish while the wordmark fades up.
+      Animated.parallel([
+        Animated.timing(rotate, { toValue: 1, duration: 680, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.22, duration: 340, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1, duration: 340, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        ]),
+        Animated.timing(labelOpacity, { toValue: 1, duration: 520, useNativeDriver: true }),
+        Animated.timing(labelShift, { toValue: 0, duration: 520, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]),
+      Animated.delay(280),
+      Animated.timing(overlayOpacity, { toValue: 0, duration: 380, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+    ]).start(() => onDone());
+    // Run the intro animation exactly once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View style={[s.splashContainer, { opacity: overlayOpacity }]}>
+      <StatusBar barStyle="dark-content" />
+      <Animated.View
+        style={[
+          s.splashStarCircle,
+          { transform: [{ translateX }, { translateY }, { scale }, { rotate: spin }] },
+        ]}
+      >
+        <Text style={s.splashStar}>✡︎</Text>
+      </Animated.View>
+      <Animated.Text
+        style={[s.splashWordmark, { opacity: labelOpacity, transform: [{ translateY: labelShift }] }]}
+      >
+        Shabbat Shalom
+      </Animated.Text>
+    </Animated.View>
+  );
+}
+
+function AppCover() {
+  return (
+    <View style={s.appCover}>
+      <View style={s.splashStarCircle}>
+        <Text style={s.splashStar}>✡︎</Text>
+      </View>
+      <Text style={s.appCoverWordmark}>Shabbat Shalom</Text>
+      <Text style={s.appCoverSubtitle}>Keep Shabbat with intention</Text>
+    </View>
+  );
+}
+
 /* ─── app ─────────────────────────────────────────────────────── */
 
 export default function App() {
+  /* ── splash ── */
+  const [showSplash, setShowSplash] = useState(true);
+
   /* ── auth state ── */
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -547,6 +702,9 @@ export default function App() {
   const [authPhone, setAuthPhone] = useState("");
   const [authPhoneCode, setAuthPhoneCode] = useState("");
   const [phoneConfirmation, setPhoneConfirmation] = useState<PhoneAuthConfirmation | null>(null);
+  const [authPhoneCountry, setAuthPhoneCountry] = useState<PhoneCountry>(DEFAULT_PHONE_COUNTRY);
+  const [signupPhoneCountry, setSignupPhoneCountry] = useState<PhoneCountry>(DEFAULT_PHONE_COUNTRY);
+  const [phoneCountryPickerFor, setPhoneCountryPickerFor] = useState<"login" | "signup" | null>(null);
   const [signupMethod, setSignupMethod] = useState<"email" | "phone">("email");
   const [signupName, setSignupName] = useState("");
   const [signupSex, setSignupSex] = useState<UserSex>("");
@@ -590,6 +748,10 @@ export default function App() {
   const [personalBlockBrokenCount, setPersonalBlockBrokenCount] = useState(0);
   const [focusClockTick, setFocusClockTick] = useState(0);
   const [focusDialDragging, setFocusDialDragging] = useState(false);
+  const [focusQuote, setFocusQuote] = useState<string>("");
+  // Cooling-off period (seconds) before a focus block is actually lifted, so a
+  // user can change their mind and re-block during the countdown.
+  const [focusUnblockCountdown, setFocusUnblockCountdown] = useState<number | null>(null);
   const [intentDraft, setIntentDraft] = useState("");
   const [savedIntentText, setSavedIntentText] = useState("");
   const [intentModalVisible, setIntentModalVisible] = useState(false);
@@ -610,10 +772,15 @@ export default function App() {
   /* ── daily info ── */
   const [showDailyInfo, setShowDailyInfo] = useState<string | null>(null);
 
+  /* ── vertical time picker (wake / bed) ── */
+  const [timePickerKind, setTimePickerKind] = useState<"wake" | "bed" | null>(null);
+
   /* ── prayer blocking overlay (blocks apps until user acknowledges) ──
      This is the single Modeh Ani / Shema flow. It only triggers at the
      wake/bed time the user picked, and only once per day (per prayer). */
   const [prayerBlockingType, setPrayerBlockingType] = useState<"modehAni" | "shema" | null>(null);
+  const [showPrayerTransliteration, setShowPrayerTransliteration] = useState(false);
+  const [shemaPrayerPage, setShemaPrayerPage] = useState<0 | 1>(0);
 
   /* ── break shabbat confirmation ── */
   const [showBreakConfirm, setShowBreakConfirm] = useState(false);
@@ -653,11 +820,13 @@ export default function App() {
   /* ── chat ── */
   const [chatMessages, setChatMessages] = useState<CongregationMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
+  const [hasUnreadCongregationChat, setHasUnreadCongregationChat] = useState(false);
 
   /* ── direct messages ── */
   const [chattingWith, setChattingWith] = useState<UserProfile | null>(null);
   const [dmMessages, setDmMessages] = useState<DirectMessage[]>([]);
   const [dmInput, setDmInput] = useState("");
+  const [unreadDmUids, setUnreadDmUids] = useState<Record<string, boolean>>({});
 
   /* ── tefillin buddies ── */
   const [showBuddyInfo, setShowBuddyInfo] = useState(false);
@@ -697,10 +866,13 @@ export default function App() {
   const buddyChatShouldSnapRef = useRef(false);
   const focusDialRef = useRef<View | null>(null);
   const lastIntentSyncKeyRef = useRef<string | null>(null);
+  const manualTefillinPromptOpenRef = useRef(false);
   const tefillinDeclinedSessionRef = useRef<Record<string, boolean>>({});
 
   /* ── animation ── */
   const tabContentAnim = useRef(new Animated.Value(1)).current;
+  const tabSlideAnim = useRef(new Animated.Value(0)).current;
+  const prevTabIndexRef = useRef<number | null>(null);
   const breakResolveRef = useRef<((result: "ABORT" | "PROCEED") => void) | null>(null);
 
   /* ── hooks ── */
@@ -729,6 +901,11 @@ export default function App() {
     const now = Date.now();
     return now >= shabbatTimes.shabbatStart.getTime() && now < shabbatTimes.shabbatEnd.getTime();
   }, [shabbatTimes]);
+
+  // Tefillin is not worn on Shabbat (Saturday). Treat the whole local Saturday
+  // as a rest day so streaks take a gap and photos/streak updates are disabled.
+  const isSaturdayToday = useMemo(() => new Date().getDay() === 6, [appForegroundTick]);
+  const isTefillinRestDay = isShabbatNow || isSaturdayToday;
 
   const homeCity = useMemo(() => {
     if (city !== "Unknown city") return cleanCity(city);
@@ -771,15 +948,9 @@ export default function App() {
     [isFemaleUser]
   );
 
-  const displayTefillinStreak = useMemo(() => {
-    if (buddyChats.length > 0) {
-      const chatStreaks = buddyChats.map((c) => c.streakCount);
-      if (chatStreaks.length > 0) {
-        return Math.max(user?.tefillinCurrentStreak ?? 0, ...chatStreaks);
-      }
-    }
-    return user?.tefillinCurrentStreak ?? 0;
-  }, [buddyChats, user?.tefillinCurrentStreak]);
+  // The user's individual tefillin streak — tracked per-person based on whether
+  // they themselves wrapped each day, independent of any buddy's streak.
+  const displayTefillinStreak = user?.tefillinCurrentStreak ?? 0;
 
   const buddyChatSavedPeekOnly = useMemo(() => {
     if (!user || buddyChatMessages.length === 0) return false;
@@ -790,6 +961,36 @@ export default function App() {
     if (!buddyChatSavedPeekOnly) return 0;
     return Math.max(buddyChatViewportHeight, 180);
   }, [buddyChatSavedPeekOnly, buddyChatViewportHeight]);
+  const displayedChatMessages = useMemo(
+    () => [...chatMessages].reverse(),
+    [chatMessages]
+  );
+  const displayedDmMessages = useMemo(
+    () => [...dmMessages].reverse(),
+    [dmMessages]
+  );
+  const hasUnreadDirectMessages = useMemo(
+    () => Object.values(unreadDmUids).some(Boolean),
+    [unreadDmUids]
+  );
+  const hasUnreadSocialMessages = hasUnreadCongregationChat || hasUnreadDirectMessages;
+
+  const markDirectChatRead = useCallback((friendUid: string, readAtMs = Date.now()) => {
+    if (!user?.uid) return;
+    setUnreadDmUids((prev) => {
+      if (!prev[friendUid]) return prev;
+      const next = { ...prev };
+      delete next[friendUid];
+      return next;
+    });
+    AsyncStorage.setItem(directChatReadKey(user.uid, friendUid), String(readAtMs)).catch(() => {});
+  }, [user?.uid]);
+
+  const markCongregationChatRead = useCallback((readAtMs = Date.now()) => {
+    if (!user?.uid || !user.congregationId) return;
+    setHasUnreadCongregationChat(false);
+    AsyncStorage.setItem(congregationChatReadKey(user.uid, user.congregationId), String(readAtMs)).catch(() => {});
+  }, [user?.congregationId, user?.uid]);
 
   const updateFocusMinutesFromPoint = useCallback((x: number, y: number, originX = 0, originY = 0) => {
     const center = FOCUS_DIAL_SIZE / 2;
@@ -824,10 +1025,13 @@ export default function App() {
 
   const tabSwipePanResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_event, gestureState) =>
-      Math.abs(gestureState.dx) > 45 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.3,
+      Math.abs(gestureState.dx) > 28 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2,
     onPanResponderRelease: (_event, gestureState) => {
-      if (gestureState.dx < -45) goToAdjacentTab("next");
-      if (gestureState.dx > 45) goToAdjacentTab("prev");
+      // Commit on a clear horizontal drag OR a quick flick.
+      const committed = Math.abs(gestureState.dx) > 70 || Math.abs(gestureState.vx) > 0.35;
+      if (!committed) return;
+      if (gestureState.dx < 0) goToAdjacentTab("next");
+      else goToAdjacentTab("prev");
     },
   }), [goToAdjacentTab]);
 
@@ -894,22 +1098,27 @@ export default function App() {
   const refreshSoloTefillinPrompt = useCallback(async () => {
     if (!user) {
       setTefillinConfirmedToday(false);
+      manualTefillinPromptOpenRef.current = false;
       setSoloTefillinPromptVisible(false);
       return;
     }
     if (isFemaleUser) {
       setTefillinConfirmedToday(false);
+      manualTefillinPromptOpenRef.current = false;
       setSoloTefillinPromptVisible(false);
       return;
     }
     if (hasTefillinBuddies) {
       setTefillinConfirmedToday(false);
-      setSoloTefillinPromptVisible(false);
+      if (!manualTefillinPromptOpenRef.current) {
+        setSoloTefillinPromptVisible(false);
+      }
       return;
     }
     // Tefillin is not worn on Shabbat (Saturday). Suppress the prompt entirely.
     if (new Date().getDay() === 6) {
       setTefillinConfirmedToday(false);
+      manualTefillinPromptOpenRef.current = false;
       setSoloTefillinPromptVisible(false);
       return;
     }
@@ -925,7 +1134,9 @@ export default function App() {
     const alreadyHandledToday = handledDay === today;
     const ignoredToday = ignoredDay === today;
     const declinedThisSession = tefillinDeclinedSessionRef.current[user.uid] === true;
-    setSoloTefillinPromptVisible(!confirmed && !alreadyHandledToday && !ignoredToday && !declinedThisSession);
+    if (!manualTefillinPromptOpenRef.current) {
+      setSoloTefillinPromptVisible(!confirmed && !alreadyHandledToday && !ignoredToday && !declinedThisSession);
+    }
   }, [getSoloTefillinPromptDay, hasTefillinBuddies, isFemaleUser, user]);
 
   const schedulePrayerScreenTimeBlocks = useCallback(async (profile: UserProfile) => {
@@ -968,14 +1179,22 @@ export default function App() {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
     const todayKey = todayDateStr();
-    const duePrayers: { type: "modehAni" | "shema"; dueMinutes: number }[] = [];
+    // Minutes elapsed since a scheduled time, wrapping across midnight so a
+    // late-night prayer that crosses 00:00 is still measured correctly.
+    const minutesSince = (dueMinutes: number): number => {
+      let diff = currentMinutes - dueMinutes;
+      if (diff < 0) diff += 1440;
+      return diff;
+    };
+    const duePrayers: { type: "modehAni" | "shema"; elapsed: number }[] = [];
 
     if (user.wantsModehAniReminder && user.wakeUpTime) {
       const wakeMinutes = minutesFromHHMM(user.wakeUpTime);
       const doneKey = `${MODEH_ANI_DONE_PREFIX}${todayKey}`;
       const done = await AsyncStorage.getItem(doneKey);
-      if (!done && currentMinutes >= wakeMinutes) {
-        duePrayers.push({ type: "modehAni", dueMinutes: wakeMinutes });
+      const elapsed = minutesSince(wakeMinutes);
+      if (!done && elapsed <= MODEH_ANI_WINDOW_MIN) {
+        duePrayers.push({ type: "modehAni", elapsed });
       }
     }
 
@@ -983,13 +1202,16 @@ export default function App() {
       const bedMinutes = minutesFromHHMM(addMinutesToTimeStr(user.bedTime, -15));
       const doneKey = `${SHEMA_DONE_PREFIX}${todayKey}`;
       const done = await AsyncStorage.getItem(doneKey);
-      if (!done && currentMinutes >= bedMinutes) {
-        duePrayers.push({ type: "shema", dueMinutes: bedMinutes });
+      const elapsed = minutesSince(bedMinutes);
+      if (!done && elapsed <= SHEMA_WINDOW_MIN) {
+        duePrayers.push({ type: "shema", elapsed });
       }
     }
 
     if (duePrayers.length > 0) {
-      const nextPrayer = duePrayers.sort((a, b) => b.dueMinutes - a.dueMinutes)[0];
+      // If (rarely) both are active, show the one whose time arrived most
+      // recently so we never surface a stale prayer over the current one.
+      const nextPrayer = duePrayers.sort((a, b) => a.elapsed - b.elapsed)[0];
       setPrayerBlockingType(nextPrayer.type);
       setScreenTimeShieldReason(nextPrayer.type).catch(() => {});
       enableFullAppBlocking().catch(() => {});
@@ -1023,6 +1245,12 @@ export default function App() {
   useEffect(() => {
     checkPrayerBlocking().catch(() => {});
   }, [appForegroundTick, checkPrayerBlocking]);
+
+  useEffect(() => {
+    if (prayerBlockingType === "shema") {
+      setShemaPrayerPage(0);
+    }
+  }, [prayerBlockingType]);
 
   /* ── persistence helpers ── */
   const saveShabbatUiState = useCallback(async (next: ShabbatUiState) => {
@@ -1123,6 +1351,8 @@ export default function App() {
       await enablePersonalBlocking();
       await scheduleScreenTimeBlock("personal", new Date(Date.now() + 1000), endDate);
       setPersonalBlockEndsAt(endDate);
+      setFocusQuote(FOCUS_QUOTES[Math.floor(Math.random() * FOCUS_QUOTES.length)] ?? FOCUS_QUOTES[0]);
+      setFocusUnblockCountdown(null);
       await AsyncStorage.setItem(PERSONAL_BLOCK_ENDS_AT_KEY, endDate.toISOString());
     } catch (error) {
       Alert.alert("Block", errorMessage(error, "Could not start block."));
@@ -1156,6 +1386,41 @@ export default function App() {
       ]
     );
   }, [onStopPersonalBlock]);
+
+  // Begin the 20-second cooling-off period before apps actually unblock. Apps
+  // stay blocked during the countdown, and the user can re-block to cancel.
+  const beginFocusUnblock = useCallback(() => {
+    haptic(12);
+    setFocusUnblockCountdown(20);
+  }, []);
+
+  const cancelFocusUnblock = useCallback(() => {
+    haptic(8);
+    setFocusUnblockCountdown(null);
+  }, []);
+
+  useEffect(() => {
+    if (focusUnblockCountdown === null) return;
+    if (focusUnblockCountdown <= 0) {
+      setFocusUnblockCountdown(null);
+      onStopPersonalBlock();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setFocusUnblockCountdown((current) => (current === null ? null : current - 1));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [focusUnblockCountdown, onStopPersonalBlock]);
+
+  // Reset the cooldown whenever a block ends; ensure a quote is set when a block
+  // is active (covers blocks restored from storage after an app relaunch).
+  useEffect(() => {
+    if (personalBlockIsActive) {
+      setFocusQuote((q) => q || (FOCUS_QUOTES[Math.floor(Math.random() * FOCUS_QUOTES.length)] ?? FOCUS_QUOTES[0]));
+    } else {
+      setFocusUnblockCountdown(null);
+    }
+  }, [personalBlockIsActive]);
 
   const saveIntentHistoryEntry = useCallback(async (weekDate: string, text: string) => {
     if (!user) return;
@@ -1291,7 +1556,7 @@ export default function App() {
   }, [appForegroundTick, user]);
 
   useEffect(() => {
-    if (!user || !user.wantsChatNotifications) return;
+    if (!user || user.wantsChatNotifications === false) return;
     let mounted = true;
     registerForChatPushNotifications(user)
       .then((updated) => {
@@ -1329,19 +1594,35 @@ export default function App() {
       setSocialSubTab("friends");
     }
     if (isFemaleUser) {
+      manualTefillinPromptOpenRef.current = false;
       setSoloTefillinPromptVisible(false);
     }
   }, [activeTab, isFemaleUser]);
 
   useEffect(() => {
+    const idx = visibleTabs.indexOf(activeTab);
+    const prevIdx = prevTabIndexRef.current;
+    prevTabIndexRef.current = idx;
+    // Slide the new page in from the direction of travel: moving to a later tab
+    // enters from the right, an earlier tab from the left.
+    const direction = prevIdx === null || idx === prevIdx ? 0 : idx > prevIdx ? 1 : -1;
+    tabSlideAnim.setValue(direction * 48);
     tabContentAnim.setValue(0);
-    Animated.timing(tabContentAnim, {
-      toValue: 1,
-      duration: 200,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [activeTab, tabContentAnim]);
+    Animated.parallel([
+      Animated.timing(tabContentAnim, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(tabSlideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        friction: 9,
+        tension: 80,
+      }),
+    ]).start();
+  }, [activeTab, tabContentAnim, tabSlideAnim, visibleTabs]);
 
   useEffect(() => {
     setIntentFlowHandler((): Promise<IntentFlowResult> => {
@@ -1543,11 +1824,89 @@ export default function App() {
 
   /* ── direct message subscription ── */
   useEffect(() => {
-    if (!user || !chattingWith || socialSubTab !== "dm") return;
+    if (!user?.uid || !chattingWith?.uid || socialSubTab !== "dm") return;
     setDmMessages([]);
     const unsubscribe = subscribeToDirectMessages(user.uid, chattingWith.uid, setDmMessages);
     return () => unsubscribe();
-  }, [user, chattingWith, socialSubTab]);
+  }, [user?.uid, chattingWith?.uid, socialSubTab]);
+
+  useEffect(() => {
+    if (!user?.uid || !user.congregationId) {
+      setHasUnreadCongregationChat(false);
+      return;
+    }
+
+    let mounted = true;
+    const unsubscribe = subscribeToLatestCongregationMessage(user.congregationId, async (message) => {
+      if (!mounted || !message || message.senderUid === user.uid) return;
+      if (socialSubTab === "chat") {
+        markCongregationChatRead(message.createdAt.getTime());
+        return;
+      }
+      const lastReadMs = Number(
+        (await AsyncStorage.getItem(congregationChatReadKey(user.uid, user.congregationId ?? ""))) ?? "0"
+      );
+      if (message.createdAt.getTime() > lastReadMs) {
+        setHasUnreadCongregationChat(true);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [markCongregationChatRead, socialSubTab, user?.congregationId, user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid || friends.length === 0) {
+      setUnreadDmUids({});
+      return;
+    }
+
+    let mounted = true;
+    const friendUids = new Set(friends.map((friend) => friend.uid));
+    setUnreadDmUids((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([uid]) => friendUids.has(uid)))
+    );
+
+    const unsubscribes = friends.map((friend) =>
+      subscribeToLatestDirectMessage(user.uid, friend.uid, async (message) => {
+        if (!mounted || !message || message.senderUid === user.uid) return;
+        const isOpen = socialSubTab === "dm" && chattingWith?.uid === friend.uid;
+        if (isOpen) {
+          markDirectChatRead(friend.uid, message.createdAt.getTime());
+          return;
+        }
+        const lastReadMs = Number(
+          (await AsyncStorage.getItem(directChatReadKey(user.uid, friend.uid))) ?? "0"
+        );
+        if (message.createdAt.getTime() > lastReadMs) {
+          setUnreadDmUids((prev) => (prev[friend.uid] ? prev : { ...prev, [friend.uid]: true }));
+        }
+      })
+    );
+
+    return () => {
+      mounted = false;
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [chattingWith?.uid, friends, markDirectChatRead, socialSubTab, user?.uid]);
+
+  useEffect(() => {
+    if (socialSubTab !== "chat" || chatMessages.length === 0) return;
+    const latest = chatMessages[chatMessages.length - 1];
+    if (latest) {
+      markCongregationChatRead(latest.createdAt.getTime());
+    }
+  }, [chatMessages, markCongregationChatRead, socialSubTab]);
+
+  useEffect(() => {
+    if (socialSubTab !== "dm" || !chattingWith?.uid || dmMessages.length === 0) return;
+    const latest = dmMessages[dmMessages.length - 1];
+    if (latest) {
+      markDirectChatRead(chattingWith.uid, latest.createdAt.getTime());
+    }
+  }, [chattingWith?.uid, dmMessages, markDirectChatRead, socialSubTab]);
 
   /* ── load buddy chats ── */
   useEffect(() => {
@@ -1694,11 +2053,12 @@ export default function App() {
     setAuthError(null);
     setActionLoading(true);
     try {
-      const profile = await registerWithEmailPassword({ email, password: signupPassword });
-      setUser({ ...profile, displayName: name, gender: signupSex });
-      setPendingSignupData({ name, sex: signupSex });
+      await registerWithEmailPassword({ email, password: signupPassword, displayName: name, gender: signupSex });
+      const profile = await createProfileAfterVerification({ displayName: name, gender: signupSex });
+      setUser(profile);
+      setPendingSignupData(null);
       await sendVerification();
-      setResendCooldown(60);
+      setResendCooldown(25);
       setPendingEmailVerification(true);
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to create account."));
@@ -1708,10 +2068,15 @@ export default function App() {
   }, [signupConfirmPassword, signupEmail, signupName, signupPassword, signupSex]);
 
   const onPressSendPhoneCode = useCallback(async () => {
+    const formattedPhone = formatPhoneForFirebase(authPhoneCountry, authPhone);
     setAuthError(null);
+    if (!formattedPhone || formattedPhone === authPhoneCountry.dialCode) {
+      setAuthError("Please enter your phone number.");
+      return;
+    }
     setActionLoading(true);
     try {
-      const confirmation = await startPhoneSignIn(authPhone);
+      const confirmation = await startPhoneSignIn(formattedPhone);
       setPhoneConfirmation(confirmation);
       Alert.alert("Code sent", "Enter the verification code you received.");
     } catch (error) {
@@ -1719,7 +2084,7 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [authPhone]);
+  }, [authPhone, authPhoneCountry]);
 
   const onPressVerifyPhoneCode = useCallback(async () => {
     if (!phoneConfirmation) { setAuthError("Please request a verification code first."); return; }
@@ -1728,13 +2093,14 @@ export default function App() {
 
   const onPressSignupSendPhoneCode = useCallback(async () => {
     const name = signupName.trim();
+    const formattedPhone = formatPhoneForFirebase(signupPhoneCountry, signupPhone);
     if (!name) { setAuthError("Please enter your name."); return; }
     if (!signupSex) { setAuthError("Please select male or female."); return; }
-    if (!signupPhone.trim()) { setAuthError("Please enter your phone number."); return; }
+    if (!formattedPhone || formattedPhone === signupPhoneCountry.dialCode) { setAuthError("Please enter your phone number."); return; }
     setAuthError(null);
     setActionLoading(true);
     try {
-      const confirmation = await startPhoneSignIn(signupPhone);
+      const confirmation = await startPhoneSignIn(formattedPhone);
       setSignupPhoneConfirmation(confirmation);
       Alert.alert("Code sent", "Enter the verification code you received.");
     } catch (error) {
@@ -1742,15 +2108,19 @@ export default function App() {
     } finally {
       setActionLoading(false);
     }
-  }, [signupName, signupPhone, signupSex]);
+  }, [signupName, signupPhone, signupPhoneCountry, signupSex]);
 
   const onPressSignupVerifyPhoneCode = useCallback(async () => {
     if (!signupPhoneConfirmation) { setAuthError("Please request a verification code first."); return; }
     setAuthError(null);
     setActionLoading(true);
     try {
-      await confirmPhoneSignUp({ confirmation: signupPhoneConfirmation, code: signupPhoneCode });
-      const profile = await createProfileAfterVerification({ displayName: signupName.trim(), gender: signupSex });
+      const profile = await confirmPhoneSignUp({
+        confirmation: signupPhoneConfirmation,
+        code: signupPhoneCode,
+        displayName: signupName.trim(),
+        gender: signupSex,
+      });
       setUser(profile);
       setSignupPhoneConfirmation(null);
       setSignupPhoneCode("");
@@ -1823,7 +2193,7 @@ export default function App() {
     setActionLoading(true);
     try {
       await sendVerification();
-      setResendCooldown(60);
+      setResendCooldown(25);
       Alert.alert("Email sent", "A new verification email has been sent.");
     } catch (error) {
       setAuthError(errorMessage(error, "Failed to resend verification email."));
@@ -1939,8 +2309,17 @@ export default function App() {
   /* ── profile callbacks ── */
   const onSaveProfile = useCallback(async () => {
     if (!user) return;
-    const nextName = profileName.trim();
-    if (!nextName) { Alert.alert("Profile", "Name is required."); return; }
+    const appleSignedIn = isAppleProvider();
+    const nextName = resolveProfileDisplayName({
+      profileDisplayName: user.displayName,
+      inputDisplayName: profileName,
+      authDisplayName: getAuthUserDisplayName(),
+      email: user.email,
+    });
+    if (!appleSignedIn && !profileName.trim() && !user.displayName?.trim()) {
+      Alert.alert("Profile", "Name is required.");
+      return;
+    }
     if (!profileSex) { Alert.alert("Profile", "Select male or female."); return; }
     setActionLoading(true);
     try {
@@ -2050,7 +2429,7 @@ export default function App() {
 
   const onToggleChatNotifications = useCallback(async () => {
     if (!user) return;
-    const next = !user.wantsChatNotifications;
+    const next = user.wantsChatNotifications === false;
     setActionLoading(true);
     try {
       if (!next) {
@@ -2216,6 +2595,7 @@ export default function App() {
     const promptDay = await getSoloTefillinPromptDay();
     const today = localDateStr();
     setTefillinConfirmedToday(true);
+    manualTefillinPromptOpenRef.current = false;
     setSoloTefillinPromptVisible(false);
     await Promise.all([
       AsyncStorage.setItem(tefillinDateKey(user.uid), promptDay),
@@ -2223,19 +2603,29 @@ export default function App() {
       AsyncStorage.removeItem(tefillinIgnoreKey(user.uid)),
     ]);
     try {
-      const fresh = await getUserProfile(user.uid);
-      if (!fresh || fresh.lastTefillinDate === promptDay) return;
-      const nextStreak = fresh.tefillinCurrentStreak + 1;
-      const updated = await updateUserProfile(user.uid, {
-        tefillinCurrentStreak: nextStreak,
-        tefillinLongestStreak: Math.max(fresh.tefillinLongestStreak, nextStreak),
-        lastTefillinDate: promptDay,
-      });
-      setUser(updated);
+      const updated = await recordTefillinDay(user.uid, promptDay);
+      if (updated) setUser(updated);
     } catch { /* keep going */ }
   }, [getSoloTefillinPromptDay, user]);
 
+  // Manually re-open the "did you wrap tefillin today?" prompt — e.g. when the
+  // user taps their tefillin streak. Works whether or not they have buddies.
+  const openTefillinPrompt = useCallback(() => {
+    if (!user || isFemaleUser) return;
+    if (isSaturdayToday) {
+      Alert.alert(
+        "Tefillin",
+        "Tefillin is not worn on Shabbat (Saturday), so today is a gap day — your streak is safe."
+      );
+      return;
+    }
+    tefillinDeclinedSessionRef.current[user.uid] = false;
+    manualTefillinPromptOpenRef.current = true;
+    setSoloTefillinPromptVisible(true);
+  }, [isFemaleUser, isSaturdayToday, user]);
+
   const onDeclineTefillinPrompt = useCallback(() => {
+    manualTefillinPromptOpenRef.current = false;
     if (user) {
       tefillinDeclinedSessionRef.current[user.uid] = true;
     }
@@ -2244,6 +2634,7 @@ export default function App() {
 
   const onIgnoreTefillinPrompt = useCallback(async () => {
     if (!user) return;
+    manualTefillinPromptOpenRef.current = false;
     setSoloTefillinPromptVisible(false);
     const today = localDateStr();
     await Promise.all([
@@ -2611,6 +3002,11 @@ export default function App() {
   }, [user]);
 
   /* ── chat callbacks ── */
+  const openCongregationChat = useCallback(() => {
+    markCongregationChatRead();
+    setSocialSubTab("chat");
+  }, [markCongregationChatRead]);
+
   const onSendChat = useCallback(async () => {
     if (!user?.congregationId || !chatInput.trim()) return;
     const text = chatInput.trim();
@@ -2627,8 +3023,9 @@ export default function App() {
     setActiveTab("social");
     setChattingWith(friend);
     setDmInput("");
+    markDirectChatRead(friend.uid);
     setSocialSubTab("dm");
-  }, []);
+  }, [markDirectChatRead]);
 
   const onSendDm = useCallback(async () => {
     if (!user || !chattingWith || !dmInput.trim()) return;
@@ -2641,6 +3038,31 @@ export default function App() {
       Alert.alert("Message", errorMessage(error, "Failed to send message."));
     }
   }, [dmInput, user, chattingWith]);
+
+  const renderCongregationMessage = useCallback(
+    ({ item }: { item: CongregationMessage }) => {
+      const isMine = item.senderUid === user?.uid;
+      return (
+        <View style={[s.chatBubble, isMine && s.chatBubbleMine]}>
+          {!isMine && <Text style={s.chatSender}>{item.senderName}</Text>}
+          <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
+        </View>
+      );
+    },
+    [user?.uid]
+  );
+
+  const renderDirectMessage = useCallback(
+    ({ item }: { item: DirectMessage }) => {
+      const isMine = item.senderUid === user?.uid;
+      return (
+        <View style={[s.chatBubble, isMine && s.chatBubbleMine]}>
+          <Text style={[s.chatText, isMine && s.chatTextMine]}>{item.text}</Text>
+        </View>
+      );
+    },
+    [user?.uid]
+  );
 
   /* ── buddy chat callbacks ── */
   const openBuddyChat = useCallback((buddy: UserProfile) => {
@@ -2679,30 +3101,94 @@ export default function App() {
     }
   }, [buddyChatInput, user, activeBuddyChat, queueBuddyChatSnapToBottom]);
 
-  const onBuddyChatCamera = useCallback(async () => {
-    if (!user || !activeBuddyChat) return;
-    if (isShabbatNow) {
-      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
-      return;
-    }
+  const restDayPhotoMessage = useCallback(() => {
+    return isSaturdayToday && !isShabbatNow
+      ? "Tefillin is not worn on Shabbat (Saturday), so photos are disabled today. Your streak takes a gap day — you won't lose it."
+      : "Tefillin photos are disabled on Shabbat.";
+  }, [isSaturdayToday, isShabbatNow]);
+
+  // Confirms the sun is up so a photo can count toward the streak. Returns true
+  // when it's safe to proceed (or when the check can't run).
+  const ensureSunWindowForPhoto = useCallback(async (): Promise<boolean> => {
+    if (!user) return false;
     const lat = currentLocation?.latitude ?? user.latitude;
     const lon = currentLocation?.longitude ?? user.longitude;
     const tzid = currentLocation?.timezone ?? user.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (lat != null && lon != null) {
-      try {
-        const visible = await isWithinSunWindow(lat, lon, tzid);
-        if (!visible) {
-          const message = "The sun is not visible — tefillin photos can only be sent between sunrise and sunset";
-          setSunBlockedMessage(message);
-          Alert.alert("Tefillin Photo", message);
-          return;
-        }
-        setSunBlockedMessage(null);
-      } catch {
-        // If the live check fails, don't block a real camera photo based on a stale banner.
-        setSunBlockedMessage(null);
+    if (lat == null || lon == null) return true;
+    try {
+      const visible = await isWithinSunWindow(lat, lon, tzid);
+      if (!visible) {
+        const message = "The sun is not visible — tefillin photos can only be sent between sunrise and sunset";
+        setSunBlockedMessage(message);
+        Alert.alert("Tefillin Photo", message);
+        return false;
       }
+      setSunBlockedMessage(null);
+      return true;
+    } catch {
+      // If the live check fails, don't block a real camera photo on a stale banner.
+      setSunBlockedMessage(null);
+      return true;
     }
+  }, [currentLocation, user]);
+
+  const uploadAndSendBuddyPhoto = useCallback(async (chat: BuddyChat, imageUri: string, fromCamera: boolean) => {
+    if (!user) return;
+    if (fromCamera && isTefillinRestDay) {
+      Alert.alert("Tefillin Photo", restDayPhotoMessage());
+      return;
+    }
+    setBuddyChatImageLoading(true);
+    if (chat.id === activeBuddyChat?.id) queueBuddyChatSnapToBottom();
+    try {
+      const downloadUrl = await uploadBuddyImage(chat.id, user.uid, imageUri);
+      await sendBuddyMessage(
+        chat.id,
+        user.uid,
+        user.displayName ?? "Anonymous",
+        "image",
+        downloadUrl,
+        currentLocation?.latitude ?? user.latitude,
+        currentLocation?.longitude ?? user.longitude,
+        currentLocation?.timezone ?? user.timeZone,
+        fromCamera
+      );
+      if (fromCamera) {
+        // Advance the user's individual tefillin streak for today, and mark the
+        // solo prompt handled so it won't nag after a real photo.
+        const today = localDateStr();
+        recordTefillinDay(user.uid, today)
+          .then((updated) => { if (updated) setUser(updated); })
+          .catch(() => {});
+        AsyncStorage.setItem(tefillinDateKey(user.uid), today).catch(() => {});
+        AsyncStorage.setItem(tefillinHandledDayKey(user.uid), today).catch(() => {});
+        setSoloTefillinPromptVisible(false);
+        // Re-evaluate the shared buddy-chat streaks (mutual completion).
+        evaluateAllStreaks(user.uid)
+          .then(() => {
+            getUserBuddyChats(user.uid).then(setBuddyChats).catch(() => {});
+          })
+          .catch(() => {});
+      }
+    } catch (error) {
+      Alert.alert("Tefillin Photo", errorMessage(error, "Failed to send image."));
+    } finally {
+      setBuddyChatImageLoading(false);
+    }
+  }, [activeBuddyChat?.id, currentLocation, isTefillinRestDay, queueBuddyChatSnapToBottom, restDayPhotoMessage, user]);
+
+  const handleBuddyImageSend = useCallback(async (imageUri: string, fromCamera: boolean) => {
+    if (!activeBuddyChat) return;
+    await uploadAndSendBuddyPhoto(activeBuddyChat, imageUri, fromCamera);
+  }, [activeBuddyChat, uploadAndSendBuddyPhoto]);
+
+  const onBuddyChatCamera = useCallback(async () => {
+    if (!user || !activeBuddyChat) return;
+    if (isTefillinRestDay) {
+      Alert.alert("Tefillin Photo", restDayPhotoMessage());
+      return;
+    }
+    if (!(await ensureSunWindowForPhoto())) return;
     try {
       const result = await launchCamera({
         mediaType: "photo" as const,
@@ -2717,12 +3203,42 @@ export default function App() {
     } catch {
       Alert.alert("Camera", "Camera is not available on this device.");
     }
-  }, [user, activeBuddyChat, currentLocation, isShabbatNow]);
+  }, [activeBuddyChat, ensureSunWindowForPhoto, isTefillinRestDay, restDayPhotoMessage, user]);
+
+  // Take a tefillin photo directly from a buddy/group row without first opening
+  // the chat thread. Sends the photo, updates the streak, and stays in place.
+  const captureTefillinPhoto = useCallback(async (chat: BuddyChat) => {
+    if (!user) return;
+    if (isTefillinRestDay) {
+      Alert.alert("Tefillin Photo", restDayPhotoMessage());
+      return;
+    }
+    if (!(await ensureSunWindowForPhoto())) return;
+    try {
+      const result = await launchCamera({
+        mediaType: "photo" as const,
+        quality: 0.7,
+      });
+      if (result.errorCode) {
+        Alert.alert("Camera", result.errorMessage ?? "Camera is not available on this device.");
+        return;
+      }
+      if (result.didCancel || !result.assets?.[0]?.uri) return;
+      await uploadAndSendBuddyPhoto(chat, result.assets[0].uri, true);
+      haptic(12);
+      Alert.alert(
+        "Tefillin Photo Sent",
+        `Your tefillin photo was sent${chat.type === "group" ? ` to ${chat.name ?? "your group"}` : ""}. Your streak is updated.`
+      );
+    } catch {
+      Alert.alert("Camera", "Camera is not available on this device.");
+    }
+  }, [ensureSunWindowForPhoto, isTefillinRestDay, restDayPhotoMessage, uploadAndSendBuddyPhoto, user]);
 
   const onBuddyChatGallery = useCallback(async () => {
     if (!user || !activeBuddyChat) return;
-    if (isShabbatNow) {
-      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
+    if (isTefillinRestDay) {
+      Alert.alert("Tefillin Photo", restDayPhotoMessage());
       return;
     }
     try {
@@ -2735,7 +3251,7 @@ export default function App() {
     } catch {
       Alert.alert("Gallery", "Could not open photo library.");
     }
-  }, [user, activeBuddyChat, isShabbatNow]);
+  }, [activeBuddyChat, isTefillinRestDay, restDayPhotoMessage, user]);
 
   const onSendBuddyQuote = useCallback(async (quote: string) => {
     if (!user || !activeBuddyChat) return;
@@ -2753,44 +3269,6 @@ export default function App() {
       Alert.alert("Quote", errorMessage(error, "Failed to send quote."));
     }
   }, [user, activeBuddyChat, queueBuddyChatSnapToBottom]);
-
-  const handleBuddyImageSend = useCallback(async (imageUri: string, fromCamera: boolean) => {
-    if (!user || !activeBuddyChat) return;
-    if (isShabbatNow) {
-      Alert.alert("Tefillin Photo", "Tefillin photos are disabled on Shabbat.");
-      return;
-    }
-    setBuddyChatImageLoading(true);
-    queueBuddyChatSnapToBottom();
-    try {
-      const downloadUrl = await uploadBuddyImage(activeBuddyChat.id, user.uid, imageUri);
-      await sendBuddyMessage(
-        activeBuddyChat.id,
-        user.uid,
-        user.displayName ?? "Anonymous",
-        "image",
-        downloadUrl,
-        currentLocation?.latitude ?? user.latitude,
-        currentLocation?.longitude ?? user.longitude,
-        currentLocation?.timezone ?? user.timeZone,
-        fromCamera
-      );
-      if (fromCamera) {
-        evaluateAllStreaks(user.uid)
-          .then(() => {
-            getUserBuddyChats(user.uid).then(setBuddyChats).catch(() => {});
-            getUserProfile(user.uid).then((updated) => {
-              if (updated) setUser(updated);
-            }).catch(() => {});
-          })
-          .catch(() => {});
-      }
-    } catch (error) {
-      Alert.alert("Tefillin Photo", errorMessage(error, "Failed to send image."));
-    } finally {
-      setBuddyChatImageLoading(false);
-    }
-  }, [user, activeBuddyChat, currentLocation, isShabbatNow, queueBuddyChatSnapToBottom]);
 
   const onMarkBuddyMessageOpened = useCallback(async (msg: BuddyMessage) => {
     if (!activeBuddyChat || msg.opened || msg.senderUid === user?.uid) return;
@@ -3012,6 +3490,20 @@ export default function App() {
     return [...buddyChats].sort((a, b) => chatSortKey(b) - chatSortKey(a));
   }, [buddyChats]);
 
+  const latestIncomingBuddyImageFor = useCallback(
+    (friendUid: string): string | null => {
+      const chat = allBuddyChatsOrdered.find(
+        (candidate) =>
+          candidate.type === "pair" &&
+          candidate.memberUids.includes(friendUid) &&
+          candidate.lastImageSenderUid === friendUid &&
+          !!candidate.lastImageUrl
+      );
+      return chat?.lastImageUrl ?? null;
+    },
+    [allBuddyChatsOrdered]
+  );
+
   /* ── time display ── */
   const timesDisplay = useMemo(() => {
     if (timesLoading) return "Loading...";
@@ -3046,18 +3538,13 @@ export default function App() {
           <Text style={s.streakLabel}>Shabbat Streak</Text>
         </View>
         {!isFemaleUser && (
-          <View style={[s.streakCard, { backgroundColor: C.primaryLight }]}>
+          <Pressable style={[s.streakCard, { backgroundColor: C.primaryLight }]} onPress={openTefillinPrompt}>
             <Text style={[s.streakNumber, { color: C.primary }]}>{displayTefillinStreak}</Text>
             <Text style={[s.streakLabel, { color: C.primary }]}>Tefillin Streak</Text>
-          </View>
+            <Text style={{ fontSize: 10, color: C.primary, marginTop: 2, fontWeight: "600" }}>Tap to log today</Text>
+          </Pressable>
         )}
       </View>
-
-      {!isFemaleUser && hasTefillinBuddies && (
-        <View style={[s.tefillinPromptBar, { backgroundColor: C.primaryLight, marginTop: 12 }]}>
-          <Text style={[s.tefillinPromptText, { color: C.primary }]}>Your tefillin streak is tracked through your buddies.</Text>
-        </View>
-      )}
 
       {WEEKLY_VIDEO_FEATURE_ENABLED && isWeeklyVideoUploader && (
         <View style={s.sectionCard}>
@@ -3093,18 +3580,6 @@ export default function App() {
           )}
         </View>
       )}
-
-      {/* Shabbat Times */}
-      <View style={s.sectionCard}>
-        <Text style={s.sectionTitle}>This Shabbat</Text>
-        <Text style={s.sectionValue}>{timesDisplay}</Text>
-        {isShabbatNow && <View style={s.liveBadge}><Text style={s.liveBadgeText}>SHABBAT NOW</Text></View>}
-        {!isStreakEligible && (
-          <Text style={{ fontSize: 11, color: C.textLight, marginTop: 6 }}>
-            Select a block mode below to keep your streak alive each Shabbat.
-          </Text>
-        )}
-      </View>
 
       {/* Shabbat Block Level */}
       <View style={s.sectionCard}>
@@ -3218,13 +3693,10 @@ export default function App() {
                   ? "Modeh Ani prayer overlay at this time"
                   : "Tefillin notification 15 min after this time"}
             </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {WAKE_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.wakeUpTime === t && s.timePillActive]} onPress={() => onSetWakeTime(t)}>
-                  <Text style={[s.timePillText, user?.wakeUpTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <Pressable style={s.timeSelectRow} onPress={() => setTimePickerKind("wake")}>
+              <Text style={[s.timeSelectValue, !user?.wakeUpTime && { color: C.textLight }]}>{user?.wakeUpTime ?? "Set wake-up time"}</Text>
+              <Text style={s.timeSelectChevron}>⌄</Text>
+            </Pressable>
           </View>
         )}
 
@@ -3250,13 +3722,10 @@ export default function App() {
         {user?.wantsShemaReminder && (
           <View style={s.inlineTimeSection}>
             <Text style={s.timeSectionTitle}>Bed Time</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.timePills}>
-              {BED_TIMES.map((t) => (
-                <Pressable key={t} style={[s.timePill, user?.bedTime === t && s.timePillActive]} onPress={() => onSetBedTime(t)}>
-                  <Text style={[s.timePillText, user?.bedTime === t && s.timePillTextActive]}>{t}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <Pressable style={s.timeSelectRow} onPress={() => setTimePickerKind("bed")}>
+              <Text style={[s.timeSelectValue, !user?.bedTime && { color: C.textLight }]}>{user?.bedTime ?? "Set bed time"}</Text>
+              <Text style={s.timeSelectChevron}>⌄</Text>
+            </Pressable>
           </View>
         )}
       </View>
@@ -3323,6 +3792,21 @@ export default function App() {
           </View>
         </View>
       )}
+
+      {/* Shabbat Times */}
+      <View style={s.sectionCard}>
+        <Text style={s.sectionTitle}>This Shabbat</Text>
+        <Text style={s.sectionValue}>{timesDisplay}</Text>
+        <Pressable onPress={() => Linking.openURL("https://www.hebcal.com/")}>
+          <Text style={s.attributionText}>Times and zmanim provided by Hebcal.com</Text>
+        </Pressable>
+        {isShabbatNow && <View style={s.liveBadge}><Text style={s.liveBadgeText}>SHABBAT NOW</Text></View>}
+        {!isStreakEligible && (
+          <Text style={{ fontSize: 11, color: C.textLight, marginTop: 6 }}>
+            Select a block mode above to keep your streak alive each Shabbat.
+          </Text>
+        )}
+      </View>
 
         <View style={{ height: 24 }} />
       </ScrollView>
@@ -3436,9 +3920,13 @@ export default function App() {
             )}
           </View>
 
-          {isShabbatNow && (
+          {isTefillinRestDay && (
             <View style={s.highlightBox}>
-              <Text style={s.highlightText}>It is Shabbat, so tefillin photos are disabled and streaks stay unchanged.</Text>
+              <Text style={s.highlightText}>
+                {isShabbatNow
+                  ? "It is Shabbat, so tefillin photos are disabled and streaks stay unchanged."
+                  : "Tefillin is not worn on Shabbat (Saturday). Photos are disabled today and your streak takes a gap day — you won't lose it."}
+              </Text>
             </View>
           )}
 
@@ -3451,20 +3939,31 @@ export default function App() {
                   if (!buddy) return null;
                   const lastDate = buddy.lastTefillinDate;
                   const isToday = lastDate === todayDateStr();
+                  const incomingImageUrl = latestIncomingBuddyImageFor(buddy.uid);
                   return (
                     <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
                       <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
                         <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
-                          <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                          {incomingImageUrl ? (
+                            <Image source={{ uri: incomingImageUrl }} style={s.buddyAvatarImage} />
+                          ) : (
+                            <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                          )}
                           {isToday && <View style={s.buddyAvatarDot} />}
+                          {incomingImageUrl && <View style={s.buddyIncomingBadge}><Text style={s.buddyIncomingBadgeText}>New</Text></View>}
                         </View>
                       </Pressable>
                       <View style={{ flex: 1 }}>
                         <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
+                        {incomingImageUrl && <Text style={s.buddyIncomingText}>New tefillin photo received</Text>}
                         <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
                       </View>
-                      <Pressable style={[s.buddySnapBtn, { backgroundColor: isShabbatNow ? C.border : C.primary }]} onPress={() => openBuddyChat(buddy)}>
-                        <CameraIcon size={22} color="#FFF" />
+                      <Pressable
+                        style={[s.buddySnapBtn, { backgroundColor: (isTefillinRestDay || buddyChatImageLoading) ? C.border : C.primary }]}
+                        onPress={() => captureTefillinPhoto(chat)}
+                        disabled={isTefillinRestDay || buddyChatImageLoading}
+                      >
+                        {buddyChatImageLoading ? <ActivityIndicator color="#FFF" size="small" /> : <CameraIcon size={22} color="#FFF" />}
                       </Pressable>
                     </Pressable>
                   );
@@ -3483,8 +3982,12 @@ export default function App() {
                       <Text style={{ fontSize: 12, color: C.textSecondary }} numberOfLines={1}>{memberNames}</Text>
                       <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
                     </View>
-                    <Pressable style={[s.buddySnapBtn, { backgroundColor: isShabbatNow ? C.border : C.primary }]} onPress={() => openGroupChat(chat)}>
-                      <CameraIcon size={22} color="#FFF" />
+                    <Pressable
+                      style={[s.buddySnapBtn, { backgroundColor: (isTefillinRestDay || buddyChatImageLoading) ? C.border : C.primary }]}
+                      onPress={() => captureTefillinPhoto(chat)}
+                      disabled={isTefillinRestDay || buddyChatImageLoading}
+                    >
+                      {buddyChatImageLoading ? <ActivityIndicator color="#FFF" size="small" /> : <CameraIcon size={22} color="#FFF" />}
                     </Pressable>
                   </Pressable>
                 );
@@ -3555,8 +4058,9 @@ export default function App() {
           <View style={s.congBannerActions}>
             {user?.congregationId && currentCongregation ? (
               <>
-                <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("chat")}>
+                <Pressable style={s.congBannerBtn} onPress={openCongregationChat}>
                   <Text style={s.congBannerBtnText}>Chat</Text>
+                  {hasUnreadCongregationChat && <View style={s.chatNotificationDot} />}
                 </Pressable>
                 <Pressable style={s.congBannerBtn} onPress={() => setSocialSubTab("friends")}>
                   <Text style={s.congBannerBtnText}>Members</Text>
@@ -3670,6 +4174,7 @@ export default function App() {
                     congregationName={friend.congregationId ? (friendCongregationNames[friend.congregationId] ?? null) : null}
                     onAvatarPress={() => setViewingFriend(friend)}
                     showTefillinStreak={!isFemaleUser}
+                    showNotification={Boolean(unreadDmUids[friend.uid])}
                   />
                 </Pressable>
               ))
@@ -3747,16 +4252,23 @@ export default function App() {
                     if (!buddy) return null;
                     const lastDate = buddy.lastTefillinDate;
                     const isToday = lastDate === todayDateStr();
+                    const incomingImageUrl = latestIncomingBuddyImageFor(buddy.uid);
                     return (
                       <Pressable key={chat.id} style={s.buddyStreakRow} onPress={() => openBuddyChat(buddy)}>
                         <Pressable onPress={() => setViewingFriend(buddy)} hitSlop={4}>
                           <View style={[s.buddyAvatarLarge, !isToday && { opacity: 0.7 }]}>
-                            <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                            {incomingImageUrl ? (
+                              <Image source={{ uri: incomingImageUrl }} style={s.buddyAvatarImage} />
+                            ) : (
+                              <Text style={s.buddyAvatarLargeText}>{(buddy.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                            )}
                             {isToday && <View style={s.buddyAvatarDot} />}
+                            {incomingImageUrl && <View style={s.buddyIncomingBadge}><Text style={s.buddyIncomingBadgeText}>New</Text></View>}
                           </View>
                         </Pressable>
                         <View style={{ flex: 1 }}>
                           <Text style={s.buddyNameLarge}>{buddy.displayName ?? "Unknown"}</Text>
+                          {incomingImageUrl && <Text style={s.buddyIncomingText}>New tefillin photo received</Text>}
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                             <Text style={s.buddyStreakText}>{chat.streakCount} day streak</Text>
                             {!isToday && <Text style={{ fontSize: 14 }}>⏳</Text>}
@@ -3838,7 +4350,7 @@ export default function App() {
 
       {/* Chat View (accessed from congregation banner) */}
       {socialSubTab === "chat" && (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+        <KeyboardAvoidingView style={s.chatThread} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
           {!user?.congregationId ? (
             <View style={s.emptyCentered}>
               <Text style={s.emptyText}>Join a congregation to start chatting</Text>
@@ -3849,16 +4361,12 @@ export default function App() {
           ) : (
             <>
               <FlatList
+                style={s.chatThread}
                 inverted
-                data={[...chatMessages].reverse()}
+                data={displayedChatMessages}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={s.chatList}
-                renderItem={({ item }) => (
-                  <View style={[s.chatBubble, item.senderUid === user?.uid && s.chatBubbleMine]}>
-                    {item.senderUid !== user?.uid && <Text style={s.chatSender}>{item.senderName}</Text>}
-                    <Text style={[s.chatText, item.senderUid === user?.uid && s.chatTextMine]}>{item.text}</Text>
-                  </View>
-                )}
+                renderItem={renderCongregationMessage}
               />
               <View style={s.chatInputRow}>
                 <TextInput
@@ -3881,17 +4389,14 @@ export default function App() {
 
       {/* Direct Message View */}
       {socialSubTab === "dm" && chattingWith && (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
+        <KeyboardAvoidingView style={s.chatThread} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
           <FlatList
+            style={s.chatThread}
             inverted
-            data={[...dmMessages].reverse()}
+            data={displayedDmMessages}
             keyExtractor={(item) => item.id}
             contentContainerStyle={s.chatList}
-            renderItem={({ item }) => (
-              <View style={[s.chatBubble, item.senderUid === user?.uid && s.chatBubbleMine]}>
-                <Text style={[s.chatText, item.senderUid === user?.uid && s.chatTextMine]}>{item.text}</Text>
-              </View>
-            )}
+            renderItem={renderDirectMessage}
             ListEmptyComponent={
               <View style={{ alignItems: "center", paddingVertical: 40 }}>
                 <Text style={{ fontSize: 32, marginBottom: 8 }}>💬</Text>
@@ -3919,11 +4424,15 @@ export default function App() {
       {/* Buddy Chat View (pair + group) */}
       {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={120}>
-          {(sunBlockedMessage || isShabbatNow) && (
+          {(sunBlockedMessage || isTefillinRestDay) && (
             <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={{ fontSize: 16 }}>🌙</Text>
               <Text style={{ color: "#92400E", fontSize: 13, flex: 1 }}>
-                {isShabbatNow ? "Tefillin photos are disabled on Shabbat." : sunBlockedMessage}
+                {isShabbatNow
+                  ? "Tefillin photos are disabled on Shabbat."
+                  : isSaturdayToday
+                    ? "Tefillin is not worn on Shabbat (Saturday). Photos are disabled today — your streak takes a gap day."
+                    : sunBlockedMessage}
               </Text>
             </View>
           )}
@@ -4041,7 +4550,7 @@ export default function App() {
           />
           <View style={s.chatInputRow}>
             <Pressable
-              style={[s.buddyChatIconBtn, { backgroundColor: (sunBlockedMessage || isShabbatNow) ? C.border : C.primary }]}
+              style={[s.buddyChatIconBtn, { backgroundColor: (sunBlockedMessage || isTefillinRestDay) ? C.border : C.primary }]}
               onPress={onBuddyChatCamera}
               disabled={buddyChatImageLoading}
             >
@@ -4164,7 +4673,7 @@ export default function App() {
               </>
             )}
             {!parashaInfo && (
-              <Text style={s.parashaSummary}>Open the Chabad.org summary below for this week's Torah portion, with practical lessons and inspiration for your week.</Text>
+              <Text style={s.parashaSummary}>This week's original Torah reflection is loading. For more in-depth learning, explore Rabbi Gordon's weekly explanations.</Text>
             )}
           </>
         ) : (
@@ -4180,17 +4689,49 @@ export default function App() {
         )}
       </View>
 
-      <Pressable style={s.primaryBtn} onPress={() => Linking.openURL(getChabadParashaUrl())}>
-        <Text style={s.primaryBtnText}>Learn More on Chabad.org</Text>
+      <Pressable style={s.primaryBtn} onPress={() => Linking.openURL(getRabbiGordonParashaUrl())}>
+        <Text style={s.primaryBtnText}>Learn with Rabbi Gordon</Text>
       </Pressable>
 
       <View style={{ height: 24 }} />
     </ScrollView>
   );
 
+  const renderPhoneNumberInput = (
+    country: PhoneCountry,
+    pickerFor: "login" | "signup",
+    value: string,
+    onChangeText: (text: string) => void,
+    editable: boolean
+  ) => (
+    <View style={s.phoneInputRow}>
+      <Pressable
+        style={s.phoneCountryBtn}
+        onPress={() => setPhoneCountryPickerFor(pickerFor)}
+        disabled={!editable}
+      >
+        <Text style={s.phoneCountryFlag}>{country.flag}</Text>
+        <Text style={s.phoneCountryCode}>{country.dialCode}</Text>
+      </Pressable>
+      <TextInput
+        placeholder="Phone number"
+        value={value}
+        onChangeText={onChangeText}
+        style={s.phoneLocalInput}
+        placeholderTextColor={C.textLight}
+        keyboardType="phone-pad"
+        editable={editable}
+      />
+    </View>
+  );
+
   /* ═══════════════════════════════════════════════════════════ */
   /*                      AUTH SCREENS                          */
   /* ═══════════════════════════════════════════════════════════ */
+
+  if (showSplash) {
+    return <AppSplash onDone={() => setShowSplash(false)} />;
+  }
 
   if (authLoading) {
     return (
@@ -4221,11 +4762,7 @@ export default function App() {
           >
             {authMode === "choose" && (
             <>
-              <View style={s.authLogoArea}>
-                <Text style={s.authLogo}>✡️</Text>
-                <Text style={s.authTitle}>Kesher</Text>
-                <Text style={s.authSubtitle}>Keep Shabbat with intention</Text>
-              </View>
+              <AppCover />
               <View style={s.authForm}>
                 <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={() => switchAuthMode("login")} disabled={actionLoading}>
                   <Text style={s.primaryBtnText}>Log In</Text>
@@ -4258,7 +4795,7 @@ export default function App() {
                 </Pressable>
                 <Pressable style={s.authLink} onPress={() => { setResetEmailValue(authEmail); setResetSent(false); setAuthError(null); setForgotPasswordVisible(true); }}><Text style={s.authLinkText}>Forgot password?</Text></Pressable>
                 <View style={s.authDivider}><View style={s.authDividerLine} /><Text style={s.authDividerText}>or sign in with phone</Text><View style={s.authDividerLine} /></View>
-                <TextInput placeholder="Phone (e.g. +15551234567)" value={authPhone} onChangeText={setAuthPhone} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="phone-pad" editable={!actionLoading} />
+                {renderPhoneNumberInput(authPhoneCountry, "login", authPhone, setAuthPhone, !actionLoading)}
                 <Pressable style={[s.outlineBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressSendPhoneCode} disabled={actionLoading}><Text style={s.outlineBtnText}>Send Phone Code</Text></Pressable>
                 {phoneConfirmation && (
                   <>
@@ -4277,17 +4814,26 @@ export default function App() {
               <Pressable style={s.authBack} onPress={() => switchAuthMode("choose")}><Text style={s.authBackText}>← Back</Text></Pressable>
               <View style={s.authLogoArea}><Text style={s.authTitle}>Create account</Text><Text style={s.authSubtitle}>Join the community</Text></View>
               <View style={s.authForm}>
+                <View style={s.authProfileIntro}>
+                  <Text style={s.authProfileKicker}>Your profile</Text>
+                  <Text style={s.authProfileTitle}>Tell us a little about you</Text>
+                  <Text style={s.authProfileSubtitle}>This helps Kesher personalize prayer and tefillin features.</Text>
+                </View>
                 <TextInput placeholder="Full name" value={signupName} onChangeText={setSignupName} style={s.authInput} placeholderTextColor={C.textLight} editable={!actionLoading} />
                 <Text style={s.authFieldLabel}>Sex</Text>
-                <View style={s.authMethodToggle}>
+                <View style={s.sexOptionGrid}>
                   {(["male", "female"] as const).map((sex) => (
                     <Pressable
                       key={sex}
-                      style={[s.authMethodTab, signupSex === sex && s.authMethodTabActive]}
+                      style={[s.sexOptionCard, signupSex === sex && s.sexOptionCardActive]}
                       onPress={() => { setSignupSex(sex); setAuthError(null); }}
                     >
-                      <Text style={[s.authMethodTabText, signupSex === sex && s.authMethodTabTextActive]}>
+                      <Text style={s.sexOptionIcon}>{sex === "male" ? "T" : "S"}</Text>
+                      <Text style={[s.sexOptionTitle, signupSex === sex && s.sexOptionTitleActive]}>
                         {sex === "male" ? "Male" : "Female"}
+                      </Text>
+                      <Text style={[s.sexOptionHint, signupSex === sex && s.sexOptionHintActive]}>
+                        {sex === "male" ? "Includes tefillin tools" : "Hides tefillin prompts"}
                       </Text>
                     </Pressable>
                   ))}
@@ -4306,7 +4852,7 @@ export default function App() {
                 )}
                 {signupMethod === "phone" && (
                   <>
-                    <TextInput placeholder="Phone (e.g. +15551234567)" value={signupPhone} onChangeText={setSignupPhone} style={s.authInput} placeholderTextColor={C.textLight} keyboardType="phone-pad" editable={!actionLoading} />
+                    {renderPhoneNumberInput(signupPhoneCountry, "signup", signupPhone, setSignupPhone, !actionLoading)}
                     {!signupPhoneConfirmation ? (
                       <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onPressSignupSendPhoneCode} disabled={actionLoading}>{actionLoading ? <ActivityIndicator color="#FFF" /> : <Text style={s.primaryBtnText}>Send Verification Code</Text>}</Pressable>
                     ) : (
@@ -4325,6 +4871,53 @@ export default function App() {
             )}
           </ScrollView>
         </KeyboardAvoidingView>
+
+        {/* Phone Country Picker */}
+        <Modal visible={phoneCountryPickerFor !== null} transparent animationType="fade">
+          <View style={s.modalOverlay}>
+            <View style={[s.modalCard, { maxHeight: "75%" }]}>
+              <Text style={s.modalTitle}>Select country</Text>
+              <Text style={[s.sectionDesc, { marginTop: 8 }]}>
+                We'll add the country code automatically before sending the verification code.
+              </Text>
+              <ScrollView style={s.phoneCountryList} showsVerticalScrollIndicator={false}>
+                {PHONE_COUNTRIES.map((country) => {
+                  const selected =
+                    phoneCountryPickerFor === "login"
+                      ? authPhoneCountry.iso === country.iso
+                      : signupPhoneCountry.iso === country.iso;
+                  return (
+                    <Pressable
+                      key={`${country.iso}-${country.dialCode}`}
+                      style={[s.phoneCountryOption, selected && s.phoneCountryOptionActive]}
+                      onPress={() => {
+                        if (phoneCountryPickerFor === "login") {
+                          setAuthPhoneCountry(country);
+                          setPhoneConfirmation(null);
+                          setAuthPhoneCode("");
+                        } else {
+                          setSignupPhoneCountry(country);
+                          setSignupPhoneConfirmation(null);
+                          setSignupPhoneCode("");
+                        }
+                        setPhoneCountryPickerFor(null);
+                      }}
+                    >
+                      <View>
+                        <Text style={s.phoneCountryOptionName}>{country.flag} {country.name}</Text>
+                        <Text style={s.phoneCountryOptionCode}>{country.dialCode}</Text>
+                      </View>
+                      {selected && <Text style={s.phoneCountrySelectedMark}>Selected</Text>}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Pressable style={s.ghostBtn} onPress={() => setPhoneCountryPickerFor(null)}>
+                <Text style={s.ghostBtnText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
 
         {/* Forgot Password Modal */}
         <Modal visible={forgotPasswordVisible} transparent animationType="fade">
@@ -4358,7 +4951,7 @@ export default function App() {
         <View style={s.centered}>
           <Text style={s.authTitle}>Verify your email</Text>
           <Text style={[s.sectionDesc, { textAlign: "center", marginTop: 12 }]}>
-            We sent a Kesher Social verification link to {user.email ?? "your email"}. It should point through keshersocial.com. Open it, then come back and tap below.
+            We sent a Kesher Social verification link to {user.email ?? "your email"}. Open it, then come back and tap below.
           </Text>
           <Text style={[s.toggleHint, { textAlign: "center", marginTop: 8 }]}>
             If you do not see it, check Spam or Promotions and mark it as not spam.
@@ -4376,32 +4969,58 @@ export default function App() {
     );
   }
 
-  const needsProfileSetup = !user.displayName?.trim() || (user.gender !== "male" && user.gender !== "female");
+  const appleSignedIn = isAppleProvider();
+  const needsGenderSetup = user.gender !== "male" && user.gender !== "female";
+  const needsNameSetup = !user.displayName?.trim() && !appleSignedIn;
+  const needsProfileSetup = needsGenderSetup || needsNameSetup;
+  const resolvedAppleDisplayName = resolveProfileDisplayName({
+    profileDisplayName: user.displayName,
+    inputDisplayName: profileName,
+    authDisplayName: getAuthUserDisplayName(),
+    email: user.email,
+  });
   if (needsProfileSetup) {
     return (
       <SafeAreaView style={s.safe}>
         <StatusBar barStyle="dark-content" />
-        <View style={s.centered}>
-          <Text style={s.authTitle}>Welcome!</Text>
-          <Text style={s.sectionDesc}>Set up your profile to get started.</Text>
-          <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={[s.authInput, s.fullWidth]} placeholderTextColor={C.textLight} />
-          <Text style={s.authFieldLabel}>Sex</Text>
-          <View style={[s.policyRow, s.fullWidth]}>
-            {(["male", "female"] as const).map((sex) => (
-              <Pressable
-                key={sex}
-                style={[s.policyPill, profileSex === sex && s.policyPillActive]}
-                onPress={() => setProfileSex(sex)}
-              >
-                <Text style={[s.policyPillText, profileSex === sex && s.policyPillTextActive]}>
-                  {sex === "male" ? "Male" : "Female"}
-                </Text>
-              </Pressable>
-            ))}
+        <View style={[s.centered, { paddingHorizontal: 24 }]}>
+          <View style={s.profileSetupCard}>
+            <View style={s.authProfileIntro}>
+              <Text style={s.authProfileKicker}>Welcome to Kesher</Text>
+              <Text style={s.authProfileTitle}>
+                {appleSignedIn ? `Shalom, ${resolvedAppleDisplayName.split(" ")[0]}` : "Set up your profile"}
+              </Text>
+              <Text style={s.authProfileSubtitle}>
+                {appleSignedIn
+                  ? "Choose the experience that fits you. We won't ask for your Apple name or email again."
+                  : "A few details let us show the right reminders and daily tools."}
+              </Text>
+            </View>
+            {!appleSignedIn && needsNameSetup && (
+              <TextInput placeholder="Name" value={profileName} onChangeText={setProfileName} style={[s.authInput, s.fullWidth]} placeholderTextColor={C.textLight} />
+            )}
+            <Text style={s.authFieldLabel}>Sex</Text>
+            <View style={s.sexOptionGrid}>
+              {(["male", "female"] as const).map((sex) => (
+                <Pressable
+                  key={sex}
+                  style={[s.sexOptionCard, profileSex === sex && s.sexOptionCardActive]}
+                  onPress={() => setProfileSex(sex)}
+                >
+                  <Text style={s.sexOptionIcon}>{sex === "male" ? "T" : "S"}</Text>
+                  <Text style={[s.sexOptionTitle, profileSex === sex && s.sexOptionTitleActive]}>
+                    {sex === "male" ? "Male" : "Female"}
+                  </Text>
+                  <Text style={[s.sexOptionHint, profileSex === sex && s.sexOptionHintActive]}>
+                    {sex === "male" ? "Includes tefillin tools" : "Hides tefillin prompts"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onSaveProfile} disabled={actionLoading}>
+              <Text style={s.primaryBtnText}>Save and continue</Text>
+            </Pressable>
           </View>
-          <Pressable style={[s.primaryBtn, s.fullWidth, actionLoading && s.disabled]} onPress={onSaveProfile} disabled={actionLoading}>
-            <Text style={s.primaryBtnText}>Save and continue</Text>
-          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -4435,6 +5054,7 @@ export default function App() {
   }
 
   if (personalBlockIsActive) {
+    const unblocking = focusUnblockCountdown !== null;
     return (
       <SafeAreaView style={s.focusOnlyScreen}>
         <StatusBar barStyle="dark-content" />
@@ -4447,15 +5067,31 @@ export default function App() {
             )}
             <Text style={s.focusOnlyTime}>{formatCountdown(personalBlockRemainingMs)}</Text>
           </View>
+          {focusQuote ? (
+            <View style={s.focusQuoteCard}>
+              <Text style={s.focusQuoteText}>{focusQuote}</Text>
+            </View>
+          ) : null}
         </View>
         <View style={s.focusOnlyActions}>
-          <Pressable
-            style={[s.dangerBtn, actionLoading && s.disabled]}
-            onPress={onConfirmBreakFocus}
-            disabled={actionLoading}
-          >
-            <Text style={s.dangerBtnText}>Break Focus</Text>
-          </Pressable>
+          {unblocking ? (
+            <>
+              <Text style={s.focusUnblockNotice}>
+                Unblocking in {focusUnblockCountdown}s. Take a breath — you can stay focused.
+              </Text>
+              <Pressable style={s.primaryBtn} onPress={cancelFocusUnblock}>
+                <Text style={s.primaryBtnText}>Keep Me Focused</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable
+              style={[s.dangerBtn, actionLoading && s.disabled]}
+              onPress={beginFocusUnblock}
+              disabled={actionLoading}
+            >
+              <Text style={s.dangerBtnText}>Break Focus</Text>
+            </Pressable>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -4492,7 +5128,7 @@ export default function App() {
 
       {/* Body */}
       <Animated.View
-        style={[s.body, { opacity: tabContentAnim, transform: [{ translateY: tabContentAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] }]}
+        style={[s.body, { opacity: tabContentAnim, transform: [{ translateX: tabSlideAnim }] }]}
         {...tabSwipePanResponder.panHandlers}
       >
         {activeTab === "home" && renderHomeTab()}
@@ -4507,7 +5143,7 @@ export default function App() {
         <TabItem label="Torah" active={activeTab === "parasha"} onPress={() => setActiveTab("parasha")} />
         <TabItem label="Block" active={activeTab === "block"} onPress={() => setActiveTab("block")} />
         <TabItem label="Home" active={activeTab === "home"} onPress={() => setActiveTab("home")} />
-        <TabItem label="Social" active={activeTab === "social"} onPress={() => { setSocialSubTab("friends"); setActiveTab("social"); }} />
+        <TabItem label="Social" active={activeTab === "social"} showBadge={hasUnreadSocialMessages} onPress={() => { setSocialSubTab("friends"); setActiveTab("social"); }} />
         {!isFemaleUser && (
           <TabItem label="Buddies" active={activeTab === "buddies"} onPress={() => { setSocialSubTab("friends"); setActiveTab("buddies"); }} />
         )}
@@ -4626,6 +5262,19 @@ export default function App() {
         </View>
       </Modal>
 
+      {/* Vertical "liquid glass" time picker */}
+      <WheelTimePicker
+        visible={timePickerKind !== null}
+        title={timePickerKind === "bed" ? "Bed Time" : "Wake-Up Time"}
+        options={timePickerKind === "bed" ? BED_TIMES : WAKE_TIMES}
+        value={timePickerKind === "bed" ? (user?.bedTime ?? null) : (user?.wakeUpTime ?? null)}
+        onSelect={(t) => {
+          if (timePickerKind === "bed") onSetBedTime(t);
+          else onSetWakeTime(t);
+        }}
+        onClose={() => setTimePickerKind(null)}
+      />
+
       {/* Tefillin Buddies Info Modal */}
       <Modal visible={showBuddyInfo} transparent animationType="fade">
         <View style={s.modalOverlay}>
@@ -4646,7 +5295,7 @@ export default function App() {
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>Have you wrapped tefillin today?</Text>
             <Text style={[s.sectionDesc, { marginTop: 12 }]}>
-              Answer yes to keep your solo tefillin streak going. No will ask again next time you open the app. Ignore turns this question off for today.
+              Answer yes to keep your tefillin streak going. No will ask again next time you open the app. Ignore turns this question off for today.
             </Text>
             <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={onConfirmTefillin}>
               <Text style={s.primaryBtnText}>Yes</Text>
@@ -4691,9 +5340,26 @@ export default function App() {
             {viewingFriend && (
               <>
                 <View style={{ alignItems: "center", marginBottom: 16 }}>
-                  <View style={[s.buddyAvatarLarge, { width: 64, height: 64, borderRadius: 32 }]}>
-                    <Text style={[s.buddyAvatarLargeText, { fontSize: 26 }]}>{(viewingFriend.displayName ?? "?")[0]?.toUpperCase()}</Text>
-                  </View>
+                  {(() => {
+                    const incomingImageUrl = latestIncomingBuddyImageFor(viewingFriend.uid);
+                    return (
+                      <>
+                        <View style={[s.buddyAvatarLarge, { width: 64, height: 64, borderRadius: 32 }]}>
+                          {incomingImageUrl ? (
+                            <Image source={{ uri: incomingImageUrl }} style={[s.buddyAvatarImage, { width: 64, height: 64, borderRadius: 32 }]} />
+                          ) : (
+                            <Text style={[s.buddyAvatarLargeText, { fontSize: 26 }]}>{(viewingFriend.displayName ?? "?")[0]?.toUpperCase()}</Text>
+                          )}
+                        </View>
+                        {incomingImageUrl && (
+                          <View style={s.friendIncomingPhotoCard}>
+                            <Image source={{ uri: incomingImageUrl }} style={s.friendIncomingPhoto} />
+                            <Text style={s.friendIncomingPhotoText}>Latest tefillin photo from {viewingFriend.displayName ?? "your friend"}</Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
                   <Text style={[s.modalTitle, { marginTop: 12, textAlign: "center" }]}>{viewingFriend.displayName ?? "Unknown"}</Text>
                   {viewingFriend.congregationId && (
                     <Text style={{ fontSize: 13, color: C.textSecondary, marginTop: 4 }}>
@@ -4823,7 +5489,7 @@ export default function App() {
                       <Text style={s.friendAvatarText}>{(member.displayName ?? "?")[0]?.toUpperCase()}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.friendName}>{member.displayName ?? "Unknown"}{isMe ? " (you)" : ""}</Text>
+                      <Text style={s.friendName}>{member.displayName ?? "Unknown"}</Text>
                     </View>
                     {!isMe && (
                       <Pressable
@@ -4894,27 +5560,73 @@ export default function App() {
       <Modal visible={prayerBlockingType !== null} animationType="fade">
         <View style={s.prayerBlockingContainer}>
           <StatusBar barStyle="light-content" />
+          <View style={s.prayerTextModeSwitch}>
+            <View>
+              <Text style={s.prayerTextModeTitle}>Prayer Text</Text>
+              <Text style={s.prayerTextModeSubtitle}>
+                {showPrayerTransliteration ? "Showing English transliteration" : "Showing Hebrew"}
+              </Text>
+            </View>
+            <View style={s.prayerTextModeControl}>
+              <Text style={s.prayerTextModePill}>Hebrew</Text>
+              <Switch
+                value={showPrayerTransliteration}
+                onValueChange={setShowPrayerTransliteration}
+                trackColor={{ false: "rgba(255,255,255,0.32)", true: C.primary }}
+                thumbColor="#FFFFFF"
+              />
+              <Text style={s.prayerTextModePill}>Translit.</Text>
+            </View>
+          </View>
+          <ScrollView
+            style={s.prayerBlockingScroll}
+            contentContainerStyle={s.prayerBlockingScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
           {prayerBlockingType === "modehAni" && (
             <>
               <Text style={s.prayerBlockingLabel}>Good Morning</Text>
               <Text style={s.prayerBlockingTitle}>Modeh Ani</Text>
               <Text style={s.prayerBlockingInstruction}>Open Kesher and recite the Modeh Ani.</Text>
-              <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.modehAni.hebrew}</Text>
+              <Text style={showPrayerTransliteration ? s.prayerBlockingTransliteration : s.prayerBlockingHebrew}>
+                {showPrayerTransliteration ? PRAYER_TEXTS.modehAni.transliteration : PRAYER_TEXTS.modehAni.hebrew}
+              </Text>
               <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.modehAni.english}</Text>
             </>
           )}
           {prayerBlockingType === "shema" && (
             <>
               <Text style={s.prayerBlockingLabel}>Good Night</Text>
-              <Text style={s.prayerBlockingTitle}>Shema</Text>
-              <Text style={s.prayerBlockingInstruction}>Open Kesher and recite the Shema.</Text>
-              <Text style={s.prayerBlockingHebrew}>{PRAYER_TEXTS.shema.hebrew}</Text>
-              <Text style={s.prayerBlockingEnglish}>{PRAYER_TEXTS.shema.english}</Text>
+              <Text style={s.prayerBlockingTitle}>{shemaPrayerPage === 0 ? "Shema" : "Ve'ahavta"}</Text>
+              <Text style={s.prayerBlockingInstruction}>
+                {shemaPrayerPage === 0
+                  ? "Open Kesher and recite the Shema."
+                  : "Continue with Ve'ahavta before completing the block."}
+              </Text>
+              <Text style={showPrayerTransliteration ? s.prayerBlockingTransliteration : s.prayerBlockingHebrew}>
+                {shemaPrayerPage === 0
+                  ? showPrayerTransliteration
+                    ? PRAYER_TEXTS.shema.transliteration
+                    : PRAYER_TEXTS.shema.hebrew
+                  : showPrayerTransliteration
+                    ? PRAYER_TEXTS.veahavta.transliteration
+                    : PRAYER_TEXTS.veahavta.hebrew}
+              </Text>
+              <Text style={s.prayerBlockingEnglish}>
+                {shemaPrayerPage === 0 ? PRAYER_TEXTS.shema.english : PRAYER_TEXTS.veahavta.english}
+              </Text>
             </>
           )}
-          <Pressable style={s.prayerBlockingBtn} onPress={onDismissPrayerBlocking}>
-            <Text style={s.prayerBlockingBtnText}>I have read this</Text>
-          </Pressable>
+          </ScrollView>
+          {prayerBlockingType === "shema" && shemaPrayerPage === 0 ? (
+            <Pressable style={s.prayerBlockingBtn} onPress={() => setShemaPrayerPage(1)}>
+              <Text style={s.prayerBlockingBtnText}>Next: Ve'ahavta</Text>
+            </Pressable>
+          ) : (
+            <Pressable style={s.prayerBlockingBtn} onPress={onDismissPrayerBlocking}>
+              <Text style={s.prayerBlockingBtnText}>I have read this</Text>
+            </Pressable>
+          )}
         </View>
       </Modal>
 
@@ -4969,10 +5681,10 @@ export default function App() {
                   <Text style={s.toggleHint}>Turn push alerts for chat messages on or off</Text>
                 </View>
                 <Switch
-                  value={Boolean(user?.wantsChatNotifications)}
+                  value={user?.wantsChatNotifications !== false}
                   onValueChange={onToggleChatNotifications}
                   trackColor={{ false: C.border, true: C.primary }}
-                  thumbColor={user?.wantsChatNotifications ? "#FFFFFF" : "#f4f4f5"}
+                  thumbColor={user?.wantsChatNotifications !== false ? "#FFFFFF" : "#f4f4f5"}
                   ios_backgroundColor={C.border}
                 />
               </View>
@@ -5307,7 +6019,7 @@ export default function App() {
 
 /* ─── sub-components ────────────────────────────────────────── */
 
-function TabItem({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function TabItem({ label, active, onPress, showBadge = false }: { label: string; active: boolean; onPress: () => void; showBadge?: boolean }) {
   return (
     <Pressable
       style={[s.tabItem, active && s.tabItemActive]}
@@ -5317,11 +6029,119 @@ function TabItem({ label, active, onPress }: { label: string; active: boolean; o
       android_disableSound
     >
       <Text style={[s.tabLabel, active && s.tabLabelActive]}>{label}</Text>
+      {showBadge && <View style={s.tabNotificationDot} />}
     </Pressable>
   );
 }
 
-function LeaderboardRow({ profile, rank, isCurrentUser, congregationName, onAvatarPress, showTefillinStreak = true }: { profile: UserProfile; rank: number; isCurrentUser?: boolean; congregationName?: string | null; onAvatarPress?: () => void; showTefillinStreak?: boolean }) {
+const WHEEL_ITEM_HEIGHT = 46;
+const WHEEL_VISIBLE_ROWS = 5;
+
+/**
+ * A vertical, snapping time wheel presented in a frosted "liquid glass" sheet,
+ * echoing the native iOS picker. Tap a row or scroll to a value, then confirm.
+ */
+function WheelTimePicker({
+  visible,
+  title,
+  options,
+  value,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  options: string[];
+  value: string | null;
+  onSelect: (time: string) => void;
+  onClose: () => void;
+}) {
+  const listRef = useRef<ScrollView | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    if (!visible) return;
+    const idx = Math.max(0, options.indexOf(value ?? options[0] ?? ""));
+    setSelectedIndex(idx);
+    requestAnimationFrame(() => {
+      listRef.current?.scrollTo({ y: idx * WHEEL_ITEM_HEIGHT, animated: false });
+    });
+  }, [visible, value, options]);
+
+  const onMomentumEnd = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / WHEEL_ITEM_HEIGHT);
+    setSelectedIndex(Math.max(0, Math.min(options.length - 1, idx)));
+  };
+
+  const padRows = Math.floor(WHEEL_VISIBLE_ROWS / 2);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={s.glassOverlay} onPress={onClose}>
+        <Pressable style={s.glassCard} onPress={() => {}}>
+          <View style={s.glassHandle} />
+          <Text style={s.glassTitle}>{title}</Text>
+          <View style={{ height: WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ROWS }}>
+            <View style={[s.glassSelectionBand, { top: WHEEL_ITEM_HEIGHT * padRows, height: WHEEL_ITEM_HEIGHT }]} pointerEvents="none" />
+            <ScrollView
+              ref={listRef}
+              showsVerticalScrollIndicator={false}
+              snapToInterval={WHEEL_ITEM_HEIGHT}
+              decelerationRate="fast"
+              onMomentumScrollEnd={onMomentumEnd}
+              contentContainerStyle={{ paddingVertical: WHEEL_ITEM_HEIGHT * padRows }}
+            >
+              {options.map((opt, i) => {
+                const active = i === selectedIndex;
+                return (
+                  <Pressable
+                    key={opt}
+                    style={{ height: WHEEL_ITEM_HEIGHT, alignItems: "center", justifyContent: "center" }}
+                    onPress={() => {
+                      setSelectedIndex(i);
+                      listRef.current?.scrollTo({ y: i * WHEEL_ITEM_HEIGHT, animated: true });
+                    }}
+                  >
+                    <Text style={[s.glassItem, active && s.glassItemActive]}>{opt}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+          <Pressable
+            style={s.glassConfirmBtn}
+            onPress={() => {
+              const chosen = options[selectedIndex];
+              if (chosen) onSelect(chosen);
+              onClose();
+            }}
+          >
+            <Text style={s.glassConfirmText}>Set {options[selectedIndex] ?? ""}</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function LeaderboardRow({
+  profile,
+  rank,
+  isCurrentUser,
+  congregationName,
+  onAvatarPress,
+  showTefillinStreak = true,
+  showNotification = false,
+}: {
+  profile: UserProfile;
+  rank: number;
+  isCurrentUser?: boolean;
+  congregationName?: string | null;
+  onAvatarPress?: () => void;
+  showTefillinStreak?: boolean;
+  showNotification?: boolean;
+}) {
   const hideStreak = !isCurrentUser && profile.streakVisibility === "private";
   return (
     <View style={[s.leaderRow, isCurrentUser && s.leaderRowHighlight]}>
@@ -5330,7 +6150,14 @@ function LeaderboardRow({ profile, rank, isCurrentUser, congregationName, onAvat
         <View style={s.friendAvatar}><Text style={s.friendAvatarText}>{(profile.displayName ?? "?")[0]?.toUpperCase()}</Text></View>
       </Pressable>
       <View style={{ flex: 1 }}>
-        <Text style={s.friendName}>{profile.displayName ?? "Unknown"}{isCurrentUser ? " (You)" : ""}</Text>
+        <View style={s.friendNameRow}>
+          <Text style={s.friendName}>{profile.displayName ?? "Unknown"}</Text>
+          {showNotification && (
+            <View style={s.messagePill}>
+              <Text style={s.messagePillText}>New</Text>
+            </View>
+          )}
+        </View>
         <Text style={s.friendCong}>{congregationName ?? (profile.congregationId ? "In a congregation" : "")}</Text>
       </View>
       {hideStreak ? (
@@ -5367,6 +6194,16 @@ const s = StyleSheet.create({
   focusOnlyDial: { width: 250, height: 250, borderRadius: 125, alignItems: "center", justifyContent: "center" },
   focusOnlyTime: { fontSize: 36, fontWeight: "900", color: C.text },
   focusOnlyActions: { paddingBottom: 18 },
+  focusQuoteCard: { marginTop: 36, marginHorizontal: 8, backgroundColor: C.surface, borderRadius: 20, paddingHorizontal: 22, paddingVertical: 20 },
+  focusQuoteText: { fontSize: 17, lineHeight: 26, color: C.text, textAlign: "center", fontStyle: "italic", fontWeight: "600" },
+  focusUnblockNotice: { fontSize: 14, color: C.textSecondary, textAlign: "center", lineHeight: 20, marginBottom: 12, paddingHorizontal: 8 },
+  splashContainer: { flex: 1, backgroundColor: C.bg, alignItems: "center", justifyContent: "center" },
+  splashStarCircle: { width: 128, height: 128, borderRadius: 64, backgroundColor: C.primaryLight, alignItems: "center", justifyContent: "center" },
+  splashStar: { fontSize: 68, color: C.primary, textAlign: "center" },
+  splashWordmark: { position: "absolute", bottom: "26%", fontSize: 30, fontWeight: "900", color: C.primaryDark, letterSpacing: 0.5 },
+  appCover: { width: "100%", alignItems: "center", justifyContent: "center", marginBottom: 26 },
+  appCoverWordmark: { marginTop: 18, fontSize: 30, fontWeight: "900", color: C.primaryDark, letterSpacing: 0.5 },
+  appCoverSubtitle: { marginTop: 8, fontSize: 15, color: C.textSecondary, textAlign: "center", lineHeight: 21 },
 
   /* header */
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12, backgroundColor: C.bg },
@@ -5382,6 +6219,7 @@ const s = StyleSheet.create({
   tabBar: { flexDirection: "row", gap: 8, borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingHorizontal: 10, paddingBottom: 8, paddingTop: 10 },
   tabItem: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
   tabItemActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  tabNotificationDot: { position: "absolute", top: 7, right: 14, width: 9, height: 9, borderRadius: 5, backgroundColor: C.danger, borderWidth: 1.5, borderColor: C.card },
   tabLabel: { fontSize: 13, fontWeight: "700", color: C.textLight },
   tabLabelActive: { color: C.primary, fontWeight: "800" },
 
@@ -5419,6 +6257,7 @@ const s = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: "800", color: C.text },
   sectionValue: { fontSize: 15, color: C.textSecondary, marginTop: 4 },
   sectionDesc: { fontSize: 13, color: C.textSecondary, marginTop: 6, lineHeight: 18 },
+  attributionText: { fontSize: 11, color: C.primary, fontWeight: "700", marginTop: 6 },
   weeklyVideoCard: { backgroundColor: C.surface, borderRadius: 16, padding: 12, marginTop: 12 },
   weeklyVideoTitle: { fontSize: 15, fontWeight: "800", color: C.text },
   weeklyVideoActions: { flexDirection: "row", gap: 8, marginTop: 10 },
@@ -5473,6 +6312,36 @@ const s = StyleSheet.create({
   timePillText: { fontSize: 12, fontWeight: "600", color: C.textSecondary },
   timePillTextActive: { color: C.primaryDark, fontWeight: "700" },
 
+  /* time select row (opens vertical picker) */
+  timeSelectRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 12, marginTop: 4 },
+  timeSelectValue: { fontSize: 17, fontWeight: "700", color: C.primaryDark },
+  timeSelectChevron: { fontSize: 20, color: C.textLight, fontWeight: "800", marginTop: -6 },
+
+  /* "liquid glass" vertical time picker */
+  glassOverlay: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "flex-end" },
+  glassCard: {
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 28,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  glassHandle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: "rgba(100,116,139,0.4)", marginBottom: 10 },
+  glassTitle: { fontSize: 18, fontWeight: "800", color: C.text, textAlign: "center", marginBottom: 6 },
+  glassSelectionBand: { position: "absolute", left: 0, right: 0, backgroundColor: "rgba(37,99,235,0.10)", borderRadius: 14, borderWidth: 1, borderColor: "rgba(37,99,235,0.25)" },
+  glassItem: { fontSize: 18, fontWeight: "600", color: C.textLight },
+  glassItemActive: { fontSize: 22, fontWeight: "900", color: C.primaryDark },
+  glassConfirmBtn: { backgroundColor: C.primary, borderRadius: 16, paddingVertical: 14, alignItems: "center", marginTop: 14 },
+  glassConfirmText: { color: "#FFF", fontSize: 16, fontWeight: "800" },
+
   /* calendar icon */
   calendarIconBtn: { padding: 4 },
   calendarIconCircle: {
@@ -5504,9 +6373,54 @@ const s = StyleSheet.create({
   prayerBlockingContainer: {
     flex: 1,
     backgroundColor: "#1a1a2e",
-    justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 32,
+    paddingTop: 72,
+    paddingBottom: 34,
+  },
+  prayerTextModeSwitch: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 24,
+  },
+  prayerTextModeTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    letterSpacing: 0.4,
+  },
+  prayerTextModeSubtitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.62)",
+    marginTop: 2,
+  },
+  prayerTextModeControl: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  prayerTextModePill: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "rgba(255,255,255,0.78)",
+  },
+  prayerBlockingScroll: {
+    width: "100%",
+    flex: 1,
+  },
+  prayerBlockingScrollContent: {
+    alignItems: "center",
+    paddingBottom: 8,
   },
   prayerBlockingLabel: {
     fontSize: 14,
@@ -5536,6 +6450,14 @@ const s = StyleSheet.create({
     color: "#e8d5b7",
     textAlign: "center",
     lineHeight: 36,
+    marginBottom: 24,
+  },
+  prayerBlockingTransliteration: {
+    fontSize: 21,
+    fontWeight: "700",
+    color: "#e8d5b7",
+    textAlign: "center",
+    lineHeight: 32,
     marginBottom: 24,
   },
   prayerBlockingEnglish: {
@@ -5584,6 +6506,7 @@ const s = StyleSheet.create({
   congBannerActions: { flexDirection: "row", gap: 10, marginTop: 12 },
   congBannerBtn: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 8 },
   congBannerBtnText: { color: "#FFF", fontWeight: "700", fontSize: 13 },
+  chatNotificationDot: { position: "absolute", top: -3, right: -3, width: 10, height: 10, borderRadius: 5, backgroundColor: C.danger, borderWidth: 1.5, borderColor: C.primary },
   congIconBtn: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 12, padding: 8, justifyContent: "center", alignItems: "center" },
 
   /* leaderboard */
@@ -5600,8 +6523,11 @@ const s = StyleSheet.create({
   friendRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   friendAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
   friendAvatarText: { fontSize: 16, fontWeight: "800", color: C.primary },
+  friendNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   friendName: { fontSize: 15, fontWeight: "700", color: C.text },
   friendCong: { fontSize: 11, color: C.textLight, marginTop: 1 },
+  messagePill: { backgroundColor: C.dangerLight, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
+  messagePillText: { color: C.danger, fontSize: 10, fontWeight: "800" },
 
   leaderRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   leaderRowHighlight: { backgroundColor: C.primaryLight, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: 12 },
@@ -5683,8 +6609,24 @@ const s = StyleSheet.create({
   authTitle: { fontSize: 32, fontWeight: "900", color: C.primaryDark, letterSpacing: 0.3, textAlign: "center" },
   authSubtitle: { marginTop: 8, fontSize: 15, color: C.textSecondary, textAlign: "center", lineHeight: 21 },
   authForm: { width: "100%", alignItems: "center", gap: 10, backgroundColor: C.card, borderRadius: 28, padding: 18, borderWidth: 1, borderColor: C.border, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 18, elevation: 4 },
+  authProfileIntro: { width: "100%", backgroundColor: C.primaryLight, borderRadius: 22, padding: 16, marginBottom: 4 },
+  authProfileKicker: { fontSize: 11, fontWeight: "900", color: C.primary, letterSpacing: 0.9, textTransform: "uppercase" },
+  authProfileTitle: { fontSize: 20, fontWeight: "900", color: C.primaryDark, marginTop: 6 },
+  authProfileSubtitle: { fontSize: 13, color: C.textSecondary, lineHeight: 19, marginTop: 4 },
+  profileSetupCard: { width: "100%", alignItems: "center", gap: 12, backgroundColor: C.card, borderRadius: 30, padding: 20, borderWidth: 1, borderColor: C.border, shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 5 },
   authFieldLabel: { alignSelf: "flex-start", fontSize: 12, fontWeight: "800", color: C.textSecondary, marginTop: 2, marginBottom: -4, textTransform: "uppercase", letterSpacing: 0.6 },
   authInput: { width: "100%", borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: "#FFFFFF", color: C.text, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15 },
+  phoneInputRow: { width: "100%", flexDirection: "row", alignItems: "center", gap: 8 },
+  phoneCountryBtn: { minWidth: 92, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.surface, paddingHorizontal: 12, paddingVertical: 14 },
+  phoneCountryFlag: { fontSize: 12, fontWeight: "900", color: C.primary },
+  phoneCountryCode: { fontSize: 14, fontWeight: "900", color: C.text },
+  phoneLocalInput: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: "#FFFFFF", color: C.text, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15 },
+  phoneCountryList: { marginTop: 12, maxHeight: 360 },
+  phoneCountryOption: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, marginBottom: 8 },
+  phoneCountryOptionActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
+  phoneCountryOptionName: { fontSize: 15, fontWeight: "800", color: C.text },
+  phoneCountryOptionCode: { fontSize: 12, fontWeight: "700", color: C.textSecondary, marginTop: 2 },
+  phoneCountrySelectedMark: { fontSize: 11, fontWeight: "900", color: C.primary },
   passwordRow: { width: "100%", flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.surface },
   passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15 },
   passwordToggle: { paddingHorizontal: 14, paddingVertical: 14 },
@@ -5694,6 +6636,14 @@ const s = StyleSheet.create({
   authMethodTabActive: { backgroundColor: C.primary },
   authMethodTabText: { color: C.text, fontWeight: "600", fontSize: 14 },
   authMethodTabTextActive: { color: "#FFF", fontWeight: "700" },
+  sexOptionGrid: { flexDirection: "row", width: "100%", gap: 10 },
+  sexOptionCard: { flex: 1, minHeight: 118, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, padding: 14, justifyContent: "center" },
+  sexOptionCardActive: { borderColor: C.primary, backgroundColor: C.primary },
+  sexOptionIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.72)", textAlign: "center", lineHeight: 34, color: C.primary, fontSize: 16, fontWeight: "900", marginBottom: 10 },
+  sexOptionTitle: { fontSize: 16, fontWeight: "900", color: C.text },
+  sexOptionTitleActive: { color: "#FFF" },
+  sexOptionHint: { fontSize: 11, color: C.textSecondary, lineHeight: 15, marginTop: 4 },
+  sexOptionHintActive: { color: "rgba(255,255,255,0.82)" },
   authDivider: { flexDirection: "row", alignItems: "center", width: "100%", marginVertical: 8 },
   authDividerLine: { flex: 1, height: 1, backgroundColor: C.border },
   authDividerText: { marginHorizontal: 12, color: C.textLight, fontSize: 12 },
@@ -5746,6 +6696,7 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   buddyAvatarLargeText: { fontSize: 20, fontWeight: "800", color: C.primary },
+  buddyAvatarImage: { width: 50, height: 50, borderRadius: 25 },
   buddyAvatarDot: {
     position: "absolute",
     bottom: 0,
@@ -5757,7 +6708,10 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: C.card,
   },
+  buddyIncomingBadge: { position: "absolute", left: -2, bottom: -4, backgroundColor: C.primary, borderRadius: 9, paddingHorizontal: 5, paddingVertical: 2, borderWidth: 1, borderColor: C.card },
+  buddyIncomingBadgeText: { color: "#FFF", fontSize: 8, fontWeight: "900" },
   buddyNameLarge: { fontSize: 16, fontWeight: "700", color: C.text },
+  buddyIncomingText: { fontSize: 12, fontWeight: "700", color: C.primary, marginTop: 2 },
   buddyStreakText: { fontSize: 13, fontWeight: "600", color: C.primary },
   buddySnapBtn: {
     backgroundColor: C.primaryLight,
@@ -5781,6 +6735,9 @@ const s = StyleSheet.create({
   },
   buddyEmptyTitle: { fontSize: 16, fontWeight: "700", color: C.text },
   buddyEmptyDesc: { fontSize: 13, color: C.textSecondary, textAlign: "center", marginTop: 4, lineHeight: 18, paddingHorizontal: 16 },
+  friendIncomingPhotoCard: { width: "100%", marginTop: 12, backgroundColor: C.surface, borderRadius: 18, padding: 10, borderWidth: 1, borderColor: C.border },
+  friendIncomingPhoto: { width: "100%", height: 180, borderRadius: 14, backgroundColor: C.border },
+  friendIncomingPhotoText: { fontSize: 12, color: C.textSecondary, fontWeight: "700", marginTop: 8, textAlign: "center" },
   buddyAddHeader: { fontSize: 14, fontWeight: "700", color: C.textSecondary, marginBottom: 8 },
   buddyAddRow: {
     flexDirection: "row",

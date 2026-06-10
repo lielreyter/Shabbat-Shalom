@@ -74,7 +74,7 @@ npx vercel --cwd website --prod
 
 ## What to update before launch
 
-- `support@keshersocial.com` — set up this inbox or forwarding rule with your domain registrar/email provider.
+- `keshersupport@gmail.com` — use this inbox for App Store and website support requests.
 - Waitlist form — currently stores submissions in `localStorage` only. Wire it up to your email collector of choice (Mailchimp, ConvertKit, Buttondown, Formspree, etc.) by replacing the JS handler in `index.html`.
 - Last-updated date in `privacy.html`.
 

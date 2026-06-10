@@ -8,7 +8,7 @@ import {
   where,
 } from "firebase/firestore";
 import { firestore } from "../firebase/firebaseConfig";
-import { getUserProfile, updateUserProfile } from "../firebase/firestore";
+import { getUserProfile } from "../firebase/firestore";
 import { getUserBuddyChats } from "./buddyChatService";
 import { BuddyChat } from "./buddyChatTypes";
 import { UserProfile } from "../types/UserProfile";
@@ -159,9 +159,16 @@ const isDateComplete = (dateStr: string, latestTz: string): boolean => {
  * If lastStreakDate exists, start from the day after.
  * Otherwise, start from the chat's creation date.
  */
-const getFirstEvalDate = (chat: BuddyChat): string => {
+const getFirstEvalDate = (chat: BuddyChat, latestTz: string): string => {
   if (chat.lastStreakDate) {
     return addDays(chat.lastStreakDate, 1);
+  }
+
+  // Legacy/dummy buddy chats may have a positive streak without a
+  // lastStreakDate. Re-evaluate yesterday so stale counts can reset instead of
+  // staying pinned forever.
+  if (chat.streakCount > 0) {
+    return addDays(todayInTz(latestTz), -1);
   }
 
   const created = chat.createdAt.toDate();
@@ -179,7 +186,7 @@ export const evaluateChatStreak = async (
   if (memberProfiles.length === 0) return chat;
 
   const latestTz = getLatestMidnightTz(memberProfiles);
-  let evalDate = getFirstEvalDate(chat);
+  let evalDate = getFirstEvalDate(chat, latestTz);
   let { streakCount, longestStreak, lastStreakDate, streakBrokenAt } = chat;
   let changed = false;
 
@@ -249,8 +256,11 @@ export const evaluateChatStreak = async (
 };
 
 /**
- * Evaluate all buddy chat streaks for a user, then persist the highest
- * streak as the user's tefillin streak.
+ * Evaluate all buddy chat streaks for a user. This only updates the *shared*
+ * per-chat streak (mutual completion). The user's individual tefillin streak
+ * (`tefillinCurrentStreak`) is tracked separately — every member keeps their
+ * own streak based on whether they personally wrapped each day — so it is
+ * intentionally NOT overwritten here with the highest buddy-chat streak.
  */
 export const evaluateAllStreaks = async (uid: string): Promise<void> => {
   const chats = await getUserBuddyChats(uid);
@@ -269,37 +279,11 @@ export const evaluateAllStreaks = async (uid: string): Promise<void> => {
     if (profile) profileMap.set(mUid, profile);
   }
 
-  const evaluatedChats: BuddyChat[] = [];
   for (const chat of chats) {
     const members = chat.memberUids
       .map((mUid) => profileMap.get(mUid))
       .filter((p): p is UserProfile => p !== undefined);
 
-    const evaluated = await evaluateChatStreak(chat, members);
-    evaluatedChats.push(evaluated);
-  }
-
-  const maxStreak = Math.max(0, ...evaluatedChats.map((c) => c.streakCount));
-  const maxLongest = Math.max(
-    0,
-    ...evaluatedChats.map((c) => c.longestStreak)
-  );
-
-  const userProfile = profileMap.get(uid);
-  if (!userProfile) return;
-
-  const updates: Partial<UserProfile> = {};
-
-  if (userProfile.tefillinCurrentStreak !== maxStreak) {
-    updates.tefillinCurrentStreak = maxStreak;
-  }
-
-  const newLongest = Math.max(userProfile.tefillinLongestStreak, maxLongest);
-  if (userProfile.tefillinLongestStreak !== newLongest) {
-    updates.tefillinLongestStreak = newLongest;
-  }
-
-  if (Object.keys(updates).length > 0) {
-    await updateUserProfile(uid, updates);
+    await evaluateChatStreak(chat, members);
   }
 };

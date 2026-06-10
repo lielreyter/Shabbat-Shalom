@@ -1,4 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="18" fill="#1A2845"/>
-  <text x="32" y="42" text-anchor="middle" font-family="Georgia, serif" font-size="34" font-weight="700" fill="#C9A55C">ç</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+  <circle cx="512" cy="512" r="380" fill="#DBEAFE"/>
+  <path
+    d="M512 270 L745 674 H279 Z M512 754 L279 350 H745 Z"
+    fill="none"
+    stroke="#2563EB"
+    stroke-width="36"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+  />
+  <circle cx="512" cy="512" r="28" fill="#1E40AF"/>
 </svg>

@@ -74,3 +74,34 @@ export const subscribeToDirectMessages = (
     callback(messages);
   });
 };
+
+export const subscribeToLatestDirectMessage = (
+  myUid: string,
+  friendUid: string,
+  callback: (message: DirectMessage | null) => void
+): Unsubscribe => {
+  const chatId = getChatId(myUid, friendUid);
+  const q = query(
+    dmCollection(chatId),
+    orderBy("createdAt", "desc"),
+    firestoreLimit(1)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const doc = snapshot.docs[0];
+    if (!doc) {
+      callback(null);
+      return;
+    }
+
+    const data = doc.data();
+    const ts = data.createdAt;
+    callback({
+      id: doc.id,
+      senderUid: data.senderUid ?? "",
+      senderName: data.senderName ?? "Unknown",
+      text: data.text ?? "",
+      createdAt: ts instanceof Timestamp ? ts.toDate() : new Date(),
+    });
+  });
+};
