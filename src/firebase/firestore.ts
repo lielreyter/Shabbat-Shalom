@@ -11,6 +11,10 @@ import {
 } from "firebase/firestore";
 import { firestore } from "./firebaseConfig";
 import { UserProfile } from "../types/UserProfile";
+import {
+  isTefillinRestDate,
+  previousTefillinEligibleDate,
+} from "../tefillin/tefillinRestDays";
 
 type UserProfileWrite = Omit<UserProfile, "createdAt" | "lastLoginAt"> & {
   createdAt: ReturnType<typeof serverTimestamp>;
@@ -36,10 +40,6 @@ const addDaysToDateString = (dateStr: string, days: number): string => {
   return date.toISOString().slice(0, 10);
 };
 
-const isSaturdayDateString = (dateStr: string): boolean => {
-  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
-};
-
 const ensureTimestamp = (value: unknown): Timestamp => {
   return value instanceof Timestamp ? value : Timestamp.now();
 };
@@ -51,6 +51,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     lastLoginAt: ensureTimestamp(data.lastLoginAt),
     displayName: data.displayName ?? null,
     email: data.email ?? null,
+    faithTradition: data.faithTradition ?? null,
     shabbatIntentText: data.shabbatIntentText ?? DEFAULT_SHABBAT_INTENTION,
     wantsMorningReminders: data.wantsMorningReminders ?? false,
     wantsShabbatReminders: data.wantsShabbatReminders ?? true,
@@ -66,6 +67,9 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     tefillinCurrentStreak: data.tefillinCurrentStreak ?? 0,
     tefillinLongestStreak: data.tefillinLongestStreak ?? 0,
     lastTefillinDate: data.lastTefillinDate ?? null,
+    candleCurrentStreak: data.candleCurrentStreak ?? 0,
+    candleLongestStreak: data.candleLongestStreak ?? 0,
+    lastCandleDate: data.lastCandleDate ?? null,
     wakeUpTime: data.wakeUpTime ?? null,
     bedTime: data.bedTime ?? null,
     shabbatBlockLevel: data.shabbatBlockLevel ?? "none",
@@ -81,6 +85,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     longitude: typeof data.longitude === "number" ? data.longitude : null,
     streakVisibility: data.streakVisibility ?? "public",
     tefillinBuddyUids: Array.isArray(data.tefillinBuddyUids) ? data.tefillinBuddyUids : [],
+    candleBuddyUids: Array.isArray(data.candleBuddyUids) ? data.candleBuddyUids : [],
     buddyChatIds: Array.isArray(data.buddyChatIds) ? data.buddyChatIds : [],
     fcmToken: data.fcmToken ?? null,
   };
@@ -118,6 +123,7 @@ export const createUserProfile = async ({
     displayNameLower: displayName?.toLowerCase() ?? null,
     friendCode,
     email,
+    faithTradition: "jewish",
     shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
     wantsMorningReminders: false,
     wantsShabbatReminders: true,
@@ -133,6 +139,9 @@ export const createUserProfile = async ({
     tefillinCurrentStreak: 0,
     tefillinLongestStreak: 0,
     lastTefillinDate: null,
+    candleCurrentStreak: 0,
+    candleLongestStreak: 0,
+    lastCandleDate: null,
     wakeUpTime: null,
     bedTime: null,
     shabbatBlockLevel: "none",
@@ -147,6 +156,7 @@ export const createUserProfile = async ({
     latitude: null,
     longitude: null,
     tefillinBuddyUids: [],
+    candleBuddyUids: [],
     buddyChatIds: [],
     fcmToken: null,
   };
@@ -183,11 +193,35 @@ export const recordTefillinDay = async (
   const profile = await getUserProfile(uid);
   if (!profile) return null;
   if (profile.lastTefillinDate === dateStr) return profile;
-  const nextStreak = (profile.tefillinCurrentStreak ?? 0) + 1;
+  if (await isTefillinRestDate(dateStr)) return profile;
+  const previousEligibleDate = await previousTefillinEligibleDate(dateStr);
+  const nextStreak =
+    previousEligibleDate && profile.lastTefillinDate === previousEligibleDate
+      ? (profile.tefillinCurrentStreak ?? 0) + 1
+      : 1;
   return updateUserProfile(uid, {
     tefillinCurrentStreak: nextStreak,
     tefillinLongestStreak: Math.max(profile.tefillinLongestStreak ?? 0, nextStreak),
     lastTefillinDate: dateStr,
+  });
+};
+
+export const recordCandleLightingDay = async (
+  uid: string,
+  dateStr: string
+): Promise<UserProfile | null> => {
+  const profile = await getUserProfile(uid);
+  if (!profile) return null;
+  if (profile.lastCandleDate === dateStr) return profile;
+  const previousFriday = addDaysToDateString(dateStr, -7);
+  const nextStreak =
+    profile.lastCandleDate === previousFriday
+      ? (profile.candleCurrentStreak ?? 0) + 1
+      : 1;
+  return updateUserProfile(uid, {
+    candleCurrentStreak: nextStreak,
+    candleLongestStreak: Math.max(profile.candleLongestStreak ?? 0, nextStreak),
+    lastCandleDate: dateStr,
   });
 };
 
@@ -276,19 +310,19 @@ export const checkAndBreakStaleStreaks = async (
     if (!profile.lastTefillinDate) {
       updates.tefillinCurrentStreak = 0;
     } else if (profile.lastTefillinDate !== todayStr && profile.lastTefillinDate !== yesterdayStr) {
-      const finalAutoDate = isSaturdayDateString(todayStr) ? todayStr : yesterdayStr;
+      const finalAutoDate = yesterdayStr;
       let cursor = addDaysToDateString(profile.lastTefillinDate, 1);
-      let missedNonShabbatDay = false;
+      let missedEligibleDay = false;
 
       while (cursor <= finalAutoDate) {
-        if (!isSaturdayDateString(cursor)) {
-          missedNonShabbatDay = true;
+        if (!(await isTefillinRestDate(cursor))) {
+          missedEligibleDay = true;
           break;
         }
         cursor = addDaysToDateString(cursor, 1);
       }
 
-      if (missedNonShabbatDay) {
+      if (missedEligibleDay) {
         updates.tefillinCurrentStreak = 0;
       }
     }

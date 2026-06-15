@@ -3,6 +3,7 @@ import { Timestamp } from "firebase/firestore";
 export interface BuddyChat {
   id: string;
   type: "pair" | "group";
+  kind: "tefillin" | "candles";
   name: string | null;
   memberUids: string[];
   createdAt: Timestamp;

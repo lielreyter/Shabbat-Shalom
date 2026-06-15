@@ -39,9 +39,18 @@ const sortBuddyChats = (chats: BuddyChat[]): BuddyChat[] =>
       (a.lastActivityAt?.toMillis?.() ?? a.createdAt.toMillis())
   );
 
+export type BuddyChatKind = "tefillin" | "candles";
+
+const isWithinCandleWindow = (date = new Date()): boolean => {
+  const day = date.getDay();
+  const hour = date.getHours();
+  return day === 5 && hour >= 16 && hour < 23;
+};
+
 const hydrateBuddyChat = (id: string, data: Record<string, unknown>): BuddyChat => ({
   id,
   type: (data.type as "pair" | "group") ?? "pair",
+  kind: data.kind === "candles" ? "candles" : "tefillin",
   name: (data.name as string) ?? null,
   memberUids: Array.isArray(data.memberUids) ? data.memberUids : [],
   createdAt: data.createdAt instanceof Timestamp ? data.createdAt : Timestamp.now(),
@@ -76,10 +85,12 @@ const hydrateBuddyMessage = (id: string, data: Record<string, unknown>): BuddyMe
 export const createBuddyChat = async (
   memberUids: string[],
   type: "pair" | "group",
-  name?: string
+  name?: string,
+  kind: BuddyChatKind = "tefillin"
 ): Promise<BuddyChat> => {
   const payload = {
     type,
+    kind,
     name: name ?? null,
     memberUids,
     createdAt: serverTimestamp(),
@@ -197,7 +208,8 @@ export const removeGroupMember = async (
 
 export const findPairChat = async (
   uid1: string,
-  uid2: string
+  uid2: string,
+  kind: BuddyChatKind = "tefillin"
 ): Promise<BuddyChat | null> => {
   const q = query(
     chatsCol,
@@ -207,6 +219,8 @@ export const findPairChat = async (
   const snapshot = await getDocs(q);
   for (const d of snapshot.docs) {
     const data = d.data() as Record<string, unknown>;
+    const chatKind = data.kind === "candles" ? "candles" : "tefillin";
+    if (chatKind !== kind) continue;
     const members = Array.isArray(data.memberUids) ? data.memberUids : [];
     if (members.includes(uid2)) {
       return hydrateBuddyChat(d.id, data);
@@ -224,12 +238,15 @@ export const sendBuddyMessage = async (
   senderLat?: number | null,
   senderLon?: number | null,
   senderTzid?: string,
-  fromCamera?: boolean
+  fromCamera?: boolean,
+  kind: BuddyChatKind = "tefillin"
 ): Promise<BuddyMessage> => {
   let streakEligible = false;
 
   if (type === "image" && fromCamera) {
-    if (
+    if (kind === "candles") {
+      streakEligible = isWithinCandleWindow();
+    } else if (
       senderLat != null &&
       senderLon != null &&
       senderTzid

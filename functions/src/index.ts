@@ -152,13 +152,14 @@ export const sendBuddyChatPush = onDocumentCreated(
     const chat = chatSnapshot.data() as {
       memberUids?: string[];
       name?: string | null;
+      kind?: string | null;
     };
     const memberUids = Array.isArray(chat.memberUids) ? chat.memberUids : [];
 
     await sendChatPush({
       recipientUids: memberUids,
       message,
-      title: chat.name || "Tefillin buddy chat",
+      title: chat.name || (chat.kind === "candles" ? "Candle buddy chat" : "Tefillin buddy chat"),
       data: {
         type: "buddyChat",
         chatId,
@@ -195,6 +196,30 @@ export const sendCongregationChatPush = onDocumentCreated(
       data: {
         type: "congregationChat",
         congregationId,
+        messageId: event.params.messageId,
+      },
+    });
+  }
+);
+
+export const sendDirectMessagePush = onDocumentCreated(
+  "directMessages/{chatId}/messages/{messageId}",
+  async (event) => {
+    const message = event.data?.data() as ChatMessage | undefined;
+    if (!message?.senderUid) return;
+
+    const chatId = event.params.chatId;
+    const memberUids = chatId.split("_").filter(Boolean);
+    if (memberUids.length < 2) return;
+
+    await sendChatPush({
+      recipientUids: memberUids,
+      message,
+      title: "Direct message",
+      data: {
+        type: "directMessage",
+        chatId,
+        senderUid: message.senderUid,
         messageId: event.params.messageId,
       },
     });

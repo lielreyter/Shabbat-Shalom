@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kesher — Redesign Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy-900: #0C1526;
+    --navy-800: #13203A;
+    --navy-700: #1A2845;
+    --navy-600: #24365C;
+    --gold: #C9A55C;
+    --gold-bright: #E3C57E;
+    --gold-deep: #A8853E;
+    --gold-soft: #F3E9D2;
+    --cream: #FAF6EE;
+    --cream-deep: #F2EBDD;
+    --paper: #FFFFFF;
+    --ink: #1C2433;
+    --ink-2: #5B6474;
+    --ink-3: #98A0B0;
+    --line: #E9E2D2;
+    --line-soft: #F0EAE0;
+    --green: #2E7D5B;
+    --green-soft: #E3F0E9;
+    --flame: #D97737;
+    --flame-soft: #FBEEE2;
+    --danger: #B4453C;
+    --danger-soft: #F8E8E6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background:
+      radial-gradient(1100px 600px at 85% -10%, rgba(201,165,92,0.16), transparent 60%),
+      radial-gradient(900px 700px at -10% 110%, rgba(26,40,69,0.12), transparent 55%),
+      var(--cream);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 44px 20px 70px;
+    color: var(--ink);
+  }
+
+  /* ============ page chrome around the phone ============ */
+  .page-head { text-align: center; margin-bottom: 30px; }
+  .page-head .mark {
+    width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%;
+    background: var(--navy-700); display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 26px rgba(19,32,58,0.28);
+  }
+  .page-head h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 40px; font-weight: 600; letter-spacing: 0.5px; color: var(--navy-700);
+  }
+  .page-head p { color: var(--ink-2); font-size: 13.5px; margin-top: 6px; letter-spacing: 0.2px; }
+
+  .screen-chips {
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 34px;
+  }
+  .screen-chips button {
+    font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600;
+    padding: 9px 16px; border-radius: 100px; border: 1px solid var(--line);
+    background: #fff; color: var(--ink-2); cursor: pointer; transition: all .18s ease;
+  }
+  .screen-chips button:hover { border-color: var(--gold); color: var(--navy-700); }
+  .screen-chips button.active {
+    background: var(--navy-700); border-color: var(--navy-700); color: var(--gold-bright);
+    box-shadow: 0 8px 20px rgba(19,32,58,0.25);
+  }
+
+  /* ============ phone frame ============ */
+  .phone {
+    width: 396px; height: 858px; border-radius: 58px;
+    background: #0a0d14;
+    padding: 10px;
+    box-shadow:
+      0 50px 100px -20px rgba(12,21,38,0.45),
+      0 30px 60px -30px rgba(12,21,38,0.5),
+      inset 0 0 0 2px rgba(255,255,255,0.06);
+    position: relative;
+    flex-shrink: 0;
+  }
+  .phone-screen {
+    width: 100%; height: 100%; border-radius: 48px; overflow: hidden;
+    background: var(--cream); position: relative;
+    display: flex; flex-direction: column;
+  }
+  .island {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 118px; height: 32px; background: #0a0d14; border-radius: 100px; z-index: 60;
+  }
+  .statusbar {
+    height: 54px; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 30px 6px; font-size: 14px; font-weight: 600; letter-spacing: 0.2px;
+    position: relative; z-index: 50;
+  }
+  .statusbar .sb-icons { display: flex; gap: 5px; align-items: center; }
+  .statusbar.light { color: #fff; }
+  .statusbar.dark { color: var(--ink); }
+
+  /* ============ screens ============ */
+  .screen { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  #screen-welcome, #screen-shabbat { background: var(--navy-800); }
+  .screen.visible { display: flex; }
+  .scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  /* app header */
+  .app-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 22px 14px;
+  }
+  .app-head .crumb { font-size: 11px; font-weight: 700; letter-spacing: 2.2px; text-transform: uppercase; color: var(--gold-deep); }
+  .app-head .title {
+    font-family: 'Cormorant Garamond', serif; font-size: 30px; font-weight: 600; color: var(--navy-700);
+    line-height: 1.1; margin-top: 2px;
+  }
+  .avatar {
+    width: 42px; height: 42px; border-radius: 50%;
+    background: linear-gradient(145deg, var(--navy-600), var(--navy-800));
+    color: var(--gold-bright); font-weight: 700; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 14px rgba(19,32,58,0.25); position: relative;
+    border: 2px solid #fff;
+  }
+  .avatar .dot {
+    position: absolute; top: -2px; right: -2px; width: 12px; height: 12px;
+    background: var(--danger); border: 2px solid var(--cream); border-radius: 50%;
+  }
+
+  .pad { padding: 0 18px 26px; }
+
+  /* generic card */
+  .card {
+    background: var(--paper); border-radius: 22px; padding: 18px;
+    border: 1px solid rgba(233,226,210,0.8);
+    box-shadow: 0 10px 30px -12px rgba(26,40,69,0.10);
+    margin-bottom: 14px;
+  }
+  .card-label {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--gold-deep); margin-bottom: 10px;
+  }
+  .section-eyebrow {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--ink-3); margin: 22px 4px 10px;
+  }
+
+  /* ============ HOME: shabbat hero ============ */
+  .hero {
+    border-radius: 26px; padding: 22px 20px 20px; margin-bottom: 14px;
+    background:
+      radial-gradient(420px 220px at 88% -20%, rgba(201,165,92,0.35), transparent 60%),
+      radial-gradient(300px 200px at -10% 110%, rgba(67,97,158,0.35), transparent 60%),
+      linear-gradient(160deg, var(--navy-700) 0%, var(--navy-900) 100%);
+    color: #fff; position: relative; overflow: hidden;
+    box-shadow: 0 18px 40px -14px rgba(12,21,38,0.55);
+  }
+  .hero .stars { position: absolute; inset: 0; opacity: 0.5; }
+  .hero .stars i {
+    position: absolute; width: 3px; height: 3px; background: #fff; border-radius: 50%; opacity: .5;
+  }
+  .hero-top { display: flex; justify-content: space-between; align-items: flex-start; position: relative; }
+  .hero-kicker { font-size: 10.5px; font-weight: 700; letter-spacing: 2.4px; text-transform: uppercase; color: var(--gold-bright); }
+  .hero-title { font-family: 'Cormorant Garamond', serif; font-size: 32px; font-weight: 600; margin-top: 4px; letter-spacing: 0.4px; }
+  .hero-sub { font-size: 12.5px; color: rgba(255,255,255,0.62); margin-top: 3px; }
+  .badge-live {
+    font-size: 10px; font-weight: 800; letter-spacing: 1.4px;
+    background: rgba(201,165,92,0.18); color: var(--gold-bright);
+    border: 1px solid rgba(201,165,92,0.45);
+    padding: 6px 11px; border-radius: 100px; backdrop-filter: blur(4px);
+  }
+  .hero-times {
+    display: flex; margin-top: 20px; position: relative;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 18px; padding: 14px 6px;
+  }
+  .hero-time { flex: 1; text-align: center; }
+  .hero-time + .hero-time { border-left: 1px solid rgba(255,255,255,0.12); }
+  .hero-time .icon { margin-bottom: 6px; }
+  .hero-time .lbl { font-size: 10.5px; letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,0.55); font-weight: 600; }
+  .hero-time .val { font-family: 'Cormorant Garamond', serif; font-size: 27px; font-weight: 600; color: var(--gold-bright); margin-top: 3px; }
+  .hero-foot {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 14px; position: relative;
+  }
+  .hero-foot .loc { font-size: 12px; color: rgba(255,255,255,0.6); display: flex; align-items: center; gap: 6px; }
+  .hero-foot .change { font-size: 12px; font-weight: 700; color: var(--gold-bright); }
+
+  /* streak duo */
+  .streaks { display: flex; gap: 12px; margin-bottom: 14px; }
+  .streak {
+    flex: 1; border-radius: 22px; padding: 16px;
+    border: 1px solid rgba(233,226,210,0.9);
+    background: var(--paper);
+    box-shadow: 0 10px 30px -12px rgba(26,40,69,0.10);
+    position: relative; overflow: hidden;
+  }
+  .streak.gold { background: linear-gradient(160deg, #FFF9EC, #F8EDD3); border-color: #EDDDB6; }
+  .streak .flame-bg { position: absolute; right: -8px; bottom: -10px; opacity: 0.13; }
+  .streak .s-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; color: var(--gold-deep); }
+  .streak.blue .s-lbl { color: var(--navy-600); }
+  .streak .s-num { font-family: 'Cormorant Garamond', serif; font-size: 44px; font-weight: 600; color: var(--navy-800); line-height: 1; margin-top: 8px; }
+  .streak .s-sub { font-size: 11px; color: var(--ink-2); margin-top: 5px; }
+  .streak .s-cta { font-size: 11px; font-weight: 700; color: var(--gold-deep); margin-top: 7px; }
+
+  /* shabbat mode segmented */
+  .mode-grid { display: flex; gap: 8px; margin-top: 4px; }
+  .mode-opt {
+    flex: 1; border-radius: 16px; border: 1.5px solid var(--line-soft); padding: 12px 10px;
+    text-align: center; background: #FCFAF5;
+  }
+  .mode-opt.sel {
+    border-color: var(--gold); background: var(--gold-soft);
+    box-shadow: 0 6px 16px -6px rgba(201,165,92,0.5);
+  }
+  .mode-opt .m-ic { margin-bottom: 6px; }
+  .mode-opt .m-t { font-size: 12.5px; font-weight: 700; color: var(--navy-800); }
+  .mode-opt .m-d { font-size: 10px; color: var(--ink-2); margin-top: 3px; line-height: 1.35; }
+  .mode-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+  .link-gold { font-size: 12.5px; font-weight: 700; color: var(--gold-deep); }
+  .link-danger { font-size: 12.5px; font-weight: 700; color: var(--danger); }
+
+  /* practice rows */
+  .row {
+    display: flex; align-items: center; gap: 13px; padding: 13px 0;
+  }
+  .row + .row { border-top: 1px solid var(--line-soft); }
+  .row .r-ic {
+    width: 40px; height: 40px; border-radius: 13px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ic-navy { background: #EBEFF7; }
+  .ic-gold { background: var(--gold-soft); }
+  .ic-flame { background: var(--flame-soft); }
+  .ic-green { background: var(--green-soft); }
+  .row .r-body { flex: 1; min-width: 0; }
+  .row .r-t { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .row .r-d { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+  .row .r-val { font-size: 13px; font-weight: 700; color: var(--gold-deep); }
+
+  /* iOS-ish toggle */
+  .tgl { width: 46px; height: 28px; border-radius: 100px; background: #E5E0D3; position: relative; flex-shrink: 0; }
+  .tgl::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+    background: #fff; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.2); transition: left .15s;
+  }
+  .tgl.on { background: var(--navy-700); }
+  .tgl.on::after { left: 21px; }
+
+  /* intention */
+  .intent-quote {
+    font-family: 'Cormorant Garamond', serif; font-size: 19px; font-style: italic; font-weight: 500;
+    color: var(--navy-800); line-height: 1.45; padding: 2px 4px 0;
+  }
+  .intent-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 13px; }
+  .intent-meta .saved { font-size: 11.5px; font-weight: 600; color: var(--green); display: flex; align-items: center; gap: 5px; }
+
+  /* holiday rows */
+  .holi { display: flex; align-items: center; gap: 12px; padding: 11px 0; }
+  .holi + .holi { border-top: 1px solid var(--line-soft); }
+  .holi .h-date {
+    width: 44px; text-align: center; flex-shrink: 0;
+    background: #FCFAF5; border: 1px solid var(--line-soft); border-radius: 12px; padding: 6px 0;
+  }
+  .holi .h-mon { font-size: 9px; font-weight: 800; letter-spacing: 1px; color: var(--gold-deep); text-transform: uppercase; }
+  .holi .h-day { font-size: 17px; font-weight: 700; color: var(--navy-800); }
+  .holi .h-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+  .holi .h-sub { font-size: 11px; color: var(--ink-2); margin-top: 1px; }
+
+  /* buttons */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border-radius: 16px; padding: 15px; font-size: 14.5px; font-weight: 700;
+    font-family: 'Inter', sans-serif; border: none; width: 100%; cursor: pointer;
+  }
+  .btn-navy { background: linear-gradient(160deg, var(--navy-600), var(--navy-800)); color: #fff; box-shadow: 0 12px 24px -10px rgba(19,32,58,0.55); }
+  .btn-gold { background: linear-gradient(160deg, var(--gold-bright), var(--gold)); color: var(--navy-900); box-shadow: 0 12px 24px -10px rgba(201,165,92,0.6); }
+  .btn-ghost { background: transparent; border: 1.5px solid var(--line); color: var(--navy-700); }
+  .btn-sm { padding: 10px 16px; width: auto; font-size: 12.5px; border-radius: 100px; }
+
+  /* ============ TORAH ============ */
+  .parsha-hero {
+    border-radius: 26px; overflow: hidden; margin-bottom: 14px; position: relative;
+    background:
+      radial-gradient(360px 200px at 100% 0%, rgba(201,165,92,0.4), transparent 65%),
+      linear-gradient(165deg, var(--navy-700), var(--navy-900));
+    color: #fff; padding: 26px 22px 24px;
+    box-shadow: 0 18px 40px -14px rgba(12,21,38,0.55);
+  }
+  .parsha-hero .book-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10px; font-weight: 800; letter-spacing: 1.8px; text-transform: uppercase;
+    background: rgba(201,165,92,0.16); color: var(--gold-bright);
+    border: 1px solid rgba(201,165,92,0.4); border-radius: 100px; padding: 6px 12px;
+  }
+  .parsha-hero .p-heb {
+    font-family: 'Cormorant Garamond', serif; font-size: 23px; color: rgba(255,255,255,0.45);
+    margin-top: 18px; letter-spacing: 1px;
+  }
+  .parsha-hero .p-name { font-family: 'Cormorant Garamond', serif; font-size: 42px; font-weight: 600; margin-top: 2px; }
+  .parsha-hero .p-ref { font-size: 12px; color: rgba(255,255,255,0.55); margin-top: 6px; letter-spacing: 0.4px; }
+  .parsha-hero .p-rule {
+    height: 1px; margin: 18px 0 14px;
+    background: linear-gradient(90deg, transparent, rgba(201,165,92,0.6), transparent);
+  }
+  .parsha-hero .p-week { display: flex; justify-content: space-between; font-size: 11.5px; color: rgba(255,255,255,0.6); }
+  .parsha-hero .p-week b { color: var(--gold-bright); font-weight: 700; }
+
+  .torah-body { font-size: 14px; line-height: 1.65; color: var(--ink-2); }
+  .torah-body .drop {
+    font-family: 'Cormorant Garamond', serif; font-size: 46px; font-weight: 600; color: var(--gold-deep);
+    float: left; line-height: 0.85; padding: 6px 8px 0 0;
+  }
+
+  .learn-cta {
+    display: flex; align-items: center; gap: 14px;
+    border-radius: 22px; padding: 16px; margin-bottom: 14px;
+    background: linear-gradient(160deg, #FFF9EC, #F6ECD6); border: 1px solid #EDDDB6;
+  }
+  .learn-cta .l-ic {
+    width: 48px; height: 48px; border-radius: 16px; background: var(--navy-700);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    box-shadow: 0 8px 18px rgba(19,32,58,0.3);
+  }
+  .learn-cta .l-t { font-size: 14.5px; font-weight: 700; color: var(--navy-800); }
+  .learn-cta .l-d { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+  .learn-cta .chev { margin-left: auto; color: var(--gold-deep); font-size: 20px; }
+
+  /* ============ BLOCK ============ */
+  .dial-wrap { display: flex; flex-direction: column; align-items: center; padding: 8px 0 4px; }
+  .dial { position: relative; width: 240px; height: 240px; }
+  .dial svg { transform: rotate(-90deg); }
+  .dial-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .dial-center .d-time { font-family: 'Cormorant Garamond', serif; font-size: 52px; font-weight: 600; color: var(--navy-800); line-height: 1; }
+  .dial-center .d-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-3); margin-top: 7px; }
+  .dial-knob {
+    position: absolute; width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(160deg, var(--gold-bright), var(--gold));
+    border: 3px solid #fff;
+    box-shadow: 0 4px 12px rgba(201,165,92,0.65);
+    top: 17px; right: 49px;
+  }
+  .pills { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+  .pill {
+    font-size: 12.5px; font-weight: 700; padding: 9px 15px; border-radius: 100px;
+    background: #fff; border: 1.5px solid var(--line); color: var(--ink-2);
+  }
+  .pill.sel { background: var(--navy-700); border-color: var(--navy-700); color: var(--gold-bright); }
+
+  .stat-duo { display: flex; gap: 12px; }
+  .stat {
+    flex: 1; text-align: center; background: var(--paper); border-radius: 20px; padding: 16px;
+    border: 1px solid rgba(233,226,210,0.8); box-shadow: 0 10px 30px -12px rgba(26,40,69,0.08);
+  }
+  .stat .st-num { font-family: 'Cormorant Garamond', serif; font-size: 34px; font-weight: 600; line-height: 1; }
+  .stat .st-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--ink-3); margin-top: 7px; }
+  .stat.good .st-num { color: var(--green); }
+  .stat.bad .st-num { color: var(--danger); }
+
+  /* ============ SOCIAL ============ */
+  .cong-banner {
+    border-radius: 24px; padding: 18px; margin-bottom: 14px; color: #fff; position: relative; overflow: hidden;
+    background:
+      radial-gradient(300px 160px at 100% 0%, rgba(201,165,92,0.35), transparent 60%),
+      linear-gradient(160deg, var(--navy-600), var(--navy-900));
+    box-shadow: 0 16px 36px -14px rgba(12,21,38,0.5);
+  }
+  .cong-top { display: flex; align-items: center; gap: 13px; }
+  .cong-ic {
+    width: 46px; height: 46px; border-radius: 15px; flex-shrink: 0;
+    background: rgba(201,165,92,0.18); border: 1px solid rgba(201,165,92,0.4);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cong-name { font-family: 'Cormorant Garamond', serif; font-size: 21px; font-weight: 600; }
+  .cong-sub { font-size: 11.5px; color: rgba(255,255,255,0.6); margin-top: 1px; }
+  .cong-actions { display: flex; gap: 9px; margin-top: 15px; }
+  .cong-actions .ca {
+    flex: 1; text-align: center; font-size: 12.5px; font-weight: 700; padding: 10px;
+    border-radius: 13px; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.14); color: #fff;
+  }
+  .cong-actions .ca.gold { background: rgba(201,165,92,0.2); border-color: rgba(201,165,92,0.5); color: var(--gold-bright); }
+
+  .req { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .req + .req { border-top: 1px solid var(--line-soft); }
+  .pp {
+    width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; color: #fff;
+  }
+  .pp-1 { background: linear-gradient(150deg, #6E89B8, #41598A); }
+  .pp-2 { background: linear-gradient(150deg, #C9A55C, #A8853E); }
+  .pp-3 { background: linear-gradient(150deg, #7FA890, #4A7561); }
+  .pp-4 { background: linear-gradient(150deg, #B88A6E, #8A5F41); }
+  .pp-5 { background: linear-gradient(150deg, #8D7FB8, #5A4A8A); }
+  .req .q-name { font-size: 14px; font-weight: 600; }
+  .req .q-sub { font-size: 11.5px; color: var(--ink-2); margin-top: 1px; }
+  .req-btns { display: flex; gap: 7px; margin-left: auto; }
+  .req-btns .a {
+    font-size: 11.5px; font-weight: 700; padding: 8px 14px; border-radius: 100px;
+    background: var(--navy-700); color: var(--gold-bright);
+  }
+  .req-btns .d {
+    font-size: 11.5px; font-weight: 700; padding: 8px 14px; border-radius: 100px;
+    background: transparent; border: 1.5px solid var(--line); color: var(--ink-2);
+  }
+
+  .lead-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .lead-row + .lead-row { border-top: 1px solid var(--line-soft); }
+  .rank {
+    width: 24px; text-align: center; font-family: 'Cormorant Garamond', serif;
+    font-size: 19px; font-weight: 700; color: var(--ink-3); flex-shrink: 0;
+  }
+  .rank.r1 { color: var(--gold-deep); }
+  .lead-row .l-name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .lead-row .l-sub { font-size: 11px; color: var(--ink-2); margin-top: 1px; }
+  .mini-badges { display: flex; gap: 6px; margin-left: auto; }
+  .mb {
+    display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700;
+    padding: 5px 10px; border-radius: 100px;
+  }
+  .mb.shab { background: var(--gold-soft); color: var(--gold-deep); }
+  .mb.tef { background: #EBEFF7; color: var(--navy-600); }
+  .new-pill {
+    font-size: 9px; font-weight: 800; letter-spacing: 0.8px; padding: 3px 8px;
+    background: var(--danger); color: #fff; border-radius: 100px;
+  }
+
+  /* ============ BUDDIES ============ */
+  .buddy { display: flex; align-items: center; gap: 13px; padding: 13px 0; }
+  .buddy + .buddy { border-top: 1px solid var(--line-soft); }
+  .buddy .b-photo {
+    width: 50px; height: 50px; border-radius: 17px; flex-shrink: 0; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 17px; color: #fff;
+  }
+  .buddy .b-photo .ring {
+    position: absolute; inset: -4px; border-radius: 21px;
+    border: 2px solid var(--gold);
+  }
+  .buddy .b-name { font-size: 14.5px; font-weight: 600; }
+  .buddy .b-sub { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+  .buddy .b-sub.unread { color: var(--gold-deep); font-weight: 600; }
+  .snap {
+    margin-left: auto; width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(160deg, var(--gold-bright), var(--gold));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 18px -6px rgba(201,165,92,0.7);
+  }
+  .streak-flame { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--flame); }
+
+  .rest-note {
+    display: flex; gap: 12px; align-items: center;
+    background: linear-gradient(160deg, #FFF9EC, #F6ECD6); border: 1px solid #EDDDB6;
+    border-radius: 18px; padding: 14px 16px; margin-bottom: 14px;
+    font-size: 12px; color: #6B5320; line-height: 1.5;
+  }
+
+  /* ============ tab bar ============ */
+  .tabbar {
+    flex-shrink: 0; display: flex; padding: 10px 14px 26px;
+    background: rgba(250,246,238,0.92); backdrop-filter: blur(16px);
+    border-top: 1px solid var(--line-soft);
+  }
+  .tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px 0 4px; cursor: pointer; border-radius: 14px; transition: all .15s;
+  }
+  .tab .t-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.3px; color: var(--ink-3); }
+  .tab svg { stroke: var(--ink-3); }
+  .tab.active .t-lbl { color: var(--navy-700); }
+  .tab.active svg { stroke: var(--navy-700); }
+  .tab.active { position: relative; }
+  .tab.active::before {
+    content: ""; position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    width: 26px; height: 3px; border-radius: 2px; background: var(--gold);
+  }
+
+  .home-indicator {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 134px; height: 5px; border-radius: 3px; background: rgba(28,36,51,0.25); z-index: 70;
+  }
+  .home-indicator.light { background: rgba(255,255,255,0.4); }
+
+  /* ============ SHABBAT OVERLAY screen ============ */
+  .shabbat-full {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 40px 34px 60px; text-align: center; position: relative; overflow: hidden;
+    background:
+      radial-gradient(500px 360px at 50% 118%, rgba(217,150,55,0.28), transparent 65%),
+      radial-gradient(400px 300px at 80% -10%, rgba(67,97,158,0.3), transparent 60%),
+      linear-gradient(175deg, var(--navy-800) 0%, var(--navy-900) 70%, #141320 100%);
+    color: #fff;
+  }
+  .shabbat-full .stars i { position: absolute; background: #fff; border-radius: 50%; }
+  .sf-kicker { font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--gold-bright); position: relative; }
+  .sf-title { font-family: 'Cormorant Garamond', serif; font-size: 58px; font-weight: 600; margin-top: 10px; position: relative; }
+  .sf-heb { font-family: 'Cormorant Garamond', serif; font-size: 22px; color: rgba(255,255,255,0.4); margin-top: 2px; position: relative; }
+  .candles { display: flex; gap: 38px; margin: 44px 0 40px; position: relative; }
+  .candle { display: flex; flex-direction: column; align-items: center; }
+  .candle .flame-glow {
+    width: 18px; height: 26px; border-radius: 50% 50% 45% 45%;
+    background: radial-gradient(circle at 50% 70%, #FFE9B8 0%, #F4B85C 55%, rgba(244,184,92,0) 75%);
+    filter: blur(0.4px);
+    box-shadow: 0 0 26px 9px rgba(244,184,92,0.4), 0 0 60px 20px rgba(244,184,92,0.14);
+    animation: flick 2.6s ease-in-out infinite;
+  }
+  .candle:last-child .flame-glow { animation-delay: -1.2s; }
+  @keyframes flick {
+    0%, 100% { transform: scaleY(1) translateX(0); }
+    30% { transform: scaleY(1.08) translateX(0.6px); }
+    60% { transform: scaleY(0.94) translateX(-0.6px); }
+  }
+  .candle .wick { width: 2px; height: 7px; background: #3a3326; }
+  .candle .body {
+    width: 16px; height: 84px; border-radius: 5px 5px 4px 4px;
+    background: linear-gradient(180deg, #FFFDF6, #EFE6CE);
+    box-shadow: inset -3px 0 5px rgba(0,0,0,0.07);
+  }
+  .candle .holder {
+    width: 34px; height: 10px; margin-top: -1px; border-radius: 3px 3px 8px 8px;
+    background: linear-gradient(180deg, var(--gold-bright), var(--gold-deep));
+  }
+  .sf-ends { font-size: 13px; color: rgba(255,255,255,0.65); position: relative; }
+  .sf-ends b { color: var(--gold-bright); font-weight: 700; }
+  .sf-msg { font-size: 13px; line-height: 1.65; color: rgba(255,255,255,0.5); margin-top: 16px; max-width: 280px; position: relative; }
+  .sf-intent {
+    margin-top: 26px; position: relative;
+    border: 1px solid rgba(201,165,92,0.35); background: rgba(201,165,92,0.08);
+    border-radius: 18px; padding: 15px 18px; max-width: 300px;
+  }
+  .sf-intent .si-l { font-size: 9.5px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: var(--gold-bright); }
+  .sf-intent .si-q { font-family: 'Cormorant Garamond', serif; font-size: 17px; font-style: italic; color: rgba(255,255,255,0.85); margin-top: 6px; line-height: 1.4; }
+  .sf-break {
+    margin-top: 36px; position: relative; font-size: 12.5px; font-weight: 600;
+    color: rgba(255,255,255,0.35); text-decoration: underline; text-underline-offset: 3px;
+  }
+
+  /* ============ WELCOME screen ============ */
+  .welcome {
+    flex: 1; display: flex; flex-direction: column; padding: 30px 30px 56px;
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(480px 320px at 110% -10%, rgba(201,165,92,0.22), transparent 60%),
+      radial-gradient(420px 360px at -20% 115%, rgba(36,54,92,0.5), transparent 60%),
+      linear-gradient(170deg, var(--navy-700), var(--navy-900));
+    color: #fff;
+  }
+  .welcome .w-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; position: relative; }
+  .w-mark {
+    width: 92px; height: 92px; border-radius: 50%;
+    background: rgba(201,165,92,0.12); border: 1px solid rgba(201,165,92,0.4);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 50px rgba(201,165,92,0.25);
+  }
+  .w-name { font-family: 'Cormorant Garamond', serif; font-size: 54px; font-weight: 600; margin-top: 26px; letter-spacing: 1px; }
+  .w-tag { font-size: 13.5px; color: rgba(255,255,255,0.55); margin-top: 8px; letter-spacing: 0.4px; }
+  .w-rule { width: 54px; height: 1px; background: linear-gradient(90deg, transparent, var(--gold), transparent); margin: 22px auto 0; }
+  .w-btns { position: relative; display: flex; flex-direction: column; gap: 11px; }
+  .w-or { text-align: center; font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,0.35); margin: 7px 0; }
+  .w-social { display: flex; gap: 11px; }
+  .w-social .btn { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.16); color: #fff; font-size: 13.5px; }
+
+  .foot-note { text-align: center; font-size: 10.5px; color: var(--ink-3); padding: 10px 0 4px; letter-spacing: 0.3px; }
+
+  @media (max-width: 460px) {
+    .phone { transform: scale(0.88); transform-origin: top center; margin-bottom: -100px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ====== page header ====== -->
+<div class="page-head">
+  <div class="mark">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+      <path d="M12 2.5 L20.5 17 H3.5 Z" stroke="#E3C57E" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M12 21.5 L3.5 7 H20.5 Z" stroke="#E3C57E" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <h1>Kesher</h1>
+  <p>Redesign concept &nbsp;·&nbsp; Intentional Jewish living &nbsp;·&nbsp; visual mockup only</p>
+</div>
+
+<div class="screen-chips">
+  <button data-screen="welcome">Welcome</button>
+  <button data-screen="home" class="active">Home</button>
+  <button data-screen="torah">Torah</button>
+  <button data-screen="block">Block</button>
+  <button data-screen="social">Social</button>
+  <button data-screen="buddies">Buddies</button>
+  <button data-screen="shabbat">Shabbat Mode</button>
+</div>
+
+<!-- ====== phone ====== -->
+<div class="phone">
+  <div class="phone-screen">
+    <div class="island"></div>
+
+    <!-- ================= WELCOME ================= -->
+    <div class="screen" id="screen-welcome">
+      <div class="statusbar light"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="white"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="white" opacity=".5"/><rect x="2" y="2" width="15" height="8" rx="2" fill="white"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="white" opacity=".5"/></svg>
+      </span></div>
+      <div class="welcome">
+        <div class="w-center">
+          <div class="w-mark">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2.5 L20.5 17 H3.5 Z" stroke="#E3C57E" stroke-width="1.3" stroke-linejoin="round"/>
+              <path d="M12 21.5 L3.5 7 H20.5 Z" stroke="#E3C57E" stroke-width="1.3" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="w-name">Kesher</div>
+          <div class="w-tag">Keep Shabbat with intention</div>
+          <div class="w-rule"></div>
+        </div>
+        <div class="w-btns">
+          <button class="btn btn-gold">Log In</button>
+          <button class="btn" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.16);color:#fff;">Sign Up</button>
+          <div class="w-or">or continue with</div>
+          <div class="w-social">
+            <button class="btn">
+              <svg width="15" height="17" viewBox="0 0 15 17" fill="white"><path d="M12.5 9c0-2.4 2-3.5 2-3.5C13.4 4 11.9 3.9 11.4 3.9c-1.3-.1-2.6.8-3.2.8-.7 0-1.7-.8-2.8-.8C3.1 4 .9 5.8.9 9.3c0 2.1.8 4.3 1.8 5.7.8 1.2 1.6 2.1 2.7 2 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.7 1.1 0 1.9-1 2.6-2.2.8-1.3 1.2-2.6 1.2-2.6S12.5 11.4 12.5 9zM10.2 2.4c.6-.7 1-1.7.9-2.4-.9 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.5 1 0 1.9-.7 2.5-1.4z"/></svg>
+              Apple</button>
+            <button class="btn">
+              <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#fff" d="M21.8 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.5c-.2 1.2-1 2.3-2 3v2.5h3.2c1.9-1.7 3.1-4.3 3.1-7.4z" opacity=".9"/><path fill="#fff" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.9-1.8-5.7-4.2H3v2.6C4.7 19.8 8.1 22 12 22z" opacity=".7"/><path fill="#fff" d="M6.3 13.9c-.2-.6-.3-1.2-.3-1.9s.1-1.3.3-1.9V7.5H3C2.4 8.9 2 10.4 2 12s.4 3.1 1 4.5l3.3-2.6z" opacity=".5"/><path fill="#fff" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9C17 2.9 14.7 2 12 2 8.1 2 4.7 4.2 3 7.5l3.3 2.6c.8-2.4 3.1-4.2 5.7-4.2z" opacity=".8"/></svg>
+              Google</button>
+          </div>
+        </div>
+      </div>
+      <div class="home-indicator light"></div>
+    </div>
+
+    <!-- ================= HOME ================= -->
+    <div class="screen visible" id="screen-home">
+      <div class="statusbar dark"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#1C2433"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="#1C2433" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#1C2433"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="#1C2433" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="app-head">
+        <div>
+          <div class="crumb">Erev Shabbat · 18 Iyar 5786</div>
+          <div class="title">Shalom, Daniel</div>
+        </div>
+        <div class="avatar">D<span class="dot"></span></div>
+      </div>
+
+      <div class="scroll"><div class="pad">
+
+        <!-- Shabbat hero -->
+        <div class="hero">
+          <div class="stars">
+            <i style="top:14%;left:8%"></i><i style="top:30%;left:22%;width:2px;height:2px"></i>
+            <i style="top:12%;left:55%;width:2px;height:2px"></i><i style="top:42%;left:88%"></i>
+            <i style="top:8%;left:78%"></i><i style="top:55%;left:8%;width:2px;height:2px"></i>
+          </div>
+          <div class="hero-top">
+            <div>
+              <div class="hero-kicker">This Shabbat</div>
+              <div class="hero-title">Parashat Behar</div>
+              <div class="hero-sub">Friday, May 16 · begins in 4h 12m</div>
+            </div>
+            <div class="badge-live">TONIGHT</div>
+          </div>
+          <div class="hero-times">
+            <div class="hero-time">
+              <div class="icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="1.7" stroke-linecap="round">
+                  <path d="M12 3c1.2 1.6 2 2.7 2 4a2 2 0 1 1-4 0c0-1.3.8-2.4 2-4z" fill="rgba(227,197,126,.25)"/>
+                  <path d="M9.5 11h5M10 11v8h4v-8"/>
+                </svg>
+              </div>
+              <div class="lbl">Candle Lighting</div>
+              <div class="val">7:52 PM</div>
+            </div>
+            <div class="hero-time">
+              <div class="icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17 12.5A6.5 6.5 0 0 1 9.6 4a7 7 0 1 0 7.4 8.5z" fill="rgba(227,197,126,.18)"/>
+                  <path d="M18.5 4.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" fill="#E3C57E" stroke="none"/>
+                </svg>
+              </div>
+              <div class="lbl">Havdalah</div>
+              <div class="val">8:56 PM</div>
+            </div>
+          </div>
+          <div class="hero-foot">
+            <div class="loc">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              Brooklyn, NY · Hebcal.com
+            </div>
+            <div class="change">Change</div>
+          </div>
+        </div>
+
+        <!-- streaks -->
+        <div class="streaks">
+          <div class="streak gold">
+            <div class="flame-bg">
+              <svg width="74" height="74" viewBox="0 0 24 24" fill="#A8853E"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>
+            </div>
+            <div class="s-lbl">Shabbat Streak</div>
+            <div class="s-num">12</div>
+            <div class="s-sub">weeks unbroken</div>
+          </div>
+          <div class="streak blue">
+            <div class="flame-bg">
+              <svg width="74" height="74" viewBox="0 0 24 24" fill="#24365C"><rect x="7" y="3" width="10" height="10" rx="2"/><path d="M9 13c-2 2-3 5-3 8h2c0-2.5.8-5 2.5-6.5z"/></svg>
+            </div>
+            <div class="s-lbl">Tefillin Streak</div>
+            <div class="s-num">8</div>
+            <div class="s-sub">days in a row</div>
+            <div class="s-cta">Tap to log today →</div>
+          </div>
+        </div>
+
+        <!-- shabbat mode -->
+        <div class="card">
+          <div class="card-label">Shabbat Mode</div>
+          <div class="mode-grid">
+            <div class="mode-opt sel">
+              <div class="m-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+              <div class="m-t">Full Block</div>
+              <div class="m-d">Block all apps during Shabbat</div>
+            </div>
+            <div class="mode-opt">
+              <div class="m-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#98A0B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="7" cy="17" r="3"/><path d="M14.5 17H20M17 14.5V20"/></svg></div>
+              <div class="m-t">Custom</div>
+              <div class="m-d">Block selected apps only</div>
+            </div>
+            <div class="mode-opt">
+              <div class="m-ic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#98A0B0" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg></div>
+              <div class="m-t">No Block</div>
+              <div class="m-d">No apps blocked</div>
+            </div>
+          </div>
+          <div class="mode-foot">
+            <span class="link-gold">Customize Shabbat Block →</span>
+            <span style="font-size:11px;color:var(--ink-3);font-weight:600;">All apps selected</span>
+          </div>
+        </div>
+
+        <!-- daily practice -->
+        <div class="section-eyebrow">Daily Practice</div>
+        <div class="card" style="padding:6px 18px;">
+          <div class="row">
+            <div class="r-ic ic-navy"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#24365C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4" width="10" height="9" rx="2"/><path d="M9 13c-2.2 2-3.4 4.6-3.6 7.5M15 13c2.2 2 3.4 4.6 3.6 7.5"/></svg></div>
+            <div class="r-body"><div class="r-t">Tefillin Reminder</div><div class="r-d">Morning notification to wrap tefillin</div></div>
+            <div class="tgl on"></div>
+          </div>
+          <div class="row">
+            <div class="r-ic ic-gold"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/></svg></div>
+            <div class="r-body"><div class="r-t">Modeh Ani</div><div class="r-d">Gratitude prayer at wake-up, before your phone opens</div></div>
+            <div class="tgl on"></div>
+          </div>
+          <div class="row">
+            <div class="r-ic ic-navy"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#24365C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 13.5A7.5 7.5 0 0 1 10.5 5a8.5 8.5 0 1 0 8.5 8.5z"/></svg></div>
+            <div class="r-body"><div class="r-t">Shema Before Bed</div><div class="r-d">15 minutes before bedtime</div></div>
+            <div class="tgl"></div>
+          </div>
+          <div class="row">
+            <div class="r-ic ic-flame"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D97737" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="7"/><path d="M12 10v3.5l2.5 1.5M5 4 3 6M19 4l2 2"/></svg></div>
+            <div class="r-body"><div class="r-t">Wake Up Time</div><div class="r-d">Modeh Ani unlocks your morning</div></div>
+            <div class="r-val">7:15 AM</div>
+          </div>
+          <div class="row">
+            <div class="r-ic ic-green"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#2E7D5B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 13.5A7.5 7.5 0 0 1 10.5 5a8.5 8.5 0 1 0 8.5 8.5z"/><path d="M17 3.5l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5z" fill="#2E7D5B" stroke="none"/></svg></div>
+            <div class="r-body"><div class="r-t">Bed Time</div><div class="r-d">Shema gently closes the day</div></div>
+            <div class="r-val">11:00 PM</div>
+          </div>
+        </div>
+
+        <!-- intention -->
+        <div class="section-eyebrow">This Week</div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="card-label" style="margin-bottom:0;">Your Shabbat Intention</div>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+          </div>
+          <div class="intent-quote" style="margin-top:12px;">“This Shabbat, I will be fully present with my family and let go of distractions.”</div>
+          <div class="intent-meta">
+            <div class="saved">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2E7D5B" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              Saved for this week
+            </div>
+            <span class="link-gold">Edit</span>
+          </div>
+        </div>
+
+        <!-- holidays -->
+        <div class="section-eyebrow">Upcoming Holidays</div>
+        <div class="card" style="padding:8px 18px;">
+          <div class="holi">
+            <div class="h-date"><div class="h-mon">Jun</div><div class="h-day">1</div></div>
+            <div><div class="h-name">Shavuot</div><div class="h-sub">Begins Sunday at sundown · blocking opt-in</div></div>
+            <div class="tgl on" style="margin-left:auto;"></div>
+          </div>
+          <div class="holi">
+            <div class="h-date"><div class="h-mon">Aug</div><div class="h-day">3</div></div>
+            <div><div class="h-name">Tisha B'Av</div><div class="h-sub">Begins Monday at sundown</div></div>
+            <div class="tgl" style="margin-left:auto;"></div>
+          </div>
+        </div>
+
+        <div class="foot-note">Times and zmanim provided by Hebcal.com</div>
+      </div></div>
+
+      <div class="tabbar" id="tabbar-home"></div>
+      <div class="home-indicator"></div>
+    </div>
+
+    <!-- ================= TORAH ================= -->
+    <div class="screen" id="screen-torah">
+      <div class="statusbar dark"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#1C2433"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="#1C2433" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#1C2433"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="#1C2433" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="app-head">
+        <div>
+          <div class="crumb">This Week's Portion</div>
+          <div class="title">Torah</div>
+        </div>
+        <div class="avatar">D</div>
+      </div>
+
+      <div class="scroll"><div class="pad">
+        <div class="parsha-hero">
+          <span class="book-badge">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h7a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2zM22 4h-7a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>
+            Leviticus · Vayikra
+          </span>
+          <div class="p-heb">בְּהַר</div>
+          <div class="p-name">Behar</div>
+          <div class="p-ref">Leviticus 25:1 – 26:2 &nbsp;·&nbsp; 57 verses</div>
+          <div class="p-rule"></div>
+          <div class="p-week"><span>Read this Shabbat</span><b>May 16–17, 2026</b></div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Summary</div>
+          <p class="torah-body">
+            <span class="drop">O</span>n Mount Sinai, God teaches Moses the laws of the Sabbatical year: every seventh year, all work on the land shall cease, and its produce becomes free for the taking. After seven such cycles comes the Jubilee — a year when all servants are set free and ancestral lands return to their original owners.
+          </p>
+          <p class="torah-body" style="margin-top:12px;">
+            Behar reminds us that the land — and time itself — ultimately belongs to God. We are guests and stewards, invited to rest, release, and trust.
+          </p>
+        </div>
+
+        <div class="learn-cta">
+          <div class="l-ic">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="10,8 16,12 10,16" fill="#E3C57E" stroke="none"/><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <div>
+            <div class="l-t">Learn with Rabbi Gordon</div>
+            <div class="l-d">Daily study of Parashat Behar · 24 min</div>
+          </div>
+          <div class="chev">›</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">A Thought for the Week</div>
+          <div class="intent-quote">“The Sabbath is a palace in time which we build, a sanctuary made not of stone but of stillness.”</div>
+          <div style="font-size:11.5px;color:var(--ink-3);margin-top:10px;font-weight:600;">— Rabbi Abraham Joshua Heschel</div>
+        </div>
+      </div></div>
+
+      <div class="tabbar" id="tabbar-torah"></div>
+      <div class="home-indicator"></div>
+    </div>
+
+    <!-- ================= BLOCK ================= -->
+    <div class="screen" id="screen-block">
+      <div class="statusbar dark"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#1C2433"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="#1C2433" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#1C2433"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="#1C2433" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="app-head">
+        <div>
+          <div class="crumb">Custom Focus Block</div>
+          <div class="title">Focus</div>
+        </div>
+        <div class="avatar">D</div>
+      </div>
+
+      <div class="scroll"><div class="pad">
+        <div class="card" style="padding:24px 18px 22px;">
+          <div class="dial-wrap">
+            <div class="dial">
+              <svg width="240" height="240" viewBox="0 0 240 240">
+                <circle cx="120" cy="120" r="104" fill="none" stroke="#F0EAE0" stroke-width="14" stroke-linecap="round"/>
+                <circle cx="120" cy="120" r="104" fill="none" stroke="url(#goldgrad)" stroke-width="14" stroke-linecap="round"
+                        stroke-dasharray="653.4" stroke-dashoffset="435.6"/>
+                <defs>
+                  <linearGradient id="goldgrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#E3C57E"/><stop offset="100%" stop-color="#C9A55C"/>
+                  </linearGradient>
+                </defs>
+                <g stroke="#D9D0BD" stroke-width="2" stroke-linecap="round">
+                  <line x1="120" y1="34" x2="120" y2="42"/><line x1="206" y1="120" x2="198" y2="120"/>
+                  <line x1="120" y1="206" x2="120" y2="198"/><line x1="34" y1="120" x2="42" y2="120"/>
+                  <line x1="180.8" y1="59.2" x2="175.1" y2="64.9"/><line x1="180.8" y1="180.8" x2="175.1" y2="175.1"/>
+                  <line x1="59.2" y1="180.8" x2="64.9" y2="175.1"/><line x1="59.2" y1="59.2" x2="64.9" y2="64.9"/>
+                </g>
+              </svg>
+              <div class="dial-knob"></div>
+              <div class="dial-center">
+                <div class="d-time">1:00</div>
+                <div class="d-lbl">Drag to set focus</div>
+              </div>
+            </div>
+            <div class="pills">
+              <div class="pill">15m</div>
+              <div class="pill">30m</div>
+              <div class="pill sel">60m</div>
+              <div class="pill">2h</div>
+              <div class="pill">3h</div>
+            </div>
+            <div style="font-size:11px;color:var(--ink-3);margin-top:11px;font-weight:600;">Up to 3 hours</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row" style="padding:4px 0;">
+            <div class="r-ic ic-gold"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg></div>
+            <div class="r-body">
+              <div class="r-t">12 apps &amp; 3 categories selected</div>
+              <div class="r-d">Social, Games, Entertainment + more</div>
+            </div>
+            <span class="link-gold">Customize</span>
+          </div>
+        </div>
+
+        <button class="btn btn-navy" style="margin-bottom:14px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          Start Block
+        </button>
+
+        <div class="section-eyebrow">Your Record</div>
+        <div class="stat-duo">
+          <div class="stat good"><div class="st-num">24</div><div class="st-lbl">Successful</div></div>
+          <div class="stat bad"><div class="st-num">3</div><div class="st-lbl">Broken</div></div>
+        </div>
+
+        <div class="card" style="margin-top:14px;background:linear-gradient(160deg,#FFF9EC,#F6ECD6);border-color:#EDDDB6;">
+          <div class="intent-quote" style="font-size:16px;">“Who is strong? One who masters their impulses.”</div>
+          <div style="font-size:11px;color:#8A6F35;margin-top:8px;font-weight:600;">— Pirkei Avot 4:1</div>
+        </div>
+      </div></div>
+
+      <div class="tabbar" id="tabbar-block"></div>
+      <div class="home-indicator"></div>
+    </div>
+
+    <!-- ================= SOCIAL ================= -->
+    <div class="screen" id="screen-social">
+      <div class="statusbar dark"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#1C2433"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="#1C2433" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#1C2433"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="#1C2433" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="app-head">
+        <div>
+          <div class="crumb">Community</div>
+          <div class="title">Social</div>
+        </div>
+        <div class="avatar">D<span class="dot"></span></div>
+      </div>
+
+      <div class="scroll"><div class="pad">
+        <!-- congregation -->
+        <div class="cong-banner">
+          <div class="cong-top">
+            <div class="cong-ic">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E3C57E" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V10l8-6 8 6v11"/><path d="M4 21h16M10 21v-5a2 2 0 0 1 4 0v5"/></svg>
+            </div>
+            <div>
+              <div class="cong-name">Beth Israel of Brooklyn</div>
+              <div class="cong-sub">Brooklyn, NY · 48 members</div>
+            </div>
+            <svg style="margin-left:auto;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          </div>
+          <div class="cong-actions">
+            <div class="ca gold">Chat</div>
+            <div class="ca">Members</div>
+          </div>
+        </div>
+
+        <!-- requests -->
+        <div class="section-eyebrow">Friend Requests</div>
+        <div class="card" style="padding:6px 18px;">
+          <div class="req">
+            <div class="pp pp-4">RK</div>
+            <div><div class="q-name">Rivka Klein</div><div class="q-sub">Friend code A7X2K9M4</div></div>
+            <div class="req-btns"><div class="a">Accept</div><div class="d">Decline</div></div>
+          </div>
+        </div>
+
+        <!-- leaderboard -->
+        <div class="section-eyebrow">Friend Leaderboard</div>
+        <div class="card" style="padding:6px 18px;">
+          <div class="lead-row">
+            <div class="rank r1">1</div>
+            <div class="pp pp-1">MS</div>
+            <div><div class="l-name">Moshe Stern <span class="new-pill">NEW</span></div><div class="l-sub">On a roll since Pesach</div></div>
+            <div class="mini-badges">
+              <div class="mb shab"><svg width="10" height="10" viewBox="0 0 24 24" fill="#A8853E"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>21</div>
+              <div class="mb tef">14</div>
+            </div>
+          </div>
+          <div class="lead-row">
+            <div class="rank">2</div>
+            <div class="pp pp-3">AL</div>
+            <div><div class="l-name">Avi Levy</div><div class="l-sub">Your tefillin buddy</div></div>
+            <div class="mini-badges">
+              <div class="mb shab"><svg width="10" height="10" viewBox="0 0 24 24" fill="#A8853E"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>15</div>
+              <div class="mb tef">8</div>
+            </div>
+          </div>
+          <div class="lead-row">
+            <div class="rank">3</div>
+            <div class="avatar" style="width:42px;height:42px;font-size:14px;border:none;box-shadow:none;">D</div>
+            <div><div class="l-name">You</div><div class="l-sub">Keep it up, Daniel</div></div>
+            <div class="mini-badges">
+              <div class="mb shab"><svg width="10" height="10" viewBox="0 0 24 24" fill="#A8853E"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>12</div>
+              <div class="mb tef">8</div>
+            </div>
+          </div>
+          <div class="lead-row">
+            <div class="rank">4</div>
+            <div class="pp pp-5">NG</div>
+            <div><div class="l-name">Noam Gold</div><div class="l-sub">Joined last month</div></div>
+            <div class="mini-badges">
+              <div class="mb shab"><svg width="10" height="10" viewBox="0 0 24 24" fill="#A8853E"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>4</div>
+              <div class="mb tef">2</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-gold" style="margin-top:4px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0C1526" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+          Add Friends
+        </button>
+        <div style="text-align:center;margin-top:13px;">
+          <span class="link-gold" style="font-size:12px;">Your friend code: D4K8B2N6 · Invite friends</span>
+        </div>
+      </div></div>
+
+      <div class="tabbar" id="tabbar-social"></div>
+      <div class="home-indicator"></div>
+    </div>
+
+    <!-- ================= BUDDIES ================= -->
+    <div class="screen" id="screen-buddies">
+      <div class="statusbar dark"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="#1C2433"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".3"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="#1C2433" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#1C2433"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="#1C2433" opacity=".4"/></svg>
+      </span></div>
+
+      <div class="app-head">
+        <div>
+          <div class="crumb">Daily Accountability</div>
+          <div class="title">Tefillin Buddies</div>
+        </div>
+        <button class="btn btn-navy btn-sm" style="box-shadow:none;">+ Group</button>
+      </div>
+
+      <div class="scroll"><div class="pad">
+        <div class="rest-note">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M19 13.5A7.5 7.5 0 0 1 10.5 5a8.5 8.5 0 1 0 8.5 8.5z"/></svg>
+          <span><b>Shabbat is near.</b> Photos pause from candle lighting to havdalah — streaks are safe on rest days.</span>
+        </div>
+
+        <div class="section-eyebrow">Your Buddies</div>
+        <div class="card" style="padding:6px 18px;">
+          <div class="buddy">
+            <div class="b-photo pp-3">AL<span class="ring"></span></div>
+            <div>
+              <div class="b-name">Avi Levy</div>
+              <div class="b-sub unread">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A8853E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                New tefillin photo · tap to open
+              </div>
+              <div class="b-sub"><span class="streak-flame">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="#D97737"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>
+                23 day streak</span></div>
+            </div>
+            <div class="snap">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0C1526" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
+          </div>
+          <div class="buddy">
+            <div class="b-photo pp-1">MS</div>
+            <div>
+              <div class="b-name">Moshe Stern</div>
+              <div class="b-sub">You sent a photo this morning</div>
+              <div class="b-sub"><span class="streak-flame">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="#D97737"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>
+                9 day streak</span></div>
+            </div>
+            <div class="snap">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0C1526" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
+          </div>
+          <div class="buddy">
+            <div class="b-photo" style="background:linear-gradient(150deg,var(--navy-600),var(--navy-800));font-size:12px;">3</div>
+            <div>
+              <div class="b-name">Morning Crew</div>
+              <div class="b-sub">2 of 3 wrapped today</div>
+              <div class="b-sub"><span class="streak-flame">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="#D97737"><path d="M12 2c2 3.5 5.5 5.5 5.5 10a5.5 5.5 0 0 1-11 0c0-1.7.6-3 1.4-4.3.3 1.2 1 2 2.1 2.3C9.5 7.6 10.6 4.6 12 2z"/></svg>
+                5 day group streak</span></div>
+            </div>
+            <div class="snap">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#0C1526" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-eyebrow">Add a Tefillin Buddy</div>
+        <div class="card" style="padding:6px 18px;">
+          <div class="req">
+            <div class="pp pp-5">NG</div>
+            <div><div class="q-name">Noam Gold</div><div class="q-sub">Friend · not yet a buddy</div></div>
+            <div class="req-btns"><div class="a">+ Add</div></div>
+          </div>
+          <div class="req">
+            <div class="pp pp-4">EB</div>
+            <div><div class="q-name">Eli Berger</div><div class="q-sub">Friend · not yet a buddy</div></div>
+            <div class="req-btns"><div class="a">+ Add</div></div>
+          </div>
+        </div>
+
+        <div class="card" style="background:linear-gradient(160deg,#FFF9EC,#F6ECD6);border-color:#EDDDB6;">
+          <div class="intent-quote" style="font-size:15.5px;">Send a daily tefillin photo to keep each other accountable. One photo a day keeps the streak alive — for both of you.</div>
+        </div>
+      </div></div>
+
+      <div class="tabbar" id="tabbar-buddies"></div>
+      <div class="home-indicator"></div>
+    </div>
+
+    <!-- ================= SHABBAT OVERLAY ================= -->
+    <div class="screen" id="screen-shabbat">
+      <div class="statusbar light"><span>9:41</span><span class="sb-icons">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="white"><rect x="0" y="6" width="3" height="5" rx="1"/><rect x="4.5" y="4" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1" opacity=".35"/></svg>
+        <svg width="24" height="12" viewBox="0 0 24 12" fill="none"><rect x="0.5" y="0.5" width="20" height="11" rx="3.5" stroke="white" opacity=".5"/><rect x="2" y="2" width="15" height="8" rx="2" fill="white"/><path d="M22 4v4c1-.3 1.6-1 1.6-2S23 4.3 22 4z" fill="white" opacity=".5"/></svg>
+      </span></div>
+
+      <div class="shabbat-full">
+        <div class="stars">
+          <i style="top:8%;left:12%;width:2px;height:2px;opacity:.6"></i>
+          <i style="top:14%;left:80%;width:3px;height:3px;opacity:.5"></i>
+          <i style="top:6%;left:48%;width:2px;height:2px;opacity:.4"></i>
+          <i style="top:22%;left:28%;width:2px;height:2px;opacity:.55"></i>
+          <i style="top:19%;left:62%;width:2px;height:2px;opacity:.35"></i>
+          <i style="top:30%;left:88%;width:2px;height:2px;opacity:.5"></i>
+          <i style="top:33%;left:8%;width:3px;height:3px;opacity:.4"></i>
+        </div>
+        <div class="sf-kicker">Your phone is resting</div>
+        <div class="sf-title">Shabbat</div>
+        <div class="sf-heb">שבת שלום</div>
+        <div class="candles">
+          <div class="candle"><div class="flame-glow"></div><div class="wick"></div><div class="body"></div><div class="holder"></div></div>
+          <div class="candle"><div class="flame-glow"></div><div class="wick"></div><div class="body"></div><div class="holder"></div></div>
+        </div>
+        <div class="sf-ends">Shabbat ends tomorrow at <b>8:56 PM</b></div>
+        <div class="sf-msg">Kesher is keeping the rest of your phone quiet. Be where your feet are.</div>
+        <div class="sf-intent">
+          <div class="si-l">Why you're keeping Shabbat</div>
+          <div class="si-q">“To be fully present with my family and let go of distractions.”</div>
+        </div>
+        <div class="sf-break">Break Shabbat</div>
+      </div>
+      <div class="home-indicator light"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // build tab bars
+  const tabs = [
+    { id: 'torah', label: 'Torah', icon: '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h7a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5H2zM22 4h-7a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5H22z"/></svg>' },
+    { id: 'block', label: 'Focus', icon: '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' },
+    { id: 'home', label: 'Home', icon: '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5V20a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 20z"/><path d="M9.5 21.5v-6h5v6"/></svg>' },
+    { id: 'social', label: 'Social', icon: '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M15.5 3.1a4 4 0 0 1 0 7.8"/></svg>' },
+    { id: 'buddies', label: 'Buddies', icon: '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>' },
+  ];
+
+  function buildTabbar(el, activeId) {
+    el.innerHTML = tabs.map(t => `
+      <div class="tab ${t.id === activeId ? 'active' : ''}" data-screen="${t.id}">
+        ${t.icon}
+        <span class="t-lbl">${t.label}</span>
+      </div>`).join('');
+  }
+  ['home', 'torah', 'block', 'social', 'buddies'].forEach(id => {
+    buildTabbar(document.getElementById('tabbar-' + id), id);
+  });
+
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('visible', s.id === 'screen-' + id));
+    document.querySelectorAll('.screen-chips button').forEach(b => b.classList.toggle('active', b.dataset.screen === id));
+  }
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-screen]');
+    if (t) show(t.dataset.screen);
+  });
+
+  const initial = location.hash.slice(1);
+  if (initial && document.getElementById('screen-' + initial)) show(initial);
+</script>
+</body>
+</html>

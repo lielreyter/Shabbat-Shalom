@@ -47,9 +47,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Used during development to connect to the React Native bundler. This will not appear in the production release.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Used to take tefillin photos for your buddy streak</string>
+	<string>Used to take tefillin and Shabbat candle photos for your buddy streaks</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Used to get Shabbat times for your area and find congregations near you</string>
+	<string>Kesher uses your location after sign-in to calculate Shabbat and candle-lighting times and find nearby congregations.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Used to save photos from chat to your camera roll</string>
 	<key>NSPhotoLibraryUsageDescription</key>

@@ -1,5 +1,7 @@
 import { Timestamp } from "firebase/firestore";
 
+export type FaithTradition = "jewish" | "christian";
+
 export interface UserProfile {
   uid: string;
   createdAt: Timestamp;
@@ -7,6 +9,7 @@ export interface UserProfile {
 
   displayName: string | null;
   email: string | null;
+  faithTradition: FaithTradition | null;
 
   shabbatIntentText: string | null;
   wantsMorningReminders: boolean;
@@ -27,6 +30,9 @@ export interface UserProfile {
   tefillinCurrentStreak: number;
   tefillinLongestStreak: number;
   lastTefillinDate: string | null;
+  candleCurrentStreak: number;
+  candleLongestStreak: number;
+  lastCandleDate: string | null;
 
   wakeUpTime: string | null;
   bedTime: string | null;
@@ -50,6 +56,7 @@ export interface UserProfile {
   streakVisibility: "public" | "friends" | "private";
 
   tefillinBuddyUids: string[];
+  candleBuddyUids: string[];
   buddyChatIds: string[];
 
   fcmToken: string | null;

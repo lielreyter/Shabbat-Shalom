@@ -49,12 +49,13 @@ const toError = (error: unknown): ShabbatTimeError => {
   };
 };
 
-export const useShabbatTimes = (): UseShabbatTimesState => {
+export const useShabbatTimes = (enabled = true): UseShabbatTimesState => {
   const [shabbatTimes, setShabbatTimes] = useState<ShabbatTimes | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<ShabbatTimeError | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     setLoading(true);
     setError(null);
     try {
@@ -67,9 +68,16 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setShabbatTimes(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
     const initialize = async () => {
       const cached = await getCachedShabbatTimes();
@@ -97,21 +105,23 @@ export const useShabbatTimes = (): UseShabbatTimesState => {
     return () => {
       isMounted = false;
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   useEffect(() => {
+    if (!enabled) return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
         refresh().catch(() => {});
       }
     });
     return () => subscription.remove();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   const wrappedRefresh = useCallback(async () => {
+    if (!enabled) return;
     await clearCache();
     await refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return {
     shabbatTimes,

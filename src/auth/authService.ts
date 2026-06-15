@@ -38,9 +38,26 @@ export type PhoneAuthConfirmation = {
 
 const EMAIL_VERIFICATION_BYPASS_EMAILS = new Set(["liel.reyter@gmail.com"]);
 const DEFAULT_SHABBAT_INTENTION = "To connect with Hashem";
+const AUTH_STATE_TIMEOUT_MS = 10000;
 
 const shouldBypassEmailVerification = (email: string | null): boolean =>
   email !== null && EMAIL_VERIFICATION_BYPASS_EMAILS.has(email.trim().toLowerCase());
+
+const withTimeout = async <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string
+): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
 
 const FIREBASE_ERROR_MESSAGES: Record<string, string> = {
   "auth/invalid-credential": "Incorrect email or password.",
@@ -138,6 +155,7 @@ const hydrateProfileWithFallback = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? firebaseUser.displayName ?? "Dev User",
       email: email ?? firebaseUser.email ?? null,
+      faithTradition: "jewish",
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -153,6 +171,9 @@ const hydrateProfileWithFallback = async ({
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
+      candleCurrentStreak: 0,
+      candleLongestStreak: 0,
+      lastCandleDate: null,
       wakeUpTime: null,
       bedTime: null,
       shabbatBlockLevel: "none",
@@ -168,6 +189,7 @@ const hydrateProfileWithFallback = async ({
       latitude: null,
       longitude: null,
       tefillinBuddyUids: [],
+      candleBuddyUids: [],
       buddyChatIds: [],
       fcmToken: null,
     };
@@ -224,6 +246,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         lastLoginAt: Timestamp.now(),
         displayName: "Dev User",
         email: null,
+        faithTradition: "jewish",
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
@@ -239,6 +262,9 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         tefillinCurrentStreak: 0,
         tefillinLongestStreak: 0,
         lastTefillinDate: null,
+        candleCurrentStreak: 0,
+        candleLongestStreak: 0,
+        lastCandleDate: null,
         wakeUpTime: null,
         bedTime: null,
         shabbatBlockLevel: "none",
@@ -254,6 +280,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         latitude: null,
         longitude: null,
         tefillinBuddyUids: [],
+        candleBuddyUids: [],
         buddyChatIds: [],
         fcmToken: null,
       };
@@ -338,6 +365,7 @@ export const registerWithEmailPassword = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? null,
       email: trimmedEmail,
+      faithTradition: "jewish",
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -353,6 +381,9 @@ export const registerWithEmailPassword = async ({
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
+      candleCurrentStreak: 0,
+      candleLongestStreak: 0,
+      lastCandleDate: null,
       wakeUpTime: null,
       bedTime: null,
       shabbatBlockLevel: "none",
@@ -368,6 +399,7 @@ export const registerWithEmailPassword = async ({
       latitude: null,
       longitude: null,
       tefillinBuddyUids: [],
+      candleBuddyUids: [],
       buddyChatIds: [],
       fcmToken: null,
     };
@@ -445,6 +477,7 @@ export const confirmPhoneSignUp = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? null,
       email: result.user.email ?? null,
+      faithTradition: "jewish",
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -460,6 +493,9 @@ export const confirmPhoneSignUp = async ({
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
+      candleCurrentStreak: 0,
+      candleLongestStreak: 0,
+      lastCandleDate: null,
       wakeUpTime: null,
       bedTime: null,
       shabbatBlockLevel: "none",
@@ -475,6 +511,7 @@ export const confirmPhoneSignUp = async ({
       latitude: null,
       longitude: null,
       tefillinBuddyUids: [],
+      candleBuddyUids: [],
       buddyChatIds: [],
       fcmToken: null,
     };
@@ -653,7 +690,11 @@ export const subscribeToAuthState = (
     // network error must NOT lock the user out of a session they already have.
     if (!pendingSignup) {
       try {
-        await firebaseUser.reload();
+        await withTimeout(
+          firebaseUser.reload(),
+          AUTH_STATE_TIMEOUT_MS,
+          "Auth session check timed out."
+        );
       } catch (reloadError) {
         const code =
           reloadError && typeof reloadError === "object" && "code" in reloadError
@@ -689,6 +730,7 @@ export const subscribeToAuthState = (
         lastLoginAt: Timestamp.now(),
         displayName: firebaseUser.displayName ?? null,
         email: firebaseUser.email ?? null,
+        faithTradition: "jewish",
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
@@ -704,6 +746,9 @@ export const subscribeToAuthState = (
         tefillinCurrentStreak: 0,
         tefillinLongestStreak: 0,
         lastTefillinDate: null,
+        candleCurrentStreak: 0,
+        candleLongestStreak: 0,
+        lastCandleDate: null,
         wakeUpTime: null,
         bedTime: null,
         shabbatBlockLevel: "none",
@@ -719,6 +764,7 @@ export const subscribeToAuthState = (
         latitude: null,
         longitude: null,
         tefillinBuddyUids: [],
+        candleBuddyUids: [],
         buddyChatIds: [],
         fcmToken: null,
       };
@@ -728,12 +774,15 @@ export const subscribeToAuthState = (
     }
 
     try {
-      const profile = await hydrateProfileForFirebaseUser(firebaseUser);
+      const profile = await withTimeout(
+        hydrateProfileForFirebaseUser(firebaseUser),
+        AUTH_STATE_TIMEOUT_MS,
+        "Profile load timed out."
+      );
       cachedUserProfile = profile;
       callback(profile);
     } catch {
-      cachedUserProfile = null;
-      callback(null);
+      callback(cachedUserProfile);
     }
   });
 };

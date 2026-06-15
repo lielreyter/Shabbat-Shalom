@@ -55,6 +55,10 @@ const isSaturdayDate = (dateStr: string): boolean => {
   return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
 };
 
+const isFridayDate = (dateStr: string): boolean => {
+  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 5;
+};
+
 /**
  * Returns the start-of-day and end-of-day as JS Dates for a given
  * "YYYY-MM-DD" in the given IANA timezone.
@@ -146,15 +150,6 @@ const getLatestMidnightTz = (profiles: UserProfile[]): string => {
 };
 
 /**
- * Checks if a given date has "completed" — i.e., midnight has passed in
- * the latest (furthest west) timezone among all members.
- */
-const isDateComplete = (dateStr: string, latestTz: string): boolean => {
-  const todayLatest = todayInTz(latestTz);
-  return dateStr < todayLatest;
-};
-
-/**
  * Determine the first date to evaluate for a chat.
  * If lastStreakDate exists, start from the day after.
  * Otherwise, start from the chat's creation date.
@@ -193,10 +188,20 @@ export const evaluateChatStreak = async (
   const maxIterations = 60;
   let iterations = 0;
 
-  while (isDateComplete(evalDate, latestTz) && iterations < maxIterations) {
-    iterations++;
+  const todayLatest = todayInTz(latestTz);
 
-    if (isSaturdayDate(evalDate)) {
+  while (evalDate <= todayLatest && iterations < maxIterations) {
+    iterations++;
+    const evaluatingCurrentDate = evalDate === todayLatest;
+
+    if (chat.kind === "tefillin" && isSaturdayDate(evalDate)) {
+      lastStreakDate = evalDate;
+      changed = true;
+      evalDate = addDays(evalDate, 1);
+      continue;
+    }
+
+    if (chat.kind === "candles" && !isFridayDate(evalDate)) {
       lastStreakDate = evalDate;
       changed = true;
       evalDate = addDays(evalDate, 1);
@@ -224,6 +229,9 @@ export const evaluateChatStreak = async (
       lastStreakDate = evalDate;
       changed = true;
     } else {
+      if (evaluatingCurrentDate) {
+        break;
+      }
       if (streakCount > 0 || lastStreakDate !== null) {
         streakCount = 0;
         streakBrokenAt = evalDate;

@@ -2,6 +2,14 @@ import messaging from "@react-native-firebase/messaging";
 import { updateUserProfile } from "../firebase/firestore";
 import { UserProfile } from "../types/UserProfile";
 
+export type ChatNotificationData = {
+  type?: string;
+  chatId?: string;
+  senderUid?: string;
+  congregationId?: string;
+  messageId?: string;
+};
+
 const isPushAuthorized = (status: number): boolean =>
   status === messaging.AuthorizationStatus.AUTHORIZED ||
   status === messaging.AuthorizationStatus.PROVISIONAL;
@@ -50,4 +58,23 @@ export const subscribeToChatPushTokenRefresh = (
       .then(onProfileUpdated)
       .catch(() => {});
   });
+};
+
+export const subscribeToChatNotificationTaps = (
+  onOpen: (data: ChatNotificationData) => void
+): (() => void) => {
+  const unsubscribe = messaging().onNotificationOpenedApp((message) => {
+    onOpen((message.data ?? {}) as ChatNotificationData);
+  });
+
+  messaging()
+    .getInitialNotification()
+    .then((message) => {
+      if (message?.data) {
+        onOpen(message.data as ChatNotificationData);
+      }
+    })
+    .catch(() => {});
+
+  return unsubscribe;
 };
