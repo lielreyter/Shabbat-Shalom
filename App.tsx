@@ -1504,11 +1504,12 @@ export default function App() {
 
   const tabSwipePanResponder = useMemo(() => {
     const shouldClaimHorizontalSwipe = (_event: unknown, gestureState: { dx: number; dy: number }): boolean => {
+      if (focusDialDragging) return false;
       if (tabSwipeLockRef.current) return false;
-      if (Date.now() - lastTabSwipeAtRef.current < 160) return false;
+      if (Date.now() - lastTabSwipeAtRef.current < 90) return false;
       const absDx = Math.abs(gestureState.dx);
       const absDy = Math.abs(gestureState.dy);
-      return absDx > 12 && absDx > absDy * 1.15;
+      return absDx > 6 && absDx > absDy * 1.05;
     };
 
     return PanResponder.create({
@@ -1518,7 +1519,7 @@ export default function App() {
         tabSwipeLockRef.current = true;
       },
       onPanResponderRelease: (_event, gestureState) => {
-        const committed = Math.abs(gestureState.dx) > 42 || Math.abs(gestureState.vx) > 0.32;
+        const committed = Math.abs(gestureState.dx) > 34 || Math.abs(gestureState.vx) > 0.24;
         if (committed) {
           lastTabSwipeAtRef.current = Date.now();
           if (gestureState.dx < 0) goToAdjacentTab("next");
@@ -1527,11 +1528,14 @@ export default function App() {
         tabSwipeLockRef.current = false;
       },
       onPanResponderTerminationRequest: () => false,
+      onPanResponderReject: () => {
+        tabSwipeLockRef.current = false;
+      },
       onPanResponderTerminate: () => {
         tabSwipeLockRef.current = false;
       },
     });
-  }, [goToAdjacentTab]);
+  }, [focusDialDragging, goToAdjacentTab]);
 
   const focusDialPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -4795,6 +4799,8 @@ export default function App() {
         ref={homeScrollRef}
         contentContainerStyle={s.tabContent}
         showsVerticalScrollIndicator={false}
+        directionalLockEnabled
+        alwaysBounceHorizontal={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       >
@@ -4933,8 +4939,8 @@ export default function App() {
         </View>
 
         {blockLevel === "custom" && (
-          <Pressable style={s.outlineBtn} onPress={onCustomizeShabbatBlock}>
-            <Text style={s.outlineBtnText}>
+          <Pressable style={[s.outlineBtn, isChristianUser && { borderColor: appAccent }]} onPress={onCustomizeShabbatBlock}>
+            <Text style={[s.outlineBtnText, isChristianUser && { color: appAccent }]}>
               {isChristianUser ? "Customize Rest Block" : "Customize Shabbat Block"}
               {customSelectionCount > 0 ? ` (${customSelectionCount} selected)` : ""}
             </Text>
@@ -5006,7 +5012,7 @@ export default function App() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={s.toggleLabel}>Modeh Ani</Text>
               <Pressable onPress={() => setShowDailyInfo("modehAni")} hitSlop={12}>
-                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+                <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
             <Text style={s.toggleHint}>Blocks your apps at wake-up until you read the prayer</Text>
@@ -5044,7 +5050,7 @@ export default function App() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Text style={s.toggleLabel}>Shema Before Bed</Text>
               <Pressable onPress={() => setShowDailyInfo("shema")} hitSlop={12}>
-                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+                <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
             <Text style={s.toggleHint}>Blocks your apps 15 minutes before bedtime until you read the prayer</Text>
@@ -5135,6 +5141,8 @@ export default function App() {
     <ScrollView
       contentContainerStyle={s.tabContent}
       showsVerticalScrollIndicator={false}
+      directionalLockEnabled
+      alwaysBounceHorizontal={false}
       scrollEnabled={!focusDialDragging}
     >
       <View style={s.sectionCard}>
@@ -5156,12 +5164,12 @@ export default function App() {
           <>
             <View ref={focusDialRef} style={s.focusTimerDial} {...focusDialPanResponder.panHandlers}>
               {renderFocusDialTicks(focusDialProgress, appAccent)}
-              <View style={[s.focusTimerKnob, focusDialKnobStyle]} />
+              <View style={[s.focusTimerKnob, focusDialKnobStyle, isChristianUser && { borderColor: appAccent }]} />
               <Text style={s.focusTimerText}>{formatCountdown(personalBlockMinutes * 60000)}</Text>
               <Text style={s.focusTimerLabel}>{isChristianUser ? "Drag to Set Quiet Time" : "Drag to Set Focus"}</Text>
             </View>
             <Text style={[s.sectionDesc, { textAlign: "center", marginTop: 8 }]}>Up to 3 hours</Text>
-            <Text style={[s.toggleLabel, { marginTop: 14 }]}>{isChristianUser ? "Quick Times" : "Quick Times"}</Text>
+            <Text style={[s.toggleLabel, { marginTop: 14 }]}>Quick Times</Text>
             <View style={s.durationPills}>
               {(isChristianUser ? [10, 15, 30, 60, 120] : [15, 30, 60, 120, 180]).map((minutes) => (
                 <Pressable
@@ -5171,7 +5179,13 @@ export default function App() {
                     setPersonalBlockMinutes(minutes);
                   }}
                 >
-                  <Text style={[s.timePillText, personalBlockMinutes === minutes && s.timePillTextActive]}>
+                  <Text
+                    style={[
+                      s.timePillText,
+                      personalBlockMinutes === minutes && s.timePillTextActive,
+                      isChristianUser && personalBlockMinutes === minutes && s.timePillTextActiveChristian,
+                    ]}
+                  >
                     {minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
                   </Text>
                 </Pressable>
@@ -5182,8 +5196,8 @@ export default function App() {
                 ? `${personalBlockSelectionCount} apps, categories, or websites selected`
                 : "No apps selected yet"}
             </Text>
-            <Pressable style={s.outlineBtn} onPress={onSetupPersonalBlock}>
-              <Text style={s.outlineBtnText}>{isChristianUser ? "Choose Distractions" : "Customize Apps"}</Text>
+            <Pressable style={[s.outlineBtn, isChristianUser && { borderColor: appAccent }]} onPress={onSetupPersonalBlock}>
+              <Text style={[s.outlineBtnText, isChristianUser && { color: appAccent }]}>{isChristianUser ? "Choose Distractions" : "Customize Apps"}</Text>
             </Pressable>
             {personalBlockEndsAt && personalBlockEndsAt.getTime() > Date.now() ? (
               <>
@@ -5201,7 +5215,7 @@ export default function App() {
             )}
             <View style={s.focusStatsRow}>
               <View style={s.focusStatCard}>
-                <Text style={s.focusStatNumber}>{personalBlockSuccessCount}</Text>
+                <Text style={[s.focusStatNumber, isChristianUser && { color: appAccent }]}>{personalBlockSuccessCount}</Text>
                 <Text style={s.focusStatLabel}>{isChristianUser ? "Completed" : "Successful"}</Text>
               </View>
               <View style={s.focusStatCard}>
@@ -5223,13 +5237,13 @@ export default function App() {
     const buddyAccent = isChristianUser ? CHRISTIAN_ACCENT : C.primary;
 
     return (
-      <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
         <View style={s.buddiesSection}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={s.buddiesSectionTitle}>{isChristianUser ? "Prayer Partners" : "Tefillin Buddies"}</Text>
               <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
-                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+                <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
             {friends.length >= 2 && (
@@ -5370,13 +5384,13 @@ export default function App() {
     const candleWindowOpen = isWithinCandleLightingWindow();
 
     return (
-      <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
         <View style={s.buddiesSection}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={s.buddiesSectionTitle}>Candle Buddies</Text>
               <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
-                <View style={s.infoIcon}><Text style={s.infoIconText}>i</Text></View>
+                <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
             <View style={s.streakPill}>
@@ -5477,7 +5491,7 @@ export default function App() {
     <View style={{ flex: 1 }}>
       {/* Congregation Banner — only on friends/chat views, hidden during buddy chat, DM, group create */}
       {socialSubTab !== "buddyChat" && socialSubTab !== "dm" && socialSubTab !== "groupCreate" && (
-        <View style={s.congBanner}>
+        <View style={[s.congBanner, isChristianUser && { backgroundColor: CHRISTIAN_ACCENT }]}>
           {user?.congregationId && currentCongregation ? (
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flex: 1 }}>
@@ -5523,18 +5537,18 @@ export default function App() {
       {/* Back to friends from chat / DM / group create view */}
       {socialSubTab === "groupCreate" && (
         <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
-          <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
+            <Text style={{ color: appAccent, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
         </Pressable>
       )}
       {socialSubTab === "chat" && (
         <Pressable style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }} onPress={() => setSocialSubTab("friends")}>
-          <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
+            <Text style={{ color: appAccent, fontWeight: "700", fontSize: 15 }}>← Back to Social</Text>
         </Pressable>
       )}
       {socialSubTab === "dm" && chattingWith && (
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 10 }}>
           <Pressable onPress={() => { setSocialSubTab("friends"); setChattingWith(null); }}>
-            <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back</Text>
+            <Text style={{ color: appAccent, fontWeight: "700", fontSize: 15 }}>← Back</Text>
           </Pressable>
           <Pressable onPress={() => setViewingFriend(chattingWith)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
             <View style={[s.friendAvatar, { width: 32, height: 32, borderRadius: 16 }]}>
@@ -5547,7 +5561,7 @@ export default function App() {
       {socialSubTab === "buddyChat" && activeBuddyChat && (activeBuddyChat.type === "group" || chattingWith) && (
         <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 10 }}>
           <Pressable onPress={() => { setSocialSubTab("friends"); setActiveBuddyChat(null); setChattingWith(null); setShowGroupMembers(false); }}>
-            <Text style={{ color: C.primary, fontWeight: "700", fontSize: 15 }}>← Back</Text>
+            <Text style={{ color: appAccent, fontWeight: "700", fontSize: 15 }}>← Back</Text>
           </Pressable>
           {activeBuddyChat.type === "group" ? (
             <Pressable onPress={() => setShowGroupMembers(true)} style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
@@ -5593,7 +5607,7 @@ export default function App() {
 
       {/* Main Social View */}
       {socialSubTab === "friends" && (
-        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
           {/* Pending friend requests */}
           {pendingRequests.length > 0 && (
             <View style={s.sectionCard}>
@@ -5686,8 +5700,8 @@ export default function App() {
               <Text style={s.primaryBtnText}>+ Add Friends</Text>
             </Pressable>
             {!user?.congregationId && (
-              <Pressable style={s.outlineBtn} onPress={() => setJoinCongregationVisible(true)}>
-                <Text style={s.outlineBtnText}>
+              <Pressable style={[s.outlineBtn, isChristianUser && { borderColor: appAccent }]} onPress={() => setJoinCongregationVisible(true)}>
+                <Text style={[s.outlineBtnText, isChristianUser && { color: appAccent }]}>
                   {isChristianUser ? "Join / Create Church Group" : "Join / Create Congregation"}
                 </Text>
               </Pressable>
@@ -5705,7 +5719,7 @@ export default function App() {
               </View>
               {friends.length >= 2 && (
                 <Pressable
-                  style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                  style={[s.buddySnapBtn, { backgroundColor: appAccent }]}
                   onPress={() => {
                     setGroupCreateSelectedUids([]);
                     setGroupCreateName("");
@@ -5749,7 +5763,7 @@ export default function App() {
                           </View>
                         </View>
                         <Pressable
-                          style={[s.buddySnapBtn, !isToday && { backgroundColor: C.primary }]}
+                          style={[s.buddySnapBtn, !isToday && { backgroundColor: appAccent }]}
                           onPress={() => openBuddyChat(buddy)}
                         >
                           {isToday ? (
@@ -5776,7 +5790,7 @@ export default function App() {
                         {!isChristianUser && <Text style={s.buddyStreakText}>{getDisplayedBuddyStreak(chat)} day streak</Text>}
                       </View>
                       <Pressable
-                        style={[s.buddySnapBtn, { backgroundColor: C.primary }]}
+                        style={[s.buddySnapBtn, { backgroundColor: appAccent }]}
                         onPress={() => openGroupChat(chat)}
                       >
                         <CameraIcon size={22} color="#FFF" />
@@ -5911,8 +5925,8 @@ export default function App() {
             </View>
           )}
           {activeBuddyChat.type === "group" && groupDailyStatus && (
-            <View style={{ backgroundColor: C.primaryLight, paddingHorizontal: 16, paddingVertical: 10 }}>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: C.primary, marginBottom: 4 }}>Today's Progress</Text>
+            <View style={{ backgroundColor: isChristianUser ? CHRISTIAN_ACCENT_LIGHT : C.primaryLight, paddingHorizontal: 16, paddingVertical: 10 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: appAccent, marginBottom: 4 }}>Today's Progress</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {activeBuddyChat.memberUids.map((uid) => {
                   const member = groupChatMembers.find((m) => m.uid === uid);
@@ -6007,7 +6021,7 @@ export default function App() {
                       </Text>
                     )}
                     {isSaved && (
-                      <Text style={{ fontSize: 10, color: C.primary }}>Saved</Text>
+                      <Text style={{ fontSize: 10, color: appAccent }}>Saved</Text>
                     )}
                   </View>
                 </Pressable>
@@ -6035,7 +6049,7 @@ export default function App() {
           />
           <View style={s.chatInputRow}>
             <Pressable
-              style={[s.buddyChatIconBtn, { backgroundColor: (!isChristianUser && activeBuddyChat.kind === "tefillin" && (sunBlockedMessage || isTefillinRestDay)) || (activeBuddyChat.kind === "candles" && !isWithinCandleLightingWindow()) ? C.border : C.primary }]}
+              style={[s.buddyChatIconBtn, { backgroundColor: (!isChristianUser && activeBuddyChat.kind === "tefillin" && (sunBlockedMessage || isTefillinRestDay)) || (activeBuddyChat.kind === "candles" && !isWithinCandleLightingWindow()) ? C.border : appAccent }]}
               onPress={onBuddyChatCamera}
               disabled={buddyChatImageLoading}
             >
@@ -6073,7 +6087,7 @@ export default function App() {
 
       {/* Group Create View */}
       {socialSubTab === "groupCreate" && (
-        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
           <Text style={[s.buddiesSectionTitle, { marginBottom: 16 }]}>Create Group Chat</Text>
 
           <View style={[s.sectionCard, { marginBottom: 16 }]}>
@@ -6094,18 +6108,18 @@ export default function App() {
               return (
                 <Pressable
                   key={friend.uid}
-                  style={[s.buddyAddRow, isSelected && { backgroundColor: C.primaryLight }]}
+                  style={[s.buddyAddRow, isSelected && { backgroundColor: isChristianUser ? CHRISTIAN_ACCENT_LIGHT : C.primaryLight }]}
                   onPress={() => {
                     setGroupCreateSelectedUids((prev) =>
                       isSelected ? prev.filter((uid) => uid !== friend.uid) : [...prev, friend.uid]
                     );
                   }}
                 >
-                  <View style={[s.friendAvatar, isSelected && { backgroundColor: C.primary }]}>
+                  <View style={[s.friendAvatar, isSelected && { backgroundColor: appAccent }]}>
                     <Text style={[s.friendAvatarText, isSelected && { color: "#FFF" }]}>{(friend.displayName ?? "?")[0]?.toUpperCase()}</Text>
                   </View>
                   <Text style={[s.friendName, { flex: 1 }]}>{friend.displayName ?? "Unknown"}</Text>
-                  <Text style={{ fontSize: 20, color: isSelected ? C.primary : C.border }}>{isSelected ? "✓" : "○"}</Text>
+                  <Text style={{ fontSize: 20, color: isSelected ? appAccent : C.border }}>{isSelected ? "✓" : "○"}</Text>
                 </Pressable>
               );
             })}
@@ -6138,7 +6152,7 @@ export default function App() {
     if (isChristianUser) {
       const todaysVerse = CHRISTIAN_DAILY_VERSES[new Date().getDay() % CHRISTIAN_DAILY_VERSES.length];
       return (
-        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
           <Text style={s.parashaHeader}>Daily Devotional</Text>
           <View style={s.christianHeroCard}>
             <Text style={s.christianHeroKicker}>Today's Focus</Text>
@@ -6177,15 +6191,15 @@ export default function App() {
     }
 
     return (
-    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={s.tabContent} showsVerticalScrollIndicator={false} directionalLockEnabled alwaysBounceHorizontal={false}>
       <Text style={s.parashaHeader}>This Week's Torah Portion</Text>
       <View style={s.parashaCard}>
         {timesLoading && !shabbatTimes ? (
           <>
-            <ActivityIndicator color={C.primary} size="large" />
+            <ActivityIndicator color={appAccent} size="large" />
             <Text style={[s.sectionDesc, { marginTop: 12 }]}>Loading this week's portion...</Text>
-            <Pressable style={[s.outlineBtn, { marginTop: 12 }]} onPress={refreshTimes}>
-              <Text style={s.outlineBtnText}>Retry</Text>
+            <Pressable style={[s.outlineBtn, { marginTop: 12 }, isChristianUser && { borderColor: appAccent }]} onPress={refreshTimes}>
+              <Text style={[s.outlineBtnText, isChristianUser && { color: appAccent }]}>Retry</Text>
             </Pressable>
           </>
         ) : shabbatTimes?.parsha ? (
@@ -7343,7 +7357,7 @@ export default function App() {
                       ? "15 min before candle lighting"
                       : "15 min before Shabbat"}
                 </Text>
-                <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: C.primary }} thumbColor={user?.wantsShabbatReminders ? "#FFFFFF" : "#f4f4f5"} ios_backgroundColor={C.border} />
+                <Switch value={Boolean(user?.wantsShabbatReminders)} onValueChange={onToggleShabbatReminder} trackColor={{ false: C.border, true: appAccent }} thumbColor={user?.wantsShabbatReminders ? "#FFFFFF" : "#f4f4f5"} ios_backgroundColor={C.border} />
               </View>
 
               <Text style={[s.sectionTitle, { marginTop: 20 }]}>Chat Notifications</Text>
@@ -7355,7 +7369,7 @@ export default function App() {
                 <Switch
                   value={user?.wantsChatNotifications !== false && Boolean(user?.fcmToken)}
                   onValueChange={onToggleChatNotifications}
-                  trackColor={{ false: C.border, true: C.primary }}
+                  trackColor={{ false: C.border, true: appAccent }}
                   thumbColor={user?.wantsChatNotifications !== false && user?.fcmToken ? "#FFFFFF" : "#f4f4f5"}
                   ios_backgroundColor={C.border}
                 />
@@ -7378,7 +7392,7 @@ export default function App() {
                     const updated = await updateUserProfile(user.uid, { streakVisibility: val ? "private" : "public" });
                     setUser(updated);
                   }}
-                  trackColor={{ false: C.border, true: C.primary }}
+                  trackColor={{ false: C.border, true: appAccent }}
                   thumbColor={user?.streakVisibility === "private" ? "#FFFFFF" : "#f4f4f5"}
                   ios_backgroundColor={C.border}
                 />
@@ -7554,7 +7568,7 @@ export default function App() {
 
             <View style={[s.highlightBox, { marginBottom: 16 }]}>
               <Text style={[s.highlightText, { fontWeight: "800", fontSize: 14 }]}>Your Friend Code</Text>
-              <Text style={{ fontSize: 22, fontWeight: "900", color: C.primary, letterSpacing: 2, marginTop: 4 }}>{user.friendCode ?? user.uid.slice(0, 8).toUpperCase()}</Text>
+              <Text style={{ fontSize: 22, fontWeight: "900", color: appAccent, letterSpacing: 2, marginTop: 4 }}>{user.friendCode ?? user.uid.slice(0, 8).toUpperCase()}</Text>
               <Text style={[s.sectionDesc, { marginTop: 4, fontSize: 11 }]}>Share this code with friends so they can add you.</Text>
               <Pressable style={[s.primaryBtn, { marginTop: 12 }]} onPress={onInviteFriends}>
                 <Text style={s.primaryBtnText}>Invite Friends</Text>
@@ -7676,7 +7690,7 @@ export default function App() {
                   placeholderTextColor={C.textLight}
                 />
 
-                {nearbyLoading && <ActivityIndicator color={C.primary} style={{ marginTop: 12 }} />}
+                {nearbyLoading && <ActivityIndicator color={appAccent} style={{ marginTop: 12 }} />}
                 {nearbyError && <Text style={s.errorText}>{nearbyError}</Text>}
 
                 <ScrollView style={{ maxHeight: 260, marginTop: 8 }} keyboardShouldPersistTaps="handled">
@@ -8106,6 +8120,8 @@ const s = StyleSheet.create({
   /* info icon */
   infoIcon: { width: 22, height: 22, borderRadius: 11, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
   infoIconText: { fontSize: 13, fontWeight: "800", color: C.primary },
+  infoIconChristian: { backgroundColor: CHRISTIAN_ACCENT_LIGHT },
+  infoIconTextChristian: { color: CHRISTIAN_ACCENT },
 
   /* inline time section */
   inlineTimeSection: { paddingLeft: 8, paddingTop: 6, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
@@ -8119,6 +8135,7 @@ const s = StyleSheet.create({
   timePillActive: { borderColor: C.primary, backgroundColor: C.primaryLight },
   timePillText: { fontSize: 12, fontWeight: "600", color: C.textSecondary },
   timePillTextActive: { color: C.primaryDark, fontWeight: "700" },
+  timePillTextActiveChristian: { color: "#FEF3C7" },
 
   /* time select row (opens vertical picker) */
   timeSelectRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 12, marginTop: 4 },
