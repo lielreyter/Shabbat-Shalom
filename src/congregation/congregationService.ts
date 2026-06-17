@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { firestore } from "../firebase/firebaseConfig";
 import { LocationResult } from "../location/locationTypes";
-import { Congregation, NearbyCongregation } from "./congregationTypes";
+import { Congregation, CongregationReligion, NearbyCongregation } from "./congregationTypes";
 import { setUserCongregation, hydrateUserProfile } from "../firebase/firestore";
 import { UserProfile } from "../types/UserProfile";
 
@@ -65,6 +65,9 @@ const tokensMatch = (a: string[], b: string[]): boolean =>
   a.length === b.length &&
   a.every((tok, i) => tok === b[i]);
 
+const normalizeReligion = (value: unknown): CongregationReligion | null =>
+  value === "jewish" || value === "christian" || value === "mixed" ? value : null;
+
 const normalizeCongregation = (
   id: string,
   data: Partial<Congregation>
@@ -72,6 +75,7 @@ const normalizeCongregation = (
   id,
   name: data.name ?? "Unknown Congregation",
   city: data.city ?? "Unknown",
+  religion: normalizeReligion(data.religion),
   latitude: typeof data.latitude === "number" ? data.latitude : 0,
   longitude: typeof data.longitude === "number" ? data.longitude : 0,
   timezone: data.timezone ?? "UTC",
@@ -167,6 +171,7 @@ export const createCongregation = async ({
   longitude,
   timezone,
   creatorUid,
+  religion,
 }: {
   name: string;
   city: string;
@@ -174,11 +179,15 @@ export const createCongregation = async ({
   longitude: number;
   timezone: string;
   creatorUid: string;
+  religion: CongregationReligion;
 }): Promise<Congregation> => {
   const trimmedName = name.trim();
   const trimmedCity = city.trim();
   if (!trimmedName || !trimmedCity) {
     throw new Error("Congregation name and city are required.");
+  }
+  if (!normalizeReligion(religion)) {
+    throw new Error("Choose whether this congregation is Jewish, Christian, or Mixed.");
   }
   const normalizedName = normalizeMatchText(trimmedName);
   const normalizedCity = normalizeMatchText(trimmedCity);
@@ -210,6 +219,7 @@ export const createCongregation = async ({
     id,
     name: trimmedName,
     city: trimmedCity,
+    religion,
     latitude,
     longitude,
     timezone,
@@ -222,6 +232,30 @@ export const createCongregation = async ({
 
   await setDoc(congregationDoc(id), created);
   return created;
+};
+
+export const setCongregationReligion = async ({
+  congregationId,
+  leaderUid,
+  religion,
+}: {
+  congregationId: string;
+  leaderUid: string;
+  religion: CongregationReligion;
+}): Promise<void> => {
+  const congregation = await getCongregationById(congregationId);
+  if (!congregation) {
+    throw new Error("Congregation not found.");
+  }
+  if (congregation.leaderUid !== leaderUid) {
+    throw new Error("Only the congregation leader can set the religion.");
+  }
+  if (!normalizeReligion(religion)) {
+    throw new Error("Choose whether this congregation is Jewish, Christian, or Mixed.");
+  }
+  await updateDoc(congregationDoc(congregationId), {
+    religion,
+  });
 };
 
 export const getCongregationById = async (

@@ -13,7 +13,30 @@
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
+	<string>AppIconNeutral</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconChristian</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconChristian</string>
+			</dict>
+			<key>AppIconJewish</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconJewish</string>
+			</dict>
+		</dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array/>
+			<key>CFBundleIconName</key>
+			<string>AppIconNeutral</string>
+		</dict>
+	</dict>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

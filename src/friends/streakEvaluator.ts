@@ -16,8 +16,10 @@ import { UserProfile } from "../types/UserProfile";
 const messagesCol = (chatId: string) =>
   collection(firestore, "buddyChats", chatId, "messages");
 
+const MAX_STREAK_LOOKBACK_DAYS = 370;
+
 /**
- * Returns "YYYY-MM-DD" for "today" in the given IANA timezone.
+ * Returns "YYYY-MM-DD" for a date in the given IANA timezone.
  */
 const dateInTz = (date: Date, tz: string): string => {
   try {
@@ -37,88 +39,22 @@ const dateInTz = (date: Date, tz: string): string => {
   }
 };
 
-/**
- * Returns the current "YYYY-MM-DD" in the given timezone.
- */
 const todayInTz = (tz: string): string => dateInTz(new Date(), tz);
 
-/**
- * Adds `days` to a "YYYY-MM-DD" string and returns the new "YYYY-MM-DD".
- */
 const addDays = (dateStr: string, days: number): string => {
   const d = new Date(`${dateStr}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
 
-const isSaturdayDate = (dateStr: string): boolean => {
-  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
-};
+const isSaturdayDate = (dateStr: string): boolean =>
+  new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 6;
 
-const isFridayDate = (dateStr: string): boolean => {
-  return new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 5;
-};
+const isFridayDate = (dateStr: string): boolean =>
+  new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 5;
 
-/**
- * Returns the start-of-day and end-of-day as JS Dates for a given
- * "YYYY-MM-DD" in the given IANA timezone.
- */
-const dayBoundsInTz = (
-  dateStr: string,
-  tz: string
-): { start: Date; end: Date } => {
-  const startLocal = new Date(`${dateStr}T00:00:00`);
-  const endLocal = new Date(`${dateStr}T23:59:59.999`);
+const maxDateStr = (a: string, b: string): string => (a > b ? a : b);
 
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    timeZoneName: "longOffset",
-  });
-
-  const extractOffsetMs = (d: Date): number => {
-    const formatted = formatter.format(d);
-    const match = formatted.match(/GMT([+-]\d{2}):?(\d{2})?/);
-    if (!match) return 0;
-    const hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2] || "0", 10);
-    return (hours * 60 + (hours < 0 ? -minutes : minutes)) * 60 * 1000;
-  };
-
-  const offsetMs = extractOffsetMs(startLocal);
-  const start = new Date(startLocal.getTime() - offsetMs);
-  const end = new Date(endLocal.getTime() - offsetMs);
-  return { start, end };
-};
-
-/**
- * Checks whether a given member sent at least one streak-eligible image
- * on their calendar date (midnight-to-midnight in their timezone).
- */
-const memberSentOnDate = async (
-  chatId: string,
-  memberUid: string,
-  dateStr: string,
-  memberTz: string
-): Promise<boolean> => {
-  const { start, end } = dayBoundsInTz(dateStr, memberTz);
-
-  const q = query(
-    messagesCol(chatId),
-    where("type", "==", "image"),
-    where("isStreakEligible", "==", true),
-    where("senderUid", "==", memberUid),
-    where("createdAt", ">=", Timestamp.fromDate(start)),
-    where("createdAt", "<=", Timestamp.fromDate(end))
-  );
-
-  const snapshot = await getDocs(q);
-  return !snapshot.empty;
-};
-
-/**
- * Returns the latest timezone (furthest west / latest midnight) among members.
- * Used to determine when a calendar date is "complete" for all members.
- */
 const getLatestMidnightTz = (profiles: UserProfile[]): string => {
   let latestTz = "UTC";
   let latestOffset = -Infinity;
@@ -135,7 +71,6 @@ const getLatestMidnightTz = (profiles: UserProfile[]): string => {
         const hours = parseInt(match[1], 10);
         const minutes = parseInt(match[2] || "0", 10);
         const totalMinutes = hours * 60 + (hours < 0 ? -minutes : minutes);
-        // More negative offset = further west = later midnight
         if (-totalMinutes > latestOffset) {
           latestOffset = -totalMinutes;
           latestTz = tz;
@@ -149,31 +84,59 @@ const getLatestMidnightTz = (profiles: UserProfile[]): string => {
   return latestTz;
 };
 
-/**
- * Determine the first date to evaluate for a chat.
- * If lastStreakDate exists, start from the day after.
- * Otherwise, start from the chat's creation date.
- */
-const getFirstEvalDate = (chat: BuddyChat, latestTz: string): string => {
-  if (chat.lastStreakDate) {
-    return addDays(chat.lastStreakDate, 1);
+const isRequiredStreakDate = (
+  kind: BuddyChat["kind"],
+  dateStr: string,
+  memberProfiles: UserProfile[]
+): boolean => {
+  if (kind === "candles") {
+    return isFridayDate(dateStr);
   }
 
-  // Legacy/dummy buddy chats may have a positive streak without a
-  // lastStreakDate. Re-evaluate yesterday so stale counts can reset instead of
-  // staying pinned forever.
-  if (chat.streakCount > 0) {
-    return addDays(todayInTz(latestTz), -1);
+  if (isSaturdayDate(dateStr)) {
+    return !memberProfiles.every((member) => member.faithTradition !== "christian");
   }
 
-  const created = chat.createdAt.toDate();
-  return created.toISOString().slice(0, 10);
+  return true;
 };
 
 /**
- * Evaluate a single buddy chat's streak by checking each pending date
- * sequentially. A single missed date breaks the streak.
+ * Groups camera-photo senders by the sender's own local date. The `fromCamera`
+ * flag is authoritative for new messages; legacy tefillin images are counted
+ * because older GPS/sun-window bugs incorrectly wrote `isStreakEligible: false`.
  */
+const getEligibleSendersByDate = async (
+  chat: BuddyChat,
+  memberProfiles: UserProfile[]
+): Promise<Map<string, Set<string>>> => {
+  const tzByUid = new Map(
+    memberProfiles.map((profile) => [profile.uid, profile.timeZone || "UTC"])
+  );
+
+  const q = query(messagesCol(chat.id), where("type", "==", "image"));
+  const snapshot = await getDocs(q);
+  const byDate = new Map<string, Set<string>>();
+
+  for (const messageDoc of snapshot.docs) {
+    const data = messageDoc.data();
+    if (data.fromCamera === false) continue;
+    if (chat.kind === "candles" && data.isStreakEligible !== true) continue;
+
+    const senderUid = typeof data.senderUid === "string" ? data.senderUid : null;
+    if (!senderUid || !tzByUid.has(senderUid)) continue;
+    const createdAt = data.createdAt as Timestamp | undefined;
+    if (!createdAt) continue;
+
+    const memberTz = tzByUid.get(senderUid)!;
+    const localDate = dateInTz(createdAt.toDate(), memberTz);
+    const senders = byDate.get(localDate) ?? new Set<string>();
+    senders.add(senderUid);
+    byDate.set(localDate, senders);
+  }
+
+  return byDate;
+};
+
 export const evaluateChatStreak = async (
   chat: BuddyChat,
   memberProfiles: UserProfile[]
@@ -181,68 +144,46 @@ export const evaluateChatStreak = async (
   if (memberProfiles.length === 0) return chat;
 
   const latestTz = getLatestMidnightTz(memberProfiles);
-  let evalDate = getFirstEvalDate(chat, latestTz);
-  let { streakCount, longestStreak, lastStreakDate, streakBrokenAt } = chat;
-  let changed = false;
-
-  const maxIterations = 60;
+  const todayLatest = todayInTz(latestTz);
+  const lookbackStart = addDays(todayLatest, -MAX_STREAK_LOOKBACK_DAYS + 1);
+  let evalDate = maxDateStr(dateInTz(chat.createdAt.toDate(), latestTz), lookbackStart);
+  let streakCount = 0;
+  let longestStreak = chat.longestStreak;
+  let lastStreakDate: string | null = null;
+  let streakBrokenAt: string | null = null;
+  const sendersByDate = await getEligibleSendersByDate(chat, memberProfiles);
   let iterations = 0;
 
-  const todayLatest = todayInTz(latestTz);
-
-  while (evalDate <= todayLatest && iterations < maxIterations) {
+  while (evalDate <= todayLatest && iterations < MAX_STREAK_LOOKBACK_DAYS) {
     iterations++;
-    const evaluatingCurrentDate = evalDate === todayLatest;
 
-    if (chat.kind === "tefillin" && isSaturdayDate(evalDate)) {
+    if (!isRequiredStreakDate(chat.kind, evalDate, memberProfiles)) {
       lastStreakDate = evalDate;
-      changed = true;
       evalDate = addDays(evalDate, 1);
       continue;
     }
 
-    if (chat.kind === "candles" && !isFridayDate(evalDate)) {
-      lastStreakDate = evalDate;
-      changed = true;
-      evalDate = addDays(evalDate, 1);
-      continue;
-    }
-
-    let allSent = true;
-    for (const member of memberProfiles) {
-      const memberTz = member.timeZone || "UTC";
-      const sent = await memberSentOnDate(
-        chat.id,
-        member.uid,
-        evalDate,
-        memberTz
-      );
-      if (!sent) {
-        allSent = false;
-        break;
-      }
-    }
+    const senders = sendersByDate.get(evalDate) ?? new Set<string>();
+    const allSent = memberProfiles.every((member) => senders.has(member.uid));
 
     if (allSent) {
       streakCount += 1;
       longestStreak = Math.max(longestStreak, streakCount);
       lastStreakDate = evalDate;
-      changed = true;
     } else {
-      if (evaluatingCurrentDate) {
-        break;
-      }
-      if (streakCount > 0 || lastStreakDate !== null) {
-        streakCount = 0;
-        streakBrokenAt = evalDate;
-        lastStreakDate = evalDate;
-        changed = true;
-      }
-      break;
+      streakCount = 0;
+      streakBrokenAt = evalDate;
+      lastStreakDate = evalDate;
     }
 
     evalDate = addDays(evalDate, 1);
   }
+
+  const changed =
+    streakCount !== chat.streakCount ||
+    longestStreak !== chat.longestStreak ||
+    lastStreakDate !== chat.lastStreakDate ||
+    streakBrokenAt !== chat.streakBrokenAt;
 
   if (changed) {
     const chatRef = doc(firestore, "buddyChats", chat.id);
@@ -263,13 +204,6 @@ export const evaluateChatStreak = async (
   };
 };
 
-/**
- * Evaluate all buddy chat streaks for a user. This only updates the *shared*
- * per-chat streak (mutual completion). The user's individual tefillin streak
- * (`tefillinCurrentStreak`) is tracked separately — every member keeps their
- * own streak based on whether they personally wrapped each day — so it is
- * intentionally NOT overwritten here with the highest buddy-chat streak.
- */
 export const evaluateAllStreaks = async (uid: string): Promise<void> => {
   const chats = await getUserBuddyChats(uid);
   if (chats.length === 0) return;

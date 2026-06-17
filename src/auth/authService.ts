@@ -1,6 +1,5 @@
 import {
   GoogleAuthProvider,
-  PhoneAuthProvider,
   createUserWithEmailAndPassword,
   deleteUser,
   OAuthProvider,
@@ -15,7 +14,8 @@ import {
   Unsubscribe,
   User as FirebaseUser,
 } from "firebase/auth";
-import nativeAuth from "@react-native-firebase/auth";
+import nativeAuth, { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import { Platform } from "react-native";
 import { auth } from "../firebase/firebaseConfig";
 import Config from "react-native-config";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -25,7 +25,7 @@ import {
   AuthError,
 } from "./appleAuth";
 import { UserProfile } from "../types/UserProfile";
-import { getOrCreateUserProfileOnLogin } from "../firebase/firestore";
+import { getOrCreateUserProfileOnLogin, getUserProfile } from "../firebase/firestore";
 import { DEV_MODE } from "../config/devMode";
 import { Timestamp } from "firebase/firestore";
 
@@ -34,6 +34,72 @@ let pendingSignup = false;
 
 export type PhoneAuthConfirmation = {
   verificationId: string;
+};
+
+let pendingNativePhoneConfirmation: FirebaseAuthTypes.ConfirmationResult | null = null;
+
+const ensureIosPhoneVerificationReady = async (): Promise<void> => {
+  if (Platform.OS !== "ios") return;
+  try {
+    const messaging = (await import("@react-native-firebase/messaging")).default;
+    await messaging().registerDeviceForRemoteMessages();
+  } catch {
+    // Phone auth can still fall back to reCAPTCHA if push registration fails.
+  }
+};
+
+const resolvePhoneAuthUser = async (): Promise<{
+  uid: string;
+  displayName: string | null;
+  email: string | null;
+}> => {
+  const readUser = (): {
+    uid: string;
+    displayName: string | null;
+    email: string | null;
+  } | null => {
+    const nativeUser = nativeAuth().currentUser;
+    if (nativeUser?.uid) {
+      return {
+        uid: nativeUser.uid,
+        displayName: nativeUser.displayName,
+        email: nativeUser.email,
+      };
+    }
+    const webUser = auth.currentUser;
+    if (webUser?.uid) {
+      return {
+        uid: webUser.uid,
+        displayName: webUser.displayName,
+        email: webUser.email,
+      };
+    }
+    return null;
+  };
+
+  const immediate = readUser();
+  if (immediate) return immediate;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const synced = readUser();
+    if (synced) return synced;
+  }
+
+  throw new Error("Phone sign-in failed. Please try again.");
+};
+
+const signOutPhoneSignupCollision = async (): Promise<void> => {
+  try {
+    await nativeAuth().signOut();
+  } catch {
+    // The native session may already be clear.
+  }
+  try {
+    await firebaseSignOut(auth);
+  } catch {
+    // Phone auth uses the native session; the web session may not exist.
+  }
 };
 
 const EMAIL_VERIFICATION_BYPASS_EMAILS = new Set(["liel.reyter@gmail.com"]);
@@ -155,7 +221,7 @@ const hydrateProfileWithFallback = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? firebaseUser.displayName ?? "Dev User",
       email: email ?? firebaseUser.email ?? null,
-      faithTradition: "jewish",
+      faithTradition: null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -168,6 +234,7 @@ const hydrateProfileWithFallback = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      firstRunGuideCompleted: false,
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
@@ -246,7 +313,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         lastLoginAt: Timestamp.now(),
         displayName: "Dev User",
         email: null,
-        faithTradition: "jewish",
+        faithTradition: null,
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
@@ -259,6 +326,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         lastStreakWeekId: null,
         congregationId: null,
         congregationOnboardingCompleted: false,
+        firstRunGuideCompleted: false,
         tefillinCurrentStreak: 0,
         tefillinLongestStreak: 0,
         lastTefillinDate: null,
@@ -365,7 +433,7 @@ export const registerWithEmailPassword = async ({
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? null,
       email: trimmedEmail,
-      faithTradition: "jewish",
+      faithTradition: null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -378,6 +446,7 @@ export const registerWithEmailPassword = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      firstRunGuideCompleted: false,
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
@@ -418,12 +487,15 @@ export const startPhoneSignIn = async (
     throw new Error("Phone number is required.");
   }
   try {
-    const confirmation = await nativeAuth().signInWithPhoneNumber(trimmedPhone);
-    if (!confirmation.verificationId) {
+    await ensureIosPhoneVerificationReady();
+    pendingNativePhoneConfirmation = await nativeAuth().signInWithPhoneNumber(trimmedPhone);
+    if (!pendingNativePhoneConfirmation.verificationId) {
+      pendingNativePhoneConfirmation = null;
       throw new Error("Phone verification could not start. Please try again.");
     }
-    return { verificationId: confirmation.verificationId };
+    return { verificationId: pendingNativePhoneConfirmation.verificationId };
   } catch (error) {
+    pendingNativePhoneConfirmation = null;
     throw mapFirebaseAuthError(error);
   }
 };
@@ -440,12 +512,22 @@ export const confirmPhoneSignIn = async ({
     throw new Error("Verification code is required.");
   }
   try {
-    const credential = PhoneAuthProvider.credential(confirmation.verificationId, trimmedCode);
-    const result = await signInWithCredential(auth, credential);
+    const nativeConfirmation = pendingNativePhoneConfirmation;
+    if (
+      !nativeConfirmation ||
+      nativeConfirmation.verificationId !== confirmation.verificationId
+    ) {
+      throw new Error("Phone verification expired. Request a new code and try again.");
+    }
+
+    await nativeConfirmation.confirm(trimmedCode);
+    pendingNativePhoneConfirmation = null;
+    const phoneUser = await resolvePhoneAuthUser();
+
     return hydrateProfileWithFallback({
-      firebaseUser: result.user,
-      displayName: result.user.displayName,
-      email: result.user.email,
+      firebaseUser: { uid: phoneUser.uid } as FirebaseUser,
+      displayName: phoneUser.displayName,
+      email: phoneUser.email,
     });
   } catch (error) {
     throw mapFirebaseAuthError(error);
@@ -469,15 +551,33 @@ export const confirmPhoneSignUp = async ({
   }
   try {
     pendingSignup = true;
-    const credential = PhoneAuthProvider.credential(confirmation.verificationId, trimmedCode);
-    const result = await signInWithCredential(auth, credential);
+    const nativeConfirmation = pendingNativePhoneConfirmation;
+    if (
+      !nativeConfirmation ||
+      nativeConfirmation.verificationId !== confirmation.verificationId
+    ) {
+      throw new Error("Phone verification expired. Request a new code and try again.");
+    }
+
+    await nativeConfirmation.confirm(trimmedCode);
+    pendingNativePhoneConfirmation = null;
+    const phoneUser = await resolvePhoneAuthUser();
+    const existingProfile = await getUserProfile(phoneUser.uid);
+    if (existingProfile) {
+      pendingSignup = false;
+      await signOutPhoneSignupCollision();
+      throw new Error(
+        "This phone number is already being used by another account. Sign in instead."
+      );
+    }
+
     const stub: UserProfile = {
-      uid: result.user.uid,
+      uid: phoneUser.uid,
       createdAt: Timestamp.now(),
       lastLoginAt: Timestamp.now(),
       displayName: displayName ?? null,
-      email: result.user.email ?? null,
-      faithTradition: "jewish",
+      email: phoneUser.email ?? null,
+      faithTradition: null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
       wantsMorningReminders: true,
       wantsShabbatReminders: true,
@@ -490,6 +590,7 @@ export const confirmPhoneSignUp = async ({
       lastStreakWeekId: null,
       congregationId: null,
       congregationOnboardingCompleted: false,
+      firstRunGuideCompleted: false,
       tefillinCurrentStreak: 0,
       tefillinLongestStreak: 0,
       lastTefillinDate: null,
@@ -504,7 +605,7 @@ export const confirmPhoneSignUp = async ({
       wantsChatNotifications: true,
       intentVisibility: "private",
       streakVisibility: "public",
-      friendCode: result.user.uid.slice(0, 8).toUpperCase(),
+      friendCode: phoneUser.uid.slice(0, 8).toUpperCase(),
       friendRequestStatus: "request",
       friendUids: [],
       pendingFriendUids: [],
@@ -518,9 +619,9 @@ export const confirmPhoneSignUp = async ({
     cachedUserProfile = stub;
     if (displayName || gender) {
       const profile = await getOrCreateUserProfileOnLogin({
-        uid: result.user.uid,
+        uid: phoneUser.uid,
         displayName: displayName ?? null,
-        email: result.user.email ?? null,
+        email: phoneUser.email ?? null,
       });
       const updated = await import("../firebase/firestore").then((m) =>
         m.updateUserProfile(profile.uid, {
@@ -532,8 +633,10 @@ export const confirmPhoneSignUp = async ({
       pendingSignup = false;
       return updated;
     }
+    pendingSignup = false;
     return stub;
   } catch (error) {
+    pendingSignup = false;
     throw mapFirebaseAuthError(error);
   }
 };
@@ -665,6 +768,11 @@ export const deleteCurrentUser = async (): Promise<void> => {
 };
 
 export const signOut = async (): Promise<void> => {
+  try {
+    await nativeAuth().signOut();
+  } catch {
+    // Ignore native sign-out errors and still clear the web session.
+  }
   await firebaseSignOut(auth);
   cachedUserProfile = null;
   pendingSignup = false;
@@ -677,8 +785,34 @@ export const getCurrentUser = (): UserProfile | null => {
 export const subscribeToAuthState = (
   callback: (profile: UserProfile | null) => void
 ): Unsubscribe => {
-  return onAuthStateChanged(auth, async (firebaseUser) => {
+  const unsubscribeNative = nativeAuth().onAuthStateChanged(async (nativeUser) => {
+    if (!nativeUser || auth.currentUser || pendingSignup) {
+      return;
+    }
+    try {
+      const profile = await withTimeout(
+        getOrCreateUserProfileOnLogin({
+          uid: nativeUser.uid,
+          displayName: nativeUser.displayName,
+          email: nativeUser.email,
+        }),
+        AUTH_STATE_TIMEOUT_MS,
+        "Profile load timed out."
+      );
+      cachedUserProfile = profile;
+      callback(profile);
+    } catch {
+      if (cachedUserProfile?.uid === nativeUser.uid) {
+        callback(cachedUserProfile);
+      }
+    }
+  });
+
+  const unsubscribeWeb = onAuthStateChanged(auth, async (firebaseUser) => {
     if (!firebaseUser) {
+      if (nativeAuth().currentUser) {
+        return;
+      }
       cachedUserProfile = null;
       callback(null);
       return;
@@ -730,7 +864,7 @@ export const subscribeToAuthState = (
         lastLoginAt: Timestamp.now(),
         displayName: firebaseUser.displayName ?? null,
         email: firebaseUser.email ?? null,
-        faithTradition: "jewish",
+        faithTradition: null,
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
         wantsMorningReminders: true,
         wantsShabbatReminders: true,
@@ -743,6 +877,7 @@ export const subscribeToAuthState = (
         lastStreakWeekId: null,
         congregationId: null,
         congregationOnboardingCompleted: false,
+        firstRunGuideCompleted: false,
         tefillinCurrentStreak: 0,
         tefillinLongestStreak: 0,
         lastTefillinDate: null,
@@ -785,6 +920,11 @@ export const subscribeToAuthState = (
       callback(cachedUserProfile);
     }
   });
+
+  return () => {
+    unsubscribeNative();
+    unsubscribeWeb();
+  };
 };
 
 export type { AuthError };

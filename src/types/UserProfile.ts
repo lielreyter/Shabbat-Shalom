@@ -26,6 +26,7 @@ export interface UserProfile {
 
   congregationId: string | null;
   congregationOnboardingCompleted: boolean;
+  firstRunGuideCompleted: boolean;
 
   tefillinCurrentStreak: number;
   tefillinLongestStreak: number;

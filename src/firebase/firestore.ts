@@ -64,6 +64,7 @@ export const hydrateUserProfile = (uid: string, data: Partial<UserProfile>): Use
     lastStreakWeekId: data.lastStreakWeekId ?? null,
     congregationId: data.congregationId ?? null,
     congregationOnboardingCompleted: data.congregationOnboardingCompleted ?? false,
+    firstRunGuideCompleted: data.firstRunGuideCompleted ?? false,
     tefillinCurrentStreak: data.tefillinCurrentStreak ?? 0,
     tefillinLongestStreak: data.tefillinLongestStreak ?? 0,
     lastTefillinDate: data.lastTefillinDate ?? null,
@@ -123,7 +124,7 @@ export const createUserProfile = async ({
     displayNameLower: displayName?.toLowerCase() ?? null,
     friendCode,
     email,
-    faithTradition: "jewish",
+    faithTradition: null,
     shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
     wantsMorningReminders: false,
     wantsShabbatReminders: true,
@@ -136,6 +137,7 @@ export const createUserProfile = async ({
     lastStreakWeekId: null,
     congregationId: null,
     congregationOnboardingCompleted: false,
+    firstRunGuideCompleted: false,
     tefillinCurrentStreak: 0,
     tefillinLongestStreak: 0,
     lastTefillinDate: null,
@@ -193,8 +195,10 @@ export const recordTefillinDay = async (
   const profile = await getUserProfile(uid);
   if (!profile) return null;
   if (profile.lastTefillinDate === dateStr) return profile;
-  if (await isTefillinRestDate(dateStr)) return profile;
-  const previousEligibleDate = await previousTefillinEligibleDate(dateStr);
+  if (profile.faithTradition !== "christian" && (await isTefillinRestDate(dateStr))) return profile;
+  const previousEligibleDate = profile.faithTradition === "christian"
+    ? addDaysToDateString(dateStr, -1)
+    : await previousTefillinEligibleDate(dateStr);
   const nextStreak =
     previousEligibleDate && profile.lastTefillinDate === previousEligibleDate
       ? (profile.tefillinCurrentStreak ?? 0) + 1

@@ -24,7 +24,6 @@ import {
 } from "firebase/storage";
 import { firestore, storage } from "../firebase/firebaseConfig";
 import { BuddyChat, BuddyMessage } from "./buddyChatTypes";
-import { isWithinSunWindow } from "./zmanimService";
 
 const chatsCol = collection(firestore, "buddyChats");
 const chatDoc = (chatId: string) => doc(firestore, "buddyChats", chatId);
@@ -246,19 +245,10 @@ export const sendBuddyMessage = async (
   if (type === "image" && fromCamera) {
     if (kind === "candles") {
       streakEligible = isWithinCandleWindow();
-    } else if (
-      senderLat != null &&
-      senderLon != null &&
-      senderTzid
-    ) {
-      try {
-        const inSunWindow = await isWithinSunWindow(senderLat, senderLon, senderTzid);
-        streakEligible = inSunWindow;
-      } catch {
-        // Zmanim fetch failed — allow photo but without streak eligibility.
-        // The camera button performs the user-facing daylight check.
-        streakEligible = false;
-      }
+    } else {
+      // Camera photos already passed the daylight gate in the UI. Keep them eligible
+      // so buddy streaks are not lost to stale GPS or zmanim hiccups.
+      streakEligible = true;
     }
   }
 
@@ -271,6 +261,7 @@ export const sendBuddyMessage = async (
     createdAt: serverTimestamp(),
     opened: false,
     isStreakEligible: streakEligible,
+    fromCamera: type === "image" ? fromCamera === true : false,
     savedByUids: [],
   };
 

@@ -1,0 +1,111 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isBuddyChatMember(chatId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/buddyChats/$(chatId))
+        && get(/databases/$(database)/documents/buddyChats/$(chatId))
+          .data.memberUids.hasAny([request.auth.uid]);
+    }
+
+    function isWeeklyVideoUploader() {
+      return isSignedIn()
+        && request.auth.token.email == "liel.reyter@gmail.com"
+        && request.auth.token.email_verified == true;
+    }
+
+    function hasValidCongregationReligion(data) {
+      return data.religion in ["jewish", "christian", "mixed"];
+    }
+
+    match /users/{uid} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSelf(uid)
+        && request.resource.data.uid == uid;
+
+      allow update: if isSelf(uid)
+        || (isSignedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "pendingFriendUids",
+            "friendUids",
+            "tefillinBuddyUids",
+            "candleBuddyUids",
+            "buddyChatIds",
+            "congregationId",
+            "congregationOnboardingCompleted",
+            "firstRunGuideCompleted"
+          ]));
+
+      allow delete: if isSelf(uid);
+
+      match /intentHistory/{weekDate} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    match /buddyChats/{chatId} {
+      allow read: if isSignedIn()
+        && resource.data.memberUids.hasAny([request.auth.uid]);
+
+      allow create: if isSignedIn()
+        && request.resource.data.memberUids.hasAny([request.auth.uid]);
+
+      allow update, delete: if isSignedIn()
+        && resource.data.memberUids.hasAny([request.auth.uid]);
+
+      match /messages/{messageId} {
+        allow read, create, update, delete: if isBuddyChatMember(chatId);
+      }
+    }
+
+    match /congregations/{congregationId} {
+      allow read, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.leaderUid == request.auth.uid
+        && request.resource.data.memberUids.hasAny([request.auth.uid])
+        && hasValidCongregationReligion(request.resource.data);
+
+      allow update: if isSignedIn()
+        && (resource.data.memberUids.hasAny([request.auth.uid])
+          || resource.data.pendingUids.hasAny([request.auth.uid]))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["religion"])
+          || (resource.data.leaderUid == request.auth.uid
+            && hasValidCongregationReligion(request.resource.data)));
+
+      allow delete: if isSignedIn()
+        && (resource.data.memberUids.hasAny([request.auth.uid])
+          || resource.data.pendingUids.hasAny([request.auth.uid]));
+
+      match /messages/{messageId} {
+        allow read, create: if isSignedIn()
+          && exists(/databases/$(database)/documents/congregations/$(congregationId))
+          && get(/databases/$(database)/documents/congregations/$(congregationId))
+            .data.memberUids.hasAny([request.auth.uid]);
+      }
+    }
+
+    match /directMessages/{chatId}/messages/{messageId} {
+      allow read, create: if isSignedIn();
+    }
+
+    match /weeklyVideos/{weekId} {
+      allow read: if isSignedIn();
+      allow write: if isWeeklyVideoUploader();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
