@@ -332,6 +332,23 @@ export const checkAndBreakStaleStreaks = async (
     }
   }
 
+  // Candle lighting is weekly (Friday). Break the streak if a Friday has fully
+  // passed without a candle photo being recorded.
+  if ((profile.candleCurrentStreak ?? 0) > 0) {
+    if (!profile.lastCandleDate) {
+      updates.candleCurrentStreak = 0;
+    } else {
+      const localToday = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, "0")}-${`${now.getDate()}`.padStart(2, "0")}`;
+      const dow = new Date(`${localToday}T12:00:00Z`).getUTCDay(); // 0=Sun..5=Fri..6=Sat
+      let daysSinceFriday = (dow - 5 + 7) % 7;
+      if (daysSinceFriday === 0) daysSinceFriday = 7; // most recent Friday strictly before today
+      const lastCompletedFriday = addDaysToDateString(localToday, -daysSinceFriday);
+      if (profile.lastCandleDate < lastCompletedFriday) {
+        updates.candleCurrentStreak = 0;
+      }
+    }
+  }
+
   if (profile.currentStreak > 0 && profile.lastStreakWeekId) {
     const lastWeekDate = new Date(profile.lastStreakWeekId.replace("week-", ""));
     const daysSinceLastWeek = Math.floor(

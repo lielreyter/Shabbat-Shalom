@@ -9,6 +9,7 @@ import {
   Easing,
   FlatList,
   Image,
+  InteractionManager,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -281,6 +282,8 @@ type GuideStep = {
   placement: GuidePlacement;
   arrow: "up" | "down" | "left" | "right";
   scroll?: "top" | "bottom";
+  insetTop?: number;
+  insetBottom?: number;
 };
 
 /* ─── constants ──────────────────────────────────────────────── */
@@ -299,7 +302,6 @@ const HOLIDAY_OPTIN_KEY = "holidayOptIn:v1";
 const PERSONAL_BLOCK_ENDS_AT_KEY = "personalBlockEndsAt:v1";
 const PERSONAL_BLOCK_SUCCESS_COUNT_KEY = "personalBlockSuccessCount:v1";
 const PERSONAL_BLOCK_BROKEN_COUNT_KEY = "personalBlockBrokenCount:v1";
-const SCREEN_TIME_PROMPT_SEEN_KEY = "screenTimePromptSeen:v1";
 const SCREEN_TIME_PERMISSION_GRANTED_KEY = "screenTimePermissionGranted:v1";
 const NOTIFICATION_PROMPT_SEEN_KEY = "notificationPromptSeen:v1";
 const NOTIFICATION_PERMISSION_GRANTED_KEY = "notificationPermissionGranted:v1";
@@ -915,8 +917,17 @@ function AppSplash({
   const overlayOpacity = useRef(new Animated.Value(1)).current;
   const labelOpacity = useRef(new Animated.Value(0)).current;
   const labelShift = useRef(new Animated.Value(12)).current;
+  const doneRef = useRef(false);
 
   useEffect(() => {
+    const finish = () => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      onDone();
+    };
+    // Safety net: native-driver animation completion callbacks can be deferred
+    // if the app loses focus mid-animation. Guarantee the splash always clears.
+    const fallback = setTimeout(finish, 3200);
     Animated.sequence([
       // 1. Bounce in from the top-left corner to the center.
       Animated.parallel([
@@ -936,7 +947,8 @@ function AppSplash({
       ]),
       Animated.delay(280),
       Animated.timing(overlayOpacity, { toValue: 0, duration: 380, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
-    ]).start(() => onDone());
+    ]).start(() => finish());
+    return () => clearTimeout(fallback);
     // Run the intro animation exactly once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1287,6 +1299,7 @@ export default function App() {
 
   /* ── tefillin buddies ── */
   const [showBuddyInfo, setShowBuddyInfo] = useState(false);
+  const [buddyInfoKind, setBuddyInfoKind] = useState<"tefillin" | "candles">("tefillin");
   const [buddyActionLoading, setBuddyActionLoading] = useState(false);
 
   /* ── buddy chat ── */
@@ -1504,6 +1517,7 @@ export default function App() {
 
   const tabSwipePanResponder = useMemo(() => {
     const shouldClaimHorizontalSwipe = (_event: unknown, gestureState: { dx: number; dy: number }): boolean => {
+      if (firstRunGuideVisible) return false;
       if (focusDialDragging) return false;
       if (tabSwipeLockRef.current) return false;
       if (Date.now() - lastTabSwipeAtRef.current < 90) return false;
@@ -1535,7 +1549,7 @@ export default function App() {
         tabSwipeLockRef.current = false;
       },
     });
-  }, [focusDialDragging, goToAdjacentTab]);
+  }, [firstRunGuideVisible, focusDialDragging, goToAdjacentTab]);
 
   const focusDialPanResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -1811,7 +1825,42 @@ export default function App() {
     await AsyncStorage.setItem(RESTRICTIONS_KEY, JSON.stringify(next));
   }, []);
 
+  const requestScreenTimeWithPrompt = useCallback(async (): Promise<boolean> => {
+    const previouslyGranted = await AsyncStorage.getItem(SCREEN_TIME_PERMISSION_GRANTED_KEY);
+    if (previouslyGranted === "true") return true;
+
+    const shouldContinue = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Kesher Needs Screen Time",
+        "Screen Time lets Kesher block apps for Shabbat, prayer, and focus features you turn on.",
+        [
+          { text: "Not Now", onPress: () => resolve(false) },
+          { text: "Allow", onPress: () => resolve(true) },
+        ]
+      );
+    });
+    if (!shouldContinue) return false;
+
+    const granted = await requestScreenTimePermission();
+    if (granted) {
+      await AsyncStorage.setItem(SCREEN_TIME_PERMISSION_GRANTED_KEY, "true");
+      return true;
+    }
+
+    Alert.alert(
+      "Screen Time Required",
+      "App blocking needs Screen Time access. Try again when you're ready to allow it.",
+      [{ text: "OK" }]
+    );
+    return false;
+  }, []);
+
   const saveBlockLevel = useCallback(async (level: BlockLevel) => {
+    if (level !== "none") {
+      const granted = await requestScreenTimeWithPrompt();
+      if (!granted) return;
+    }
+
     if (level === "custom") {
       if (customSelectionCount < 1) {
         const result = await presentFamilyActivityPicker(
@@ -1832,9 +1881,11 @@ export default function App() {
     setBlockLevel(level);
     await AsyncStorage.setItem(BLOCK_LEVEL_KEY, level);
     await setScreenTimeBlockMode(level);
-  }, [customSelectionCount, isChristianUser]);
+  }, [customSelectionCount, isChristianUser, requestScreenTimeWithPrompt]);
 
   const onCustomizeShabbatBlock = useCallback(async () => {
+    const granted = await requestScreenTimeWithPrompt();
+    if (!granted) return;
     try {
       const result = await presentFamilyActivityPicker(
         "custom",
@@ -1855,9 +1906,11 @@ export default function App() {
     } catch (error) {
       Alert.alert("Custom Block", errorMessage(error, "Could not open app picker."));
     }
-  }, [blockLevel, isChristianUser]);
+  }, [blockLevel, isChristianUser, requestScreenTimeWithPrompt]);
 
   const onSetupPersonalBlock = useCallback(async () => {
+    const granted = await requestScreenTimeWithPrompt();
+    if (!granted) return;
     try {
       const result = await presentFamilyActivityPicker("personal", "Choose Apps to Block");
       if (!result.cancelled) {
@@ -1870,7 +1923,7 @@ export default function App() {
     } catch (error) {
       Alert.alert("Block Setup", errorMessage(error, "Could not open app picker."));
     }
-  }, [personalBlockEndsAt]);
+  }, [personalBlockEndsAt, requestScreenTimeWithPrompt]);
 
   const onStartPersonalBlock = useCallback(async () => {
     if (shabbatBlockIsActive) {
@@ -1882,6 +1935,9 @@ export default function App() {
       );
       return;
     }
+
+    const granted = await requestScreenTimeWithPrompt();
+    if (!granted) return;
 
     try {
       let count = personalBlockSelectionCount;
@@ -1908,7 +1964,7 @@ export default function App() {
     } catch (error) {
       Alert.alert("Block", errorMessage(error, "Could not start block."));
     }
-  }, [isChristianUser, personalBlockMinutes, personalBlockSelectionCount, shabbatBlockIsActive]);
+  }, [isChristianUser, personalBlockMinutes, personalBlockSelectionCount, requestScreenTimeWithPrompt, shabbatBlockIsActive]);
 
   const onStopPersonalBlock = useCallback(async () => {
     try {
@@ -2103,7 +2159,13 @@ export default function App() {
         lastProfileSyncUidRef.current = null;
       }
     });
-    return unsubscribe;
+    // Watchdog: never leave the user stuck on the loading screen if the auth
+    // listener is slow or never fires (e.g. transient native bridge issues).
+    const authWatchdog = setTimeout(() => setAuthLoading(false), AUTH_ACTION_TIMEOUT_MS);
+    return () => {
+      clearTimeout(authWatchdog);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -2257,8 +2319,13 @@ export default function App() {
           return;
         }
         if (seen !== "true") {
-          setFirstRunGuideStep(0);
-          setFirstRunGuideVisible(true);
+          InteractionManager.runAfterInteractions(() => {
+            setTimeout(() => {
+              if (!mounted) return;
+              setFirstRunGuideStep(0);
+              setFirstRunGuideVisible(true);
+            }, 450);
+          });
         }
       })
       .catch(() => {});
@@ -3115,34 +3182,38 @@ export default function App() {
       return [
         {
           title: "Rest Day",
-          body: "Your Home tab tracks weekly rest. Pick a rest block when you want Kesher to protect worship, quiet, and time away from digital noise.",
+          body: "Track your weekly rest streak and block settings here.",
           tab: "home",
           placement: "bottom",
           arrow: "up",
           scroll: "top",
+          insetBottom: 108,
         },
         {
           title: "Congregations",
-          body: "This is where you join or create a church, small group, or mixed community. The label tells searchers what kind of group it is.",
+          body: "Join or create a church or small group from Social.",
           tab: "social",
           socialSubTab: "friends",
           placement: "bottom",
           arrow: "up",
+          insetBottom: 108,
         },
         {
           title: "Prayer Partners",
-          body: "The i next to Prayer Partners explains the feature. Partners share daily encouragement and photos; hold a photo to save it in the chat.",
+          body: "Tap i for how partner photos work. Hold a photo to save it.",
           tab: "buddies",
           socialSubTab: "friends",
           placement: "bottom",
           arrow: "up",
+          insetBottom: 108,
         },
         {
           title: "Scripture",
-          body: "End here for the weekly Scripture view. Come back when you want a calmer place to read and reflect.",
+          body: "Read today's Scripture and weekly passages here.",
           tab: "parasha",
-          placement: "top",
-          arrow: "down",
+          placement: "bottom",
+          arrow: "up",
+          insetBottom: 108,
         },
       ];
     }
@@ -3151,43 +3222,48 @@ export default function App() {
       {
         title: "Streaks And Tefillin",
         body: isFemaleUser
-          ? "Home tracks your Shabbat streak. Your candle buddy streak lives in the buddies tab."
-          : "Home tracks Shabbat and tefillin streaks. Tap the tefillin card when you wrapped today, or send a live buddy photo.",
+          ? "Track your Shabbat streak here. Candle buddies are in Buddies."
+          : "Track Shabbat and tefillin streaks. Tap the tefillin card when you wrapped.",
         tab: "home",
         placement: "bottom",
         arrow: "up",
         scroll: "top",
+        insetBottom: 108,
       },
       {
         title: "Prayers",
-        body: "Prayer reminders live near the bottom of Home. Modeh Ani and Shema can block distracting apps until you read the prayer.",
+        body: "Modeh Ani and Shema can block apps until you read the prayer.",
         tab: "home",
         placement: "top",
         arrow: "down",
         scroll: "bottom",
+        insetTop: 72,
       },
       {
         title: "Congregations",
-        body: "Join or create a congregation from Social. New and old congregations are labeled Jewish, Christian, or Mixed so people know what they found.",
+        body: "Join or create a congregation from Social.",
         tab: "social",
         socialSubTab: "friends",
         placement: "bottom",
         arrow: "up",
+        insetBottom: 108,
       },
       {
         title: isFemaleUser ? "Candle Buddies" : "Tefillin Buddies",
-        body: `${isFemaleUser ? "Candle buddies" : "Tefillin buddies"} use the i button to explain how accountability photos work. Hold a photo to save it in the chat.`,
+        body: "Tap i to learn how buddy photos work. Hold a photo to save it.",
         tab: "buddies",
         socialSubTab: "friends",
         placement: "bottom",
         arrow: "up",
+        insetBottom: 108,
       },
       {
         title: "Weekly Torah",
-        body: "The Torah tab closes the tour with this week's portion and a short reflection.",
+        body: "This week's Torah portion and reflection live here.",
         tab: "parasha",
-        placement: "top",
-        arrow: "down",
+        placement: "bottom",
+        arrow: "up",
+        insetBottom: 108,
       },
     ];
   }, [isChristianUser, isFemaleUser]);
@@ -3207,24 +3283,27 @@ export default function App() {
         } else {
           homeScrollRef.current?.scrollTo({ y: 0, animated: true });
         }
-      }, 120);
+      }, 280);
     }
   }, [currentGuideStep, firstRunGuideVisible]);
 
-  const onNextGuideStep = useCallback(async () => {
+  const onNextGuideStep = useCallback(() => {
     if (firstRunGuideStep < guideSteps.length - 1) {
       setFirstRunGuideStep((step) => step + 1);
       return;
     }
+    // Dismiss synchronously first so the overlay can never trap touches if the
+    // persistence below is slow or fails.
+    setFirstRunGuideVisible(false);
+    setActiveTab("home");
     if (user?.uid) {
-      await AsyncStorage.setItem(firstRunGuideKey(user.uid), "true");
+      AsyncStorage.setItem(firstRunGuideKey(user.uid), "true").catch(() => {});
       if (user.uid.startsWith("dev-local-")) {
         setUser((prev) => prev ? { ...prev, firstRunGuideCompleted: true } : prev);
       } else {
         updateUserProfile(user.uid, { firstRunGuideCompleted: true }).then(setUser).catch(() => {});
       }
     }
-    setFirstRunGuideVisible(false);
   }, [firstRunGuideStep, guideSteps.length, user]);
 
   /* ── shabbat mode callbacks ── */
@@ -3459,34 +3538,6 @@ export default function App() {
       ]
     );
     return false;
-  }, []);
-
-  const requestScreenTimeWithPrompt = useCallback(async (): Promise<boolean> => {
-    const [promptSeen, previouslyGranted] = await Promise.all([
-      AsyncStorage.getItem(SCREEN_TIME_PROMPT_SEEN_KEY),
-      AsyncStorage.getItem(SCREEN_TIME_PERMISSION_GRANTED_KEY),
-    ]);
-    if (previouslyGranted === "true") return true;
-    if (promptSeen === "true") return false;
-
-    const shouldContinue = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        "Kesher Would Like to Access Screen Time",
-        "Kesher uses Screen Time only for the app blocking features you choose to turn on.",
-        [
-          { text: "Don't Allow", style: "cancel", onPress: () => resolve(false) },
-          { text: "Continue", style: "default", onPress: () => resolve(true) },
-        ]
-      );
-    });
-    await AsyncStorage.setItem(SCREEN_TIME_PROMPT_SEEN_KEY, "true");
-    if (!shouldContinue) return false;
-
-    const granted = await requestScreenTimePermission();
-    if (granted) {
-      await AsyncStorage.setItem(SCREEN_TIME_PERMISSION_GRANTED_KEY, "true");
-    }
-    return granted;
   }, []);
 
   /* ── reminder callbacks ── */
@@ -4834,6 +4885,17 @@ export default function App() {
               {tefillinConfirmedToday ? "Logged today" : isTefillinRestDay ? "No tefillin today" : "Tap to log today"}
             </Text>
           </Pressable>
+        ) : !isChristianUser && isFemaleUser ? (
+          <Pressable
+            style={[s.streakCard, { backgroundColor: C.primaryLight }]}
+            onPress={() => { setSocialSubTab("friends"); setActiveTab("buddies"); }}
+          >
+            <Text style={[s.streakNumber, { color: C.primary }]}>{displayCandleStreak}</Text>
+            <Text style={[s.streakLabel, { color: C.primary }]}>Candle Streak</Text>
+            <Text style={{ fontSize: 10, color: C.primary, marginTop: 2, fontWeight: "600" }}>
+              {user?.lastCandleDate === localDateStr() ? "Lit this week" : "Light on Friday"}
+            </Text>
+          </Pressable>
         ) : null}
       </View>
 
@@ -5242,7 +5304,7 @@ export default function App() {
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={s.buddiesSectionTitle}>{isChristianUser ? "Prayer Partners" : "Tefillin Buddies"}</Text>
-              <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
+              <Pressable onPress={() => { setBuddyInfoKind("tefillin"); setShowBuddyInfo(true); }} hitSlop={12}>
                 <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
@@ -5389,7 +5451,7 @@ export default function App() {
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <Text style={s.buddiesSectionTitle}>Candle Buddies</Text>
-              <Pressable onPress={() => setShowBuddyInfo(true)} hitSlop={12}>
+              <Pressable onPress={() => { setBuddyInfoKind("candles"); setShowBuddyInfo(true); }} hitSlop={12}>
                 <View style={[s.infoIcon, isChristianUser && s.infoIconChristian]}><Text style={[s.infoIconText, isChristianUser && s.infoIconTextChristian]}>i</Text></View>
               </Pressable>
             </View>
@@ -6543,7 +6605,7 @@ export default function App() {
                         {sex === "male" ? "Male" : "Female"}
                       </Text>
                       <Text style={[s.sexOptionHint, profileSex === sex && s.sexOptionHintActive]}>
-                        {sex === "male" ? "Includes tefillin tools" : "Hides tefillin prompts"}
+                        {sex === "male" ? "Includes tefillin tools" : "Includes candle tools"}
                       </Text>
                     </Pressable>
                   ))}
@@ -6741,24 +6803,31 @@ export default function App() {
       </Modal>
 
       {/* First-run Guide */}
-      <Modal visible={firstRunGuideVisible} transparent animationType="fade">
-        <View style={s.guideOverlay} pointerEvents="box-none">
+      {firstRunGuideVisible && (
+        <View style={s.guideOverlay}>
           {currentGuideStep && (
-            <View style={[
-              s.guideCard,
-              currentGuideStep.placement === "top"
-                ? s.guideCardTop
-                : currentGuideStep.placement === "bottom"
-                  ? s.guideCardBottom
-                  : currentGuideStep.placement === "left"
-                    ? s.guideCardLeft
-                    : currentGuideStep.placement === "right"
-                      ? s.guideCardRight
-                      : s.guideCardCenter,
-            ]}>
-              <Text style={[s.guideArrow, { color: appAccent }]}>
-                {currentGuideStep.arrow === "up" ? "↑" : currentGuideStep.arrow === "down" ? "↓" : currentGuideStep.arrow === "left" ? "←" : "→"}
-              </Text>
+            <View
+              pointerEvents="auto"
+              style={[
+                s.guideCard,
+                currentGuideStep.placement === "top"
+                  ? s.guideCardTop
+                  : currentGuideStep.placement === "bottom"
+                    ? s.guideCardBottom
+                    : currentGuideStep.placement === "left"
+                      ? s.guideCardLeft
+                      : currentGuideStep.placement === "right"
+                        ? s.guideCardRight
+                        : s.guideCardCenter,
+                currentGuideStep.insetTop != null ? { top: currentGuideStep.insetTop } : null,
+                currentGuideStep.insetBottom != null ? { bottom: currentGuideStep.insetBottom } : null,
+              ]}
+            >
+              {currentGuideStep.arrow === "up" || currentGuideStep.arrow === "left" ? (
+                <Text style={[s.guideArrow, { color: appAccent }]}>
+                  {currentGuideStep.arrow === "up" ? "↑" : "←"}
+                </Text>
+              ) : null}
               <View style={s.guideTextBox}>
                 <View style={s.guideHeaderRow}>
                   <FaithMark
@@ -6779,10 +6848,15 @@ export default function App() {
                   </Text>
                 </Pressable>
               </View>
+              {currentGuideStep.arrow === "down" || currentGuideStep.arrow === "right" ? (
+                <Text style={[s.guideArrow, { color: appAccent }]}>
+                  {currentGuideStep.arrow === "down" ? "↓" : "→"}
+                </Text>
+              ) : null}
             </View>
           )}
         </View>
-      </Modal>
+      )}
 
       {/* Intent Modal */}
       <Modal visible={intentModalVisible} transparent animationType="fade">
@@ -6912,15 +6986,19 @@ export default function App() {
         onClose={() => setTimePickerKind(null)}
       />
 
-      {/* Tefillin Buddies Info Modal */}
+      {/* Buddies Info Modal */}
       <Modal visible={showBuddyInfo} transparent animationType="fade">
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
-            <Text style={s.modalTitle}>{isChristianUser ? "Prayer Partners" : "Tefillin Buddies"}</Text>
+            <Text style={s.modalTitle}>
+              {buddyInfoKind === "candles" ? "Candle Buddies" : isChristianUser ? "Prayer Partners" : "Tefillin Buddies"}
+            </Text>
             <Text style={[s.sectionDesc, { marginTop: 12, fontSize: 14, lineHeight: 22 }]}>
-              {isChristianUser
-                ? "Prayer partners help you stay accountable without turning prayer into a performance. Send a simple check-in - a Bible, prayer journal, or quiet space - and encourage each other with grace. Hold any photo to save it in the chat."
-                : "Tefillin buddies is a way to better hold yourself accountable to wrapping tefillin by sharing this commitment with your friends. Send a live tefillin photo to keep the shared streak alive, and hold any photo to save it in the chat."}
+              {buddyInfoKind === "candles"
+                ? "Candle buddies help you stay accountable to lighting Shabbat candles each week. Send a live candle photo every Friday between 4:00 PM and 11:00 PM to keep your shared weekly streak alive, and hold any photo to save it in the chat."
+                : isChristianUser
+                  ? "Prayer partners help you stay accountable without turning prayer into a performance. Send a simple check-in - a Bible, prayer journal, or quiet space - and encourage each other with grace. Hold any photo to save it in the chat."
+                  : "Tefillin buddies is a way to better hold yourself accountable to wrapping tefillin by sharing this commitment with your friends. Send a live tefillin photo to keep the shared streak alive, and hold any photo to save it in the chat."}
             </Text>
             <Pressable style={[s.primaryBtn, { marginTop: 16 }]} onPress={() => setShowBuddyInfo(false)}>
               <Text style={s.primaryBtnText}>Got it</Text>
@@ -7092,6 +7170,25 @@ export default function App() {
                                   <Text style={s.primaryBtnText}>
                                     {isChristianUser ? "Add Prayer Partner" : "Add Tefillin Buddy"}
                                   </Text>
+                                </Pressable>
+                              )
+                            )}
+                            {!isChristianUser && isFemaleUser && (
+                              candleBuddyUids.includes(viewingFriend.uid) ? (
+                                <Pressable
+                                  style={[s.primaryBtn, { backgroundColor: C.dangerLight }]}
+                                  onPress={() => { onRemoveCandleBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                                  disabled={buddyActionLoading}
+                                >
+                                  <Text style={[s.primaryBtnText, { color: C.danger }]}>Remove Candle Buddy</Text>
+                                </Pressable>
+                              ) : (
+                                <Pressable
+                                  style={s.primaryBtn}
+                                  onPress={() => { onAddCandleBuddy(viewingFriend.uid); setViewingFriend(null); }}
+                                  disabled={buddyActionLoading}
+                                >
+                                  <Text style={s.primaryBtnText}>Add Candle Buddy</Text>
                                 </Pressable>
                               )
                             )}
@@ -7956,7 +8053,7 @@ function LeaderboardRow({
 /* ─── styles ─────────────────────────────────────────────────── */
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.bg },
+  safe: { flex: 1, backgroundColor: C.bg, position: "relative" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 28 },
   body: { flex: 1 },
   fullWidth: { width: "100%" },
@@ -8483,8 +8580,8 @@ const s = StyleSheet.create({
   reviewSecondaryBtnText: { color: C.primary, fontSize: 15, fontWeight: "900" },
   reviewQuietBtn: { paddingVertical: 12, paddingHorizontal: 12, marginTop: 2 },
   reviewQuietBtnText: { color: C.textLight, fontSize: 13, fontWeight: "800" },
-  guideOverlay: { flex: 1, backgroundColor: "rgba(15,23,42,0.22)", paddingHorizontal: 16, paddingVertical: 26 },
-  guideCard: { position: "absolute", width: "78%", maxWidth: 320, alignItems: "center" },
+  guideOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15,23,42,0.22)", paddingHorizontal: 16, paddingVertical: 26, zIndex: 1000, elevation: 1000 },
+  guideCard: { position: "absolute", width: "72%", maxWidth: 300, alignItems: "center" },
   guideTextBox: { width: "100%", backgroundColor: C.bg, borderRadius: 22, padding: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.18, shadowRadius: 24, elevation: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.7)" },
   guideCardTop: { top: 58, alignSelf: "center" },
   guideCardCenter: { top: "36%", alignSelf: "center" },

@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1A2845" />
-  <title>Kesher — Intentional Jewish living</title>
-  <meta name="description" content="Kesher helps you bring more intention, focus, and consistency into your Jewish life — Shabbat times, tefillin streaks, prayer reminders, and community." />
+  <title>Kesher — Faith, focus, and community</title>
+  <meta name="description" content="Kesher is live on the App Store. Build Jewish or Christian spiritual habits with Shabbat or Sabbath rest, prayer reminders, focus blocks, congregations, and accountability buddies." />
   <link rel="canonical" href="https://keshersocial.com/" />
-  <meta property="og:title" content="Kesher — Intentional Jewish living" />
-  <meta property="og:description" content="Shabbat times, tefillin streaks, prayer reminders, and Jewish community accountability." />
+  <meta property="og:title" content="Kesher — Faith, focus, and community" />
+  <meta property="og:description" content="Now on the App Store. Jewish and Christian paths for rest, prayer, Scripture, focus blocks, and community accountability." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://keshersocial.com/" />
   <meta name="twitter:card" content="summary" />
@@ -24,6 +24,9 @@
       --navy-soft: #2C3E66;
       --gold: #C9A55C;
       --gold-deep: #A8853F;
+      --purple: #7C3AED;
+      --purple-deep: #5B21B6;
+      --purple-light: #EDE9FE;
       --ink: #2C2A26;
       --ink-soft: #6B6863;
       --line: rgba(26, 40, 69, 0.12);
@@ -63,7 +66,6 @@
       padding: 0 28px;
     }
 
-    /* ─── Navigation ─── */
     nav {
       position: sticky;
       top: 0;
@@ -133,7 +135,6 @@
       .nav-links a:not(.nav-cta) { display: none; }
     }
 
-    /* ─── Hero ─── */
     .hero {
       position: relative;
       padding: 110px 0 90px;
@@ -146,7 +147,7 @@
       inset: 0;
       background:
         radial-gradient(60% 60% at 20% 10%, rgba(201, 165, 92, 0.18), transparent 60%),
-        radial-gradient(50% 60% at 90% 30%, rgba(26, 40, 69, 0.10), transparent 60%);
+        radial-gradient(50% 60% at 90% 30%, rgba(124, 58, 237, 0.10), transparent 60%);
       pointer-events: none;
     }
     .hero-eyebrow {
@@ -164,6 +165,13 @@
       background: rgba(201, 165, 92, 0.12);
       border: 1px solid rgba(201, 165, 92, 0.35);
     }
+    .hero-live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22C55E;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
+    }
     .hero h1 {
       font-size: clamp(48px, 7vw, 84px);
       margin-bottom: 24px;
@@ -176,7 +184,7 @@
     .hero-sub {
       font-size: 19px;
       color: var(--ink-soft);
-      max-width: 620px;
+      max-width: 680px;
       margin: 0 auto 40px;
     }
     .hero-actions {
@@ -184,6 +192,7 @@
       gap: 14px;
       justify-content: center;
       flex-wrap: wrap;
+      align-items: center;
     }
     .btn {
       display: inline-flex;
@@ -207,6 +216,17 @@
       transform: translateY(-2px);
       box-shadow: 0 20px 48px -16px rgba(26, 40, 69, 0.7);
     }
+    .btn-app-store {
+      background: #000;
+      color: #fff;
+      padding: 14px 22px;
+      box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.45);
+    }
+    .btn-app-store:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 20px 48px -16px rgba(0, 0, 0, 0.55);
+    }
+    .btn-app-store svg { flex-shrink: 0; }
     .btn-ghost {
       background: transparent;
       color: var(--navy);
@@ -235,8 +255,13 @@
       color: var(--navy);
       letter-spacing: 0.1em;
     }
+    .hero-tagline {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--ink-soft);
+      letter-spacing: 0.04em;
+    }
 
-    /* ─── Sections ─── */
     section { padding: 100px 0; }
     .section-eyebrow {
       font-size: 12.5px;
@@ -258,12 +283,68 @@
       margin-bottom: 56px;
     }
 
-    /* ─── Features ─── */
-    .features {
+    .paths {
       background: var(--cream-deep);
       border-top: 1px solid var(--line);
       border-bottom: 1px solid var(--line);
     }
+    .path-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 800px) { .path-grid { grid-template-columns: 1fr; } }
+    .path-card {
+      border-radius: var(--radius);
+      padding: 36px 32px;
+      border: 1px solid var(--line);
+      background: var(--cream);
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .path-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow);
+    }
+    .path-card.jewish { border-top: 4px solid var(--gold); }
+    .path-card.christian { border-top: 4px solid var(--purple); }
+    .path-symbol {
+      font-size: 28px;
+      margin-bottom: 14px;
+    }
+    .path-card h3 {
+      font-size: 30px;
+      margin-bottom: 10px;
+    }
+    .path-card.jewish h3 { color: var(--navy); }
+    .path-card.christian h3 { color: var(--purple-deep); }
+    .path-card p {
+      color: var(--ink-soft);
+      font-size: 15px;
+      margin-bottom: 18px;
+    }
+    .path-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .path-list li {
+      font-size: 14.5px;
+      color: var(--ink);
+      padding-left: 22px;
+      position: relative;
+    }
+    .path-list li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      font-weight: 700;
+    }
+    .path-card.jewish .path-list li::before { color: var(--gold-deep); }
+    .path-card.christian .path-list li::before { color: var(--purple); }
+
+    .features { background: var(--cream); }
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -272,7 +353,7 @@
     @media (max-width: 900px) { .feature-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 600px) { .feature-grid { grid-template-columns: 1fr; } }
     .feature {
-      background: var(--cream);
+      background: var(--cream-deep);
       border-radius: var(--radius);
       padding: 36px 30px;
       border: 1px solid var(--line);
@@ -301,7 +382,24 @@
       font-size: 15px;
     }
 
-    /* ─── Quote / About ─── */
+    .download-band {
+      background: var(--navy);
+      color: var(--cream);
+      text-align: center;
+      padding: 72px 0;
+    }
+    .download-band h2 {
+      color: var(--cream);
+      font-size: clamp(32px, 4vw, 44px);
+      margin-bottom: 16px;
+    }
+    .download-band p {
+      color: rgba(250, 246, 238, 0.78);
+      font-size: 17px;
+      max-width: 540px;
+      margin: 0 auto 28px;
+    }
+
     .about {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -353,10 +451,7 @@
     }
     .about-body strong { color: var(--navy); font-weight: 600; }
 
-    /* ─── Contact ─── */
-    .contact {
-      text-align: center;
-    }
+    .contact { text-align: center; }
     .contact-card {
       max-width: 560px;
       margin: 0 auto;
@@ -383,7 +478,6 @@
       color: var(--ink-soft);
     }
 
-    /* ─── Footer ─── */
     footer {
       background: var(--navy);
       color: rgba(250, 246, 238, 0.85);
@@ -428,7 +522,6 @@
       text-align: center;
     }
 
-    /* ─── Reveal animation ─── */
     .reveal {
       opacity: 0;
       transform: translateY(20px);
@@ -449,89 +542,145 @@
         <div class="brand-name">Kesher</div>
       </a>
       <div class="nav-links">
+        <a href="#paths">Paths</a>
         <a href="#features">Features</a>
         <a href="#about">About</a>
-        <a href="#contact" class="nav-cta">Contact</a>
+        <a href="https://apps.apple.com/us/app/kesher-social/id6773103372" class="nav-cta" target="_blank" rel="noopener noreferrer">Get the App</a>
       </div>
     </div>
   </nav>
 
   <header class="hero" id="top">
     <div class="container">
-      <div class="hero-eyebrow">A name. A practice. A life.</div>
-      <h1>Live with <em>intention</em>,<br/>one mitzvah at a time.</h1>
+      <div class="hero-eyebrow"><span class="hero-live-dot"></span> Now live on the App Store</div>
+      <h1>Faith, focus, and <em>connection</em>.</h1>
       <p class="hero-sub">
-        Kesher helps you bring focus, consistency, and meaning into your Jewish life — Shabbat times, tefillin streaks, daily prayers, and a community that keeps you accountable.
+        Kesher helps you build real spiritual habits — not just reminders, but daily rhythm, accountability, and community. Choose a Jewish or Christian path when you sign up, then grow with rest, prayer, Scripture, and friends who keep you going.
       </p>
       <div class="hero-actions">
-        <a href="#features" class="btn btn-primary">See What's Inside →</a>
-        <a href="#contact" class="btn btn-ghost">Contact Support</a>
+        <a href="https://apps.apple.com/us/app/kesher-social/id6773103372" class="btn btn-app-store" target="_blank" rel="noopener noreferrer">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          Download on the App Store
+        </a>
+        <a href="#paths" class="btn btn-ghost">See what's inside</a>
       </div>
       <div class="hero-hebrew">
         <div class="hero-hebrew-line"></div>
         <div class="hero-hebrew-text">קֶשֶׁר</div>
         <div class="hero-hebrew-line"></div>
       </div>
+      <p class="hero-tagline">Connection · Practice · Community</p>
     </div>
   </header>
 
+  <section class="paths" id="paths">
+    <div class="container">
+      <div class="section-eyebrow reveal">Two paths, one app</div>
+      <h2 class="section-title reveal">Built for how you actually live your faith.</h2>
+      <p class="section-lead reveal">
+        Kesher is not one-size-fits-all. Pick Judaism or Christianity at setup and the whole app adapts — language, reminders, content, and community.
+      </p>
+
+      <div class="path-grid">
+        <div class="path-card jewish reveal">
+          <div class="path-symbol">✡︎</div>
+          <h3>Jewish path</h3>
+          <p>Shabbat Shalom — the full Kesher experience for Jewish living.</p>
+          <ul class="path-list">
+            <li>Shabbat candle-lighting and havdalah times for your location</li>
+            <li>Tefillin streaks and daily photo buddies</li>
+            <li>Modeh Ani, Shema, and prayer reminders</li>
+            <li>Weekly Torah portion and community videos</li>
+            <li>Shabbat Mode app blocking</li>
+            <li>Congregations, friends, and group chat</li>
+          </ul>
+        </div>
+
+        <div class="path-card christian reveal">
+          <div class="path-symbol">✝</div>
+          <h3>Christian path</h3>
+          <p>Walk with Christ — Scripture, quiet time, and church community.</p>
+          <ul class="path-list">
+            <li>Weekly rest and personal quiet-time focus blocks</li>
+            <li>Daily Scripture and devotional content</li>
+            <li>Prayer partners for accountability check-ins</li>
+            <li>Church groups and friend chat</li>
+            <li>Screen Time blocking for prayer and focus</li>
+            <li>Guided onboarding tailored to your path</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="features" id="features">
     <div class="container">
-      <div class="section-eyebrow reveal">Built for Jewish living</div>
-      <h2 class="section-title reveal">Everything you need to stay rooted and consistent.</h2>
+      <div class="section-eyebrow reveal">Shared foundation</div>
+      <h2 class="section-title reveal">The tools that keep you consistent.</h2>
       <p class="section-lead reveal">
-        From the first words of Modeh Ani in the morning to lighting candles before Shabbat, Kesher quietly guides you through your day.
+        Whether you are preparing for Shabbat or guarding a Sabbath rest, Kesher gives you focus, friends, and gentle structure.
       </p>
 
       <div class="feature-grid">
         <div class="feature reveal">
           <div class="feature-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          </div>
-          <h3>Shabbat Times</h3>
-          <p>Accurate candle-lighting and havdalah times for your exact location, with a gentle reminder before Shabbat begins.</p>
-        </div>
-
-        <div class="feature reveal">
-          <div class="feature-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          </div>
-          <h3>Tefillin Streaks</h3>
-          <p>Track every morning you wrap. Add a buddy for daily photo accountability — no streak, no excuses.</p>
-        </div>
-
-        <div class="feature reveal">
-          <div class="feature-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-          </div>
-          <h3>Prayer Reminders</h3>
-          <p>Modeh Ani when you wake. Shema before you sleep. Quiet, beautifully timed prompts that don't pull you away.</p>
-        </div>
-
-        <div class="feature reveal">
-          <div class="feature-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
           </div>
-          <h3>Shabbat Mode</h3>
-          <p>Block distracting apps from Friday sundown to Saturday night. Your phone rests so you can too.</p>
+          <h3>Focus & Rest Blocks</h3>
+          <p>Block distracting apps for Shabbat, weekly rest, prayer time, or a custom quiet-time session. Your phone rests so you can too.</p>
         </div>
 
         <div class="feature reveal">
           <div class="feature-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </div>
-          <h3>Congregations & Buddies</h3>
-          <p>Find your shul. Connect with friends. Share weekly intentions and lift each other up — in person and in chat.</p>
+          <h3>Community & Buddies</h3>
+          <p>Join congregations or church groups, add friends, and stay accountable with tefillin buddies or prayer partners through daily check-ins and chat.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h3>Streaks & Reminders</h3>
+          <p>Gentle prompts for prayer, tefillin, and rest — timed for your day, not disruptive. Build streaks that reflect real consistency.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <h3>Chat & Notifications</h3>
+          <p>Message friends and groups in-app. Visible notification badges help you see when someone checked in or sent a message.</p>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3>Custom Quiet Time</h3>
+          <p>Set a focus timer for prayer, Scripture, or personal quiet time — separate from your weekly rest block.</p>
         </div>
 
         <div class="feature reveal">
           <div class="feature-icon">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           </div>
-          <h3>Weekly Parasha</h3>
-          <p>The week's Torah portion at your fingertips, plus videos from rabbis your community trusts.</p>
+          <h3>Scripture & Torah</h3>
+          <p>Jewish users get the weekly parasha. Christian users get daily Scripture and devotionals — always at your fingertips.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="download-band">
+    <div class="container reveal">
+      <h2>Ready to connect?</h2>
+      <p>Kesher is free to download on iPhone. Choose your faith path, invite a friend, and start building habits that last.</p>
+      <a href="https://apps.apple.com/us/app/kesher-social/id6773103372" class="btn btn-app-store" target="_blank" rel="noopener noreferrer">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        Get Kesher on the App Store
+      </a>
     </div>
   </section>
 
@@ -550,10 +699,10 @@
           <strong>Kesher</strong> — the Hebrew word for <em>connection</em> — was built for people who want their devices to support their spiritual life instead of distracting from it.
         </p>
         <p>
-          We believe a small reminder, in the right moment, can be the difference between a missed mitzvah and a meaningful day. So we made the smallest, gentlest, most beautiful nudge we could imagine — and we wrapped it in a streak, a buddy, and a community.
+          We believe a small reminder, in the right moment, can be the difference between a missed habit and a meaningful day. So we made gentle nudges, streaks, buddies, and community — for Jewish and Christian users alike.
         </p>
         <p>
-          One day at a time. One prayer at a time. One Shabbat at a time.
+          One day at a time. One prayer at a time. One rest day at a time.
         </p>
       </div>
     </div>
@@ -565,7 +714,7 @@
         <div class="section-eyebrow">Contact & Support</div>
         <h2 class="section-title" style="margin-left:auto;margin-right:auto;">Questions? Feedback? Just say hello.</h2>
         <p class="section-lead" style="margin-left:auto;margin-right:auto;text-align:center;">
-          We read every message. Reach out and we'll get back to you within a few days.
+          Kesher is live and growing. We read every message and usually reply within a few days.
         </p>
         <a class="contact-email" href="mailto:keshersupport@gmail.com">keshersupport@gmail.com</a>
         <p class="contact-meta">For account, privacy, or deletion requests, please email the same address.</p>
@@ -581,14 +730,16 @@
           <div class="brand-name">Kesher</div>
         </div>
         <div class="footer-links">
+          <a href="#paths">Paths</a>
           <a href="#features">Features</a>
           <a href="#about">About</a>
           <a href="#contact">Contact</a>
+          <a href="https://apps.apple.com/us/app/kesher-social/id6773103372" target="_blank" rel="noopener noreferrer">App Store</a>
           <a href="./privacy.html">Privacy</a>
         </div>
       </div>
       <div class="footer-meta">
-        © <span id="year"></span> Kesher. Built with kavanah. קֶשֶׁר · Connection. Practice. Community.
+        © <span id="year"></span> Kesher. Built with intention. קֶשֶׁר · Connection. Practice. Community.
       </div>
     </div>
   </footer>
