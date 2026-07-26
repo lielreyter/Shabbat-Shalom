@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "55ANQG7WDQ.com.lielsimon.shem",
+        "paths": [
+          "/verify-email",
+          "/verify-email/*"
+        ]
+      }
+    ]
+  }
+}

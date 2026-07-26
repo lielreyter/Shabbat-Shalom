@@ -593,7 +593,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.31;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -601,6 +601,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem;
 				PRODUCT_NAME = shabbat_shalomv1;
+				SWIFT_OBJC_BRIDGING_HEADER = "shabbat_shalomv1/shabbat_shalomv1-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
@@ -625,7 +626,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.31;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -633,6 +634,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.lielsimon.shem;
 				PRODUCT_NAME = shabbat_shalomv1;
+				SWIFT_OBJC_BRIDGING_HEADER = "shabbat_shalomv1/shabbat_shalomv1-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
 			};

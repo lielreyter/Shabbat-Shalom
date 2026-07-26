@@ -1,13 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" fill="#FFFFFF"/>
-  <circle cx="512" cy="512" r="380" fill="#DBEAFE"/>
-  <path
-    d="M512 270 L745 674 H279 Z M512 754 L279 350 H745 Z"
-    fill="none"
-    stroke="#2563EB"
-    stroke-width="36"
-    stroke-linejoin="round"
-    stroke-linecap="round"
-  />
-  <circle cx="512" cy="512" r="28" fill="#1E40AF"/>
+  <image href="favicon-512.png" width="1024" height="1024"/>
 </svg>

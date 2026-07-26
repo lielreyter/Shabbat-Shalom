@@ -20,7 +20,9 @@ private func sharedDefaults() -> UserDefaults? {
 }
 
 private func reason(for activity: DeviceActivityName) -> String {
-    activity.rawValue
+    activity.rawValue.hasPrefix("shem.")
+        ? String(activity.rawValue.dropFirst("shem.".count))
+        : activity.rawValue
 }
 
 private func activeReasons() -> Set<String> {
@@ -84,12 +86,17 @@ private func enableSelectionBlocking(mode: String) -> Bool {
 }
 
 private func enableConfiguredBlocking() {
-    let mode = sharedDefaults()?.string(forKey: blockModeKey) ?? "full"
-    if (mode == "custom" || mode == "medium"), enableSelectionBlocking(mode: mode) {
+    let mode = sharedDefaults()?.string(forKey: blockModeKey) ?? "none"
+    if mode == "none" {
         return
     }
-
-    enableFullBlocking()
+    if mode == "full" {
+        enableFullBlocking()
+        return
+    }
+    if mode == "custom" || mode == "medium" {
+        _ = enableSelectionBlocking(mode: mode)
+    }
 }
 
 private func enableBlocking(for activity: DeviceActivityName) {
@@ -160,6 +167,9 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
         var reasons = activeReasons()
         reasons.remove(reason(for: activity))
+        // Remove the legacy prefixed value as well so installs upgraded from
+        // older builds cannot retain a stale Shabbat shield indefinitely.
+        reasons.remove(activity.rawValue)
         saveActiveReasons(reasons)
         if reasons.isEmpty {
             clearBlockingIfUnused()

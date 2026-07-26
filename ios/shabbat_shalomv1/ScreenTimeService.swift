@@ -69,7 +69,6 @@ private func setActiveShieldReason(_ reason: String?) {
   }
 
   setSharedValue(reason, forKey: currentShieldReasonKey)
-  setSharedValue([reason], forKey: activeReasonsKey)
 }
 
 private func selectionDataKey(for mode: String) -> String {
@@ -142,7 +141,10 @@ private func applySelectionBlocking(mode: String) throws -> Int {
 
 @available(iOS 16.0, *)
 private func applyConfiguredBlocking() throws {
-  let mode = sharedDefaults()?.string(forKey: blockModeKey) ?? "full"
+  let mode = sharedDefaults()?.string(forKey: blockModeKey) ?? "none"
+  if mode == "none" {
+    return
+  }
   if mode == "custom" || mode == "medium" {
     _ = try applySelectionBlocking(mode: mode)
     return
@@ -239,7 +241,47 @@ private func currentScheduledReason() -> String {
 class ScreenTimeService: NSObject {
   @objc
   static func requiresMainQueueSetup() -> Bool {
-    false
+    true
+  }
+
+  @available(iOS 16.0, *)
+  private func authorizationStatusValue() -> String {
+    switch AuthorizationCenter.shared.authorizationStatus {
+    case .notDetermined:
+      return "notDetermined"
+    case .denied:
+      return "denied"
+    case .approved:
+      return "approved"
+    @unknown default:
+      return "denied"
+    }
+  }
+
+  @available(iOS 16.0, *)
+  private func requireAuthorization(_ reject: RCTPromiseRejectBlock) -> Bool {
+    guard AuthorizationCenter.shared.authorizationStatus == .approved else {
+      reject(
+        "screen_time_not_authorized",
+        "Screen Time access is not currently approved for Kesher.",
+        nil
+      )
+      return false
+    }
+    return true
+  }
+
+  @objc(getAuthorizationStatus:rejecter:)
+  func getAuthorizationStatus(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    guard #available(iOS 16.0, *) else {
+      resolve(["status": "unavailable"])
+      return
+    }
+
+    resolve(["status": authorizationStatusValue()])
   }
 
   @objc(requestAuthorization:rejecter:)
@@ -252,14 +294,19 @@ class ScreenTimeService: NSObject {
       return
     }
 
-    Task {
+    Task { @MainActor in
       do {
+        if AuthorizationCenter.shared.authorizationStatus == .approved {
+          resolve(true)
+          return
+        }
         try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
-        resolve(true)
+        resolve(AuthorizationCenter.shared.authorizationStatus == .approved)
       } catch {
-        // Surface a soft failure so JS can treat this as "not granted"
-        // rather than crashing on entitlement/config issues.
-        resolve(false)
+        let code = AuthorizationCenter.shared.authorizationStatus == .denied
+          ? "screen_time_auth_denied"
+          : "screen_time_auth_failed"
+        reject(code, error.localizedDescription, error)
       }
     }
   }
@@ -275,6 +322,7 @@ class ScreenTimeService: NSObject {
              nil)
       return
     }
+    guard requireAuthorization(reject) else { return }
 
     applyFullBlocking()
     if sharedDefaults()?.string(forKey: currentShieldReasonKey) == nil {
@@ -304,6 +352,7 @@ class ScreenTimeService: NSObject {
              nil)
       return
     }
+    guard requireAuthorization(reject) else { return }
 
     do {
       let count = try applySelectionBlocking(mode: "personal")
@@ -327,6 +376,9 @@ class ScreenTimeService: NSObject {
              "Screen Time blocking requires iOS 16 or newer.",
              nil)
       return
+    }
+    if mode != "none" {
+      guard requireAuthorization(reject) else { return }
     }
 
     do {
@@ -363,6 +415,10 @@ class ScreenTimeService: NSObject {
     rejecter reject: RCTPromiseRejectBlock
   ) {
     setSharedValue(mode, forKey: blockModeKey)
+    if mode == "none", #available(iOS 16.0, *) {
+      ManagedSettingsStore().clearAllSettings()
+      setActiveShieldReason(nil)
+    }
     resolve(nil)
   }
 
@@ -382,6 +438,39 @@ class ScreenTimeService: NSObject {
     resolve(nil)
   }
 
+  @objc(clearExpiredShabbatBlocking:rejecter:)
+  func clearExpiredShabbatBlocking(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    guard #available(iOS 16.0, *) else {
+      resolve(nil)
+      return
+    }
+
+    let defaults = sharedDefaults()
+    let currentReason = defaults?.string(forKey: currentShieldReasonKey)
+    let isShabbatReason =
+      currentReason == "shabbat" || currentReason == "shem.shabbat"
+    guard isShabbatReason else {
+      resolve(nil)
+      return
+    }
+
+    var reasons = Set(defaults?.stringArray(forKey: activeReasonsKey) ?? [])
+    reasons.remove("shabbat")
+    reasons.remove("shem.shabbat")
+    setSharedValue(Array(reasons), forKey: activeReasonsKey)
+
+    if reasons.isEmpty {
+      ManagedSettingsStore().clearAllSettings()
+      setSharedValue(nil, forKey: currentShieldReasonKey)
+    } else {
+      setSharedValue(reasons.sorted().last, forKey: currentShieldReasonKey)
+    }
+    resolve(nil)
+  }
+
   @objc(scheduleBlock:startIso:endIso:resolver:rejecter:)
   func scheduleBlock(
     _ identifier: String,
@@ -396,6 +485,7 @@ class ScreenTimeService: NSObject {
              nil)
       return
     }
+    guard requireAuthorization(reject) else { return }
 
     guard let startDate = parseIsoDate(startIso),
           let endDate = parseIsoDate(endIso),
@@ -439,6 +529,7 @@ class ScreenTimeService: NSObject {
              nil)
       return
     }
+    guard requireAuthorization(reject) else { return }
 
     DispatchQueue.main.async {
       let initialSelection = loadSelection(mode: mode) ?? FamilyActivitySelection()

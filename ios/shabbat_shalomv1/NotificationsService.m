@@ -47,6 +47,28 @@ RCT_REMAP_METHOD(requestPermission,
   }];
 }
 
+RCT_REMAP_METHOD(getPermissionStatus,
+                 getPermissionStatusWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject)
+{
+  UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+  [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+    switch (settings.authorizationStatus) {
+      case UNAuthorizationStatusAuthorized:
+      case UNAuthorizationStatusProvisional:
+      case UNAuthorizationStatusEphemeral:
+        resolve(@"authorized");
+        return;
+      case UNAuthorizationStatusDenied:
+        resolve(@"denied");
+        return;
+      case UNAuthorizationStatusNotDetermined:
+        resolve(@"notDetermined");
+        return;
+    }
+  }];
+}
+
 RCT_REMAP_METHOD(scheduleNotification,
                  scheduleNotificationWithIdentifier:(NSString *)identifier
                  title:(NSString *)title

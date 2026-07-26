@@ -7,7 +7,7 @@ import {
 } from "./shabbatModeTypes";
 import {
   cancelScheduledScreenTimeBlock,
-  requestScreenTimePermission,
+  getScreenTimeAuthorizationStatus,
   scheduleScreenTimeBlock,
 } from "../ios/screenTimeService";
 
@@ -78,8 +78,8 @@ export const scheduleShabbatMode = async (
   }
 
   try {
-    const granted = await requestScreenTimePermission();
-    if (!granted) {
+    const status = await getScreenTimeAuthorizationStatus();
+    if (status !== "approved") {
       throw new Error("Screen Time permission denied.");
     }
     await scheduleScreenTimeBlock("shabbat", times.shabbatStart, times.shabbatEnd);

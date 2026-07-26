@@ -1,18 +1,20 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   GoogleAuthProvider,
-  createUserWithEmailAndPassword,
   deleteUser,
   OAuthProvider,
   onAuthStateChanged,
   sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   signInAnonymously,
   signInWithCredential,
   signOut as firebaseSignOut,
   updateProfile,
   Unsubscribe,
   User as FirebaseUser,
+  type ActionCodeSettings,
 } from "firebase/auth";
 import nativeAuth, { FirebaseAuthTypes } from "@react-native-firebase/auth";
 import { Platform } from "react-native";
@@ -105,6 +107,21 @@ const signOutPhoneSignupCollision = async (): Promise<void> => {
 const EMAIL_VERIFICATION_BYPASS_EMAILS = new Set(["liel.reyter@gmail.com"]);
 const DEFAULT_SHABBAT_INTENTION = "To connect with Hashem";
 const AUTH_STATE_TIMEOUT_MS = 10000;
+const EMAIL_FOR_SIGN_IN_KEY = "kesher:emailForSignIn:v1";
+const PENDING_EMAIL_SIGNUP_KEY = "kesher:pendingEmailSignup:v1";
+/** Branded landing page for email sign-in and verification links. */
+export const AUTH_ACTION_URL = "https://keshersocial.com/verify-email";
+
+export type PendingEmailSignup = {
+  displayName: string;
+  gender: string | null;
+};
+
+const emailLinkActionSettings = (): ActionCodeSettings => ({
+  url: AUTH_ACTION_URL,
+  handleCodeInApp: true,
+  iOS: { bundleId: "com.lielsimon.shem" },
+});
 
 const shouldBypassEmailVerification = (email: string | null): boolean =>
   email !== null && EMAIL_VERIFICATION_BYPASS_EMAILS.has(email.trim().toLowerCase());
@@ -223,7 +240,7 @@ const hydrateProfileWithFallback = async ({
       email: email ?? firebaseUser.email ?? null,
       faithTradition: null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
-      wantsMorningReminders: true,
+      wantsMorningReminders: false,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       platform: "ios",
@@ -267,6 +284,9 @@ const hydrateProfileWithFallback = async ({
 
 const ensureGoogleConfigured = (): void => {
   const webClientId = Config.GOOGLE_WEB_CLIENT_ID ?? "";
+  const iosClientId =
+    Config.GOOGLE_IOS_CLIENT_ID ??
+    "330103796558-sspi7pacf2koi4dkeoovrhvsp9mqeknq.apps.googleusercontent.com";
   if (!webClientId) {
     throw new Error(
       "Missing GOOGLE_WEB_CLIENT_ID. Add it to .env using your Firebase Web client ID."
@@ -274,6 +294,7 @@ const ensureGoogleConfigured = (): void => {
   }
   GoogleSignin.configure({
     webClientId,
+    iosClientId,
   });
 };
 
@@ -315,7 +336,7 @@ export const signInWithApple = async (): Promise<UserProfile> => {
         email: null,
         faithTradition: null,
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
-        wantsMorningReminders: true,
+        wantsMorningReminders: false,
         wantsShabbatReminders: true,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         platform: "ios",
@@ -391,90 +412,79 @@ export const signInWithGoogle = async (): Promise<UserProfile> => {
   }
 };
 
-export const signInWithEmailPassword = async ({
-  email,
-  password,
-}: {
-  email: string;
-  password: string;
-}): Promise<UserProfile> => {
+export const storePendingEmailSignup = async (data: PendingEmailSignup): Promise<void> => {
+  await AsyncStorage.setItem(PENDING_EMAIL_SIGNUP_KEY, JSON.stringify(data));
+};
+
+export const clearPendingEmailSignup = async (): Promise<void> => {
+  await Promise.all([
+    AsyncStorage.removeItem(PENDING_EMAIL_SIGNUP_KEY),
+    AsyncStorage.removeItem(EMAIL_FOR_SIGN_IN_KEY),
+  ]);
+};
+
+/** Send a passwordless email sign-in link (works for both sign-up and log-in). */
+export const sendEmailSignInLink = async (email: string): Promise<void> => {
   const trimmedEmail = email.trim();
-  if (!trimmedEmail || !password) {
-    throw new Error("Email and password are required.");
+  if (!trimmedEmail) {
+    throw new Error("Email is required.");
   }
   try {
-    const result = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-    return hydrateProfileWithFallback({ firebaseUser: result.user, email: trimmedEmail });
+    await sendSignInLinkToEmail(auth, trimmedEmail, emailLinkActionSettings());
+    await AsyncStorage.setItem(EMAIL_FOR_SIGN_IN_KEY, trimmedEmail);
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
 };
 
-export const registerWithEmailPassword = async ({
-  email,
-  password,
-  displayName,
-  gender,
-}: {
-  email: string;
-  password: string;
-  displayName?: string | null;
-  gender?: string | null;
-}): Promise<UserProfile> => {
-  const trimmedEmail = email.trim();
-  if (!trimmedEmail || !password) {
-    throw new Error("Email and password are required.");
+export const canHandleEmailLink = (link: string): boolean =>
+  isSignInWithEmailLink(auth, link);
+
+/** Complete sign-in after the user opens the email link on this device. */
+export const completeEmailLinkSignIn = async (link: string): Promise<UserProfile> => {
+  if (!isSignInWithEmailLink(auth, link)) {
+    throw new Error("This link is not a valid Kesher sign-in link.");
+  }
+  let email = await AsyncStorage.getItem(EMAIL_FOR_SIGN_IN_KEY);
+  if (!email) {
+    try {
+      email = new URL(link).searchParams.get("email");
+    } catch {
+      email = null;
+    }
+  }
+  if (!email) {
+    throw new Error(
+      "Open the link on the same device where you requested it, or request a new link."
+    );
   }
   try {
-    const result = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
-    const stub: UserProfile = {
-      uid: result.user.uid,
-      createdAt: Timestamp.now(),
-      lastLoginAt: Timestamp.now(),
-      displayName: displayName ?? null,
-      email: trimmedEmail,
-      faithTradition: null,
-      shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
-      wantsMorningReminders: true,
-      wantsShabbatReminders: true,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-      platform: "ios",
-      gender: gender ?? null,
-      profileImageUrl: null,
-      currentStreak: 0,
-      longestStreak: 0,
-      lastStreakWeekId: null,
-      congregationId: null,
-      congregationOnboardingCompleted: false,
-      firstRunGuideCompleted: false,
-      tefillinCurrentStreak: 0,
-      tefillinLongestStreak: 0,
-      lastTefillinDate: null,
-      candleCurrentStreak: 0,
-      candleLongestStreak: 0,
-      lastCandleDate: null,
-      wakeUpTime: null,
-      bedTime: null,
-      shabbatBlockLevel: "none",
-      wantsModehAniReminder: false,
-      wantsShemaReminder: false,
-      wantsChatNotifications: true,
-      intentVisibility: "private",
-      streakVisibility: "public",
-      friendCode: result.user.uid.slice(0, 8).toUpperCase(),
-      friendRequestStatus: "request",
-      friendUids: [],
-      pendingFriendUids: [],
-      latitude: null,
-      longitude: null,
-      tefillinBuddyUids: [],
-      candleBuddyUids: [],
-      buddyChatIds: [],
-      fcmToken: null,
-    };
-    cachedUserProfile = stub;
-    return stub;
+    const pendingRaw = await AsyncStorage.getItem(PENDING_EMAIL_SIGNUP_KEY);
+    pendingSignup = Boolean(pendingRaw);
+    const result = await signInWithEmailLink(auth, email, link);
+    await AsyncStorage.removeItem(EMAIL_FOR_SIGN_IN_KEY);
+
+    let profile = await hydrateProfileWithFallback({
+      firebaseUser: result.user,
+      email,
+    });
+
+    if (pendingRaw) {
+      const pending = JSON.parse(pendingRaw) as PendingEmailSignup;
+      await AsyncStorage.removeItem(PENDING_EMAIL_SIGNUP_KEY);
+      profile = await import("../firebase/firestore").then((m) =>
+        m.updateUserProfile(profile.uid, {
+          displayName: pending.displayName || profile.displayName,
+          gender: pending.gender ?? profile.gender,
+        })
+      );
+    }
+
+    cachedUserProfile = profile;
+    pendingSignup = false;
+    return profile;
   } catch (error) {
+    pendingSignup = false;
     throw mapFirebaseAuthError(error);
   }
 };
@@ -579,7 +589,7 @@ export const confirmPhoneSignUp = async ({
       email: phoneUser.email ?? null,
       faithTradition: null,
       shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
-      wantsMorningReminders: true,
+      wantsMorningReminders: false,
       wantsShabbatReminders: true,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       platform: "ios",
@@ -649,12 +659,10 @@ export const sendVerification = async (): Promise<void> => {
   if (user.emailVerified) {
     return;
   }
-  // Send with Firebase's default hosted verification page. Passing a custom
-  // continue URL whose domain is not in the Firebase "Authorized domains" list
-  // causes sendEmailVerification to fail with auth/unauthorized-continue-uri,
-  // which silently stops the email from ever being delivered.
+  // Branded continue URL — domain must be listed under Firebase Console >
+  // Authentication > Settings > Authorized domains (keshersocial.com).
   try {
-    await sendEmailVerification(user);
+    await sendEmailVerification(user, emailLinkActionSettings());
   } catch (error) {
     throw mapFirebaseAuthError(error);
   }
@@ -722,14 +730,6 @@ export const resolveProfileDisplayName = ({
 
 export const isCurrentUserEmailVerified = (): boolean => {
   return auth.currentUser?.emailVerified ?? false;
-};
-
-export const resetPassword = async (email: string): Promise<void> => {
-  const trimmed = email.trim();
-  if (!trimmed) {
-    throw new Error("Email is required.");
-  }
-  await sendPasswordResetEmail(auth, trimmed);
 };
 
 export const createProfileAfterVerification = async ({
@@ -866,7 +866,7 @@ export const subscribeToAuthState = (
         email: firebaseUser.email ?? null,
         faithTradition: null,
         shabbatIntentText: DEFAULT_SHABBAT_INTENTION,
-        wantsMorningReminders: true,
+        wantsMorningReminders: false,
         wantsShabbatReminders: true,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         platform: "ios",

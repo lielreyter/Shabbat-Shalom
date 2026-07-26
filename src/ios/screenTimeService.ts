@@ -6,6 +6,9 @@ import {
 
 type ScreenTimeNativeModule = {
   requestAuthorization: () => Promise<boolean>;
+  getAuthorizationStatus: () => Promise<{
+    status: ScreenTimeAuthorizationStatus;
+  }>;
   enableFullAppBlocking: () => Promise<void>;
   enablePersonalBlocking: () => Promise<{ count: number }>;
   setShieldReason: (reason: "modehAni" | "shema" | "shabbat" | "personal" | "manual") => Promise<void>;
@@ -14,6 +17,7 @@ type ScreenTimeNativeModule = {
   ) => Promise<{ count: number }>;
   setBlockMode: (mode: "full" | "medium" | "custom" | "none") => Promise<void>;
   disableAllBlocking: () => Promise<void>;
+  clearExpiredShabbatBlocking: () => Promise<void>;
   scheduleBlock: (
     identifier: "modehAni" | "shema" | "shabbat" | "personal",
     startIso: string,
@@ -30,6 +34,12 @@ type ScreenTimeNativeModule = {
     mode: "medium" | "custom" | "personal"
   ) => Promise<{ count: number }>;
 };
+
+export type ScreenTimeAuthorizationStatus =
+  | "notDetermined"
+  | "denied"
+  | "approved"
+  | "unavailable";
 
 const ScreenTimeModule =
   NativeModules.ScreenTimeService as ScreenTimeNativeModule | undefined;
@@ -53,6 +63,42 @@ const ensureModule = (): ScreenTimeNativeModule => {
   return ScreenTimeModule;
 };
 
+const screenTimeError = (
+  error: unknown,
+  fallbackCode: ShabbatModeErrorCode,
+  fallbackMessage: string
+): ShabbatModeError => {
+  const nativeError =
+    error && typeof error === "object"
+      ? (error as { code?: string; message?: string })
+      : null;
+  const denied =
+    nativeError?.code === "screen_time_not_authorized" ||
+    nativeError?.code === "screen_time_auth_denied";
+  return {
+    code: denied ? ShabbatModeErrorCode.SCREEN_TIME_DENIED : fallbackCode,
+    message: nativeError?.message || fallbackMessage,
+  };
+};
+
+export const getScreenTimeAuthorizationStatus =
+  async (): Promise<ScreenTimeAuthorizationStatus> => {
+    ensureIos();
+    if (!ScreenTimeModule) {
+      return "unavailable";
+    }
+    try {
+      const result = await ensureModule().getAuthorizationStatus();
+      return result.status;
+    } catch (error) {
+      throw screenTimeError(
+        error,
+        ShabbatModeErrorCode.BLOCKING_FAILED,
+        "Could not check Screen Time access."
+      );
+    }
+  };
+
 export const requestScreenTimePermission = async (): Promise<boolean> => {
   ensureIos();
   if (!ScreenTimeModule) {
@@ -62,12 +108,12 @@ export const requestScreenTimePermission = async (): Promise<boolean> => {
   const module = ensureModule();
   try {
     return await module.requestAuthorization();
-  } catch {
-    console.error("Screen Time permission request failed.");
-    throw {
-      code: ShabbatModeErrorCode.SCREEN_TIME_DENIED,
-      message: "Screen Time permission was denied.",
-    } satisfies ShabbatModeError;
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.SCREEN_TIME_DENIED,
+      "Screen Time permission could not be granted."
+    );
   }
 };
 
@@ -80,12 +126,12 @@ export const enableFullAppBlocking = async (): Promise<void> => {
   const module = ensureModule();
   try {
     await module.enableFullAppBlocking();
-  } catch {
-    console.error("Failed to enable Screen Time blocking.");
-    throw {
-      code: ShabbatModeErrorCode.BLOCKING_FAILED,
-      message: "Failed to enable Screen Time blocking.",
-    } satisfies ShabbatModeError;
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to enable Screen Time blocking."
+    );
   }
 };
 
@@ -110,11 +156,12 @@ export const enablePersonalBlocking = async (): Promise<{ count: number }> => {
   }
   try {
     return await ensureModule().enablePersonalBlocking();
-  } catch {
-    throw {
-      code: ShabbatModeErrorCode.BLOCKING_FAILED,
-      message: "Failed to enable selected Screen Time blocking.",
-    } satisfies ShabbatModeError;
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to enable selected Screen Time blocking."
+    );
   }
 };
 
@@ -128,11 +175,12 @@ export const enableBlockingMode = async (
   }
   try {
     return await ensureModule().enableBlockingMode(mode);
-  } catch {
-    throw {
-      code: ShabbatModeErrorCode.BLOCKING_FAILED,
-      message: "Failed to enable selected Screen Time blocking.",
-    } satisfies ShabbatModeError;
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to enable selected Screen Time blocking."
+    );
   }
 };
 
@@ -145,8 +193,12 @@ export const setScreenTimeBlockMode = async (
   }
   try {
     await ensureModule().setBlockMode(mode);
-  } catch {
-    // The JS setting is still saved; native will retry when blocking is enabled.
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to save the Screen Time block level."
+    );
   }
 };
 
@@ -168,6 +220,22 @@ export const disableAllBlocking = async (): Promise<void> => {
   }
 };
 
+export const clearExpiredShabbatBlocking = async (): Promise<void> => {
+  ensureIos();
+  if (!ScreenTimeModule) {
+    return;
+  }
+  try {
+    await ensureModule().clearExpiredShabbatBlocking();
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to clear expired Shabbat blocking."
+    );
+  }
+};
+
 export const scheduleScreenTimeBlock = async (
   identifier: "modehAni" | "shema" | "shabbat" | "personal",
   startDate: Date,
@@ -181,12 +249,12 @@ export const scheduleScreenTimeBlock = async (
   const module = ensureModule();
   try {
     await module.scheduleBlock(identifier, startDate.toISOString(), endDate.toISOString());
-  } catch {
-    console.error("Failed to schedule Screen Time block.");
-    throw {
-      code: ShabbatModeErrorCode.BLOCKING_FAILED,
-      message: "Failed to schedule Screen Time block.",
-    } satisfies ShabbatModeError;
+  } catch (error) {
+    throw screenTimeError(
+      error,
+      ShabbatModeErrorCode.BLOCKING_FAILED,
+      "Failed to schedule Screen Time block."
+    );
   }
 };
 

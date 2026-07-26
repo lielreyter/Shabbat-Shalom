@@ -40,7 +40,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>Kesher</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -53,6 +53,14 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.330103796558-sspi7pacf2koi4dkeoovrhvsp9mqeknq</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.lielsimon.shem</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.lielsimon.shem</string>
 			</array>
 		</dict>
 	</array>

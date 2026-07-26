@@ -13,7 +13,7 @@ import {
   setInactiveState,
 } from "./shabbatModeState";
 import {
-  enableFullAppBlocking,
+  enableBlockingMode,
   disableAllBlocking,
   requestScreenTimePermission,
 } from "../ios/screenTimeService";
@@ -28,7 +28,12 @@ const ensureInitialized = async (): Promise<void> => {
   }
 };
 
-export const startShabbatMode = async (weekId?: string): Promise<void> => {
+export type ActiveShabbatBlockLevel = "full" | "custom";
+
+export const startShabbatMode = async (
+  blockLevel: ActiveShabbatBlockLevel = "full",
+  weekId?: string
+): Promise<void> => {
   await ensureInitialized();
   const granted = await requestScreenTimePermission();
   if (!granted) {
@@ -38,7 +43,7 @@ export const startShabbatMode = async (weekId?: string): Promise<void> => {
     } satisfies ShabbatModeError;
   }
 
-  await enableFullAppBlocking();
+  await enableBlockingMode(blockLevel);
   await setActiveState(weekId ?? getCurrentWeekId() ?? "unknown-week");
 };
 

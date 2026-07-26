@@ -5,6 +5,7 @@ import {
 } from "../shabbatMode/shabbatModeTypes";
 import {
   attemptBreakShabbat,
+  ActiveShabbatBlockLevel,
   endShabbatMode,
   getCurrentState,
   startShabbatMode,
@@ -14,7 +15,7 @@ import { loadShabbatModeState } from "../shabbatMode/shabbatModeState";
 type UseShabbatModeState = {
   status: ShabbatModeStatus;
   isActive: boolean;
-  start: () => Promise<void>;
+  start: (blockLevel?: ActiveShabbatBlockLevel) => Promise<void>;
   end: () => Promise<void>;
   breakShabbat: () => Promise<"ALLOWED" | "CANCELED">;
 };
@@ -41,8 +42,8 @@ export const useShabbatMode = (): UseShabbatModeState => {
     };
   }, []);
 
-  const start = useCallback(async () => {
-    await startShabbatMode();
+  const start = useCallback(async (blockLevel: ActiveShabbatBlockLevel = "full") => {
+    await startShabbatMode(blockLevel);
     setState(getCurrentState());
   }, []);
 

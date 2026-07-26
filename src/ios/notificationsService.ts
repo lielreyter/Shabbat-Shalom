@@ -12,6 +12,7 @@ export type ReminderError = {
 
 type NotificationNativeModule = {
   requestPermission: () => Promise<boolean>;
+  getPermissionStatus: () => Promise<NotificationPermissionStatus>;
   scheduleNotification: (
     id: string,
     title: string,
@@ -22,6 +23,11 @@ type NotificationNativeModule = {
   cancelNotificationById: (id: string) => Promise<void>;
   cancelAllNotifications: () => Promise<void>;
 };
+
+export type NotificationPermissionStatus =
+  | "notDetermined"
+  | "denied"
+  | "authorized";
 
 const NotificationModule =
   NativeModules.NotificationsService as NotificationNativeModule | undefined;
@@ -50,6 +56,18 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
     } satisfies ReminderError;
   }
 };
+
+export const getNotificationPermissionStatus =
+  async (): Promise<NotificationPermissionStatus> => {
+    if (!NotificationModule) {
+      return "denied";
+    }
+    try {
+      return await ensureModule().getPermissionStatus();
+    } catch {
+      return "denied";
+    }
+  };
 
 export const scheduleDailyNotification = async (
   id: string,
