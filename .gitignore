@@ -71,6 +71,7 @@ firebase.txt
 .env
 .env.*
 !.env.example
+website/firebase-config.js
 
 # Yarn
 .yarn/*

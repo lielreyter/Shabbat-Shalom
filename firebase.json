@@ -1,6 +1,9 @@
 {
   "hosting": {
     "public": "website",
+    "predeploy": [
+      "node scripts/injectWebsiteFirebaseConfig.mjs"
+    ],
     "ignore": [
       "firebase-debug.log",
       "firebase-debug.*.log",

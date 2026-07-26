@@ -92,6 +92,7 @@
     <a class="footer-link" href="https://keshersocial.com">Back to Kesher</a>
   </main>
 
+  <script src="./firebase-config.js"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
     import {
@@ -101,11 +102,10 @@
       signInWithEmailLink,
     } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 
-    const firebaseConfig = {
-      apiKey: "REDACTED",
-      authDomain: "shabbat-shalom-8994d.firebaseapp.com",
-      projectId: "shabbat-shalom-8994d",
-    };
+    const firebaseConfig = window.__KESHER_FIREBASE_CONFIG__;
+    if (!firebaseConfig?.apiKey || !firebaseConfig?.authDomain || !firebaseConfig?.projectId) {
+      throw new Error("Missing website Firebase config. Run scripts/injectWebsiteFirebaseConfig.mjs before deploy.");
+    }
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
